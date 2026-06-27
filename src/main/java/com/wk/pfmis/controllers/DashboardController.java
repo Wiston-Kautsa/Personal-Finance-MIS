@@ -16,9 +16,11 @@ import javafx.scene.chart.LineChart;
 import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.ColumnConstraints;
@@ -434,11 +436,11 @@ public class DashboardController {
     }
 
     private void makeDynamic(Node node) {
-        if (node instanceof Region region && !isMetricCard(node) && !(node instanceof Button)) {
+        if (node instanceof Region region && !isMetricCard(node) && !isLeafControl(node)) {
             region.setMaxWidth(Double.MAX_VALUE);
             region.setMaxHeight(Double.MAX_VALUE);
         }
-        if (!isMetricCard(node) && !(node instanceof Button)) {
+        if (!isMetricCard(node) && !isLeafControl(node)) {
             VBox.setVgrow(node, Priority.ALWAYS);
             HBox.setHgrow(node, Priority.ALWAYS);
         }
@@ -479,10 +481,10 @@ public class DashboardController {
             }
         }
         for (Node child : gridPane.getChildren()) {
-            if (!isMetricCard(child) && !(child instanceof Button)) {
+            if (!isMetricCard(child) && !isLeafControl(child)) {
                 GridPane.setHgrow(child, Priority.ALWAYS);
             }
-            if (child instanceof Region region && !isMetricCard(child) && !(child instanceof Button)) {
+            if (child instanceof Region region && !isMetricCard(child) && !isLeafControl(child)) {
                 region.setMaxWidth(Double.MAX_VALUE);
             }
         }
@@ -492,5 +494,11 @@ public class DashboardController {
         return node.getStyleClass().contains("metric-card")
                 || node.getStyleClass().contains("compact-metric-card")
                 || node.getStyleClass().contains("wide-compact-metric-card");
+    }
+
+    private boolean isLeafControl(Node node) {
+        return node instanceof Button
+                || node instanceof TextInputControl
+                || node instanceof ComboBoxBase<?>;
     }
 }

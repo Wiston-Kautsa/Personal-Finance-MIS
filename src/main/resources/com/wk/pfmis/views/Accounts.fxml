@@ -11,6 +11,7 @@
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
@@ -69,14 +70,18 @@
     </TitledPane>
 
     <TitledPane text="Existing Accounts" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-        <VBox spacing="10">
-            <HBox alignment="CENTER_LEFT" spacing="12" styleClass="account-table-header">
-                <TextField fx:id="searchField" promptText="Search Accounts..." prefWidth="260"/>
-                <Button text="View History" onAction="#viewHistory" styleClass="account-outline-button"/>
-                <Button text="Delete Selected" onAction="#deleteAccount" styleClass="account-danger-button"/>
-                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
+        <VBox spacing="12">
+            <HBox alignment="CENTER_LEFT" spacing="10" styleClass="account-table-toolbar">
+                <VBox spacing="4" HBox.hgrow="ALWAYS">
+                    <Label text="Find an account" styleClass="field-label"/>
+                    <TextField fx:id="searchField" promptText="Search by name, type, provider, currency, or status" prefWidth="420" maxWidth="520" minHeight="34" prefHeight="34" maxHeight="34"/>
+                </VBox>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button text="View History" onAction="#viewHistory" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-outline-button"/>
+                <Button text="Delete Selected" onAction="#deleteAccount" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-danger-button"/>
+                <Button text="Refresh" onAction="#refresh" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-outline-button"/>
             </HBox>
-            <TableView fx:id="accountsTable" prefHeight="250">
+            <TableView fx:id="accountsTable" prefHeight="320" VBox.vgrow="ALWAYS">
                 <columns>
                     <TableColumn fx:id="nameColumn" text="Account Name" prefWidth="210"/>
                     <TableColumn fx:id="typeColumn" text="Type" prefWidth="140"/>
