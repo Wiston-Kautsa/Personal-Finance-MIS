@@ -28,6 +28,7 @@
             <TableView fx:id="categoryTable" prefWidth="300" prefHeight="220">
                 <columns>
                     <TableColumn fx:id="categoryLabelColumn" text="Category" prefWidth="180"/>
+                    <TableColumn fx:id="categoryAccountColumn" text="Account" prefWidth="180"/>
                     <TableColumn fx:id="categoryAmountColumn" text="Amount" prefWidth="110"/>
                 </columns>
             </TableView>

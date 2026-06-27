@@ -28,6 +28,7 @@ public class ReportsController {
     @FXML private Label categoryReportTitle;
     @FXML private TableView<ReportRow> categoryTable;
     @FXML private TableColumn<ReportRow, String> categoryLabelColumn;
+    @FXML private TableColumn<ReportRow, String> categoryAccountColumn;
     @FXML private TableColumn<ReportRow, Double> categoryAmountColumn;
     @FXML private VBox projectReportPane;
     @FXML private Label projectReportTitle;
@@ -59,6 +60,7 @@ public class ReportsController {
         yearBox.setItems(FXCollections.observableArrayList(IntStream.rangeClosed(year - 5, year + 1).boxed().toList()));
         yearBox.getSelectionModel().select(Integer.valueOf(year));
         categoryLabelColumn.setCellValueFactory(new PropertyValueFactory<>("label"));
+        categoryAccountColumn.setCellValueFactory(new PropertyValueFactory<>("account"));
         categoryAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
         projectLabelColumn.setCellValueFactory(new PropertyValueFactory<>("label"));
         projectAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
@@ -99,14 +101,14 @@ public class ReportsController {
     }
 
     private void refreshIncomeReport() {
-        setCategoryReport("Income Sources", "Source", database.incomeSourceReport());
+        setCategoryReport("Income Sources", "Source", true, database.incomeSourceByAccountReport());
         projectTable.getItems().clear();
         accountTable.getItems().clear();
         showReportPanes(true, false, false);
     }
 
     private void refreshExpenseReport() {
-        setCategoryReport("Expense Categories", "Category", database.categorySpendingReport());
+        setCategoryReport("Expense Categories", "Category", true, database.categorySpendingByAccountReport());
         setProjectReport("Project Expense Spending", database.projectSpendingReport());
         accountTable.getItems().clear();
         showReportPanes(true, true, false);
@@ -134,8 +136,13 @@ public class ReportsController {
     }
 
     private void setCategoryReport(String title, String labelColumn, List<ReportRow> rows) {
+        setCategoryReport(title, labelColumn, false, rows);
+    }
+
+    private void setCategoryReport(String title, String labelColumn, boolean showAccount, List<ReportRow> rows) {
         categoryReportTitle.setText(title);
         categoryLabelColumn.setText(labelColumn);
+        categoryAccountColumn.setVisible(showAccount);
         categoryTable.setItems(FXCollections.observableArrayList(rows));
     }
 

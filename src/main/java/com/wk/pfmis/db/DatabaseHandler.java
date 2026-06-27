@@ -1112,6 +1112,34 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> incomeSourceByAccountReport() {
+        return reportWithAccount("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       a.account_name AS account,
+                       COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'INCOME'
+                GROUP BY label, account
+                ORDER BY label, account
+                """);
+    }
+
+    public List<ReportRow> categorySpendingByAccountReport() {
+        return reportWithAccount("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       a.account_name AS account,
+                       COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'EXPENSE'
+                GROUP BY label, account
+                ORDER BY label, account
+                """);
+    }
+
     public List<ReportRow> projectSpendingReport() {
         return report("""
                 SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
@@ -1165,6 +1193,24 @@ public class DatabaseHandler {
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
                 rows.add(new ReportRow(resultSet.getString("label"), resultSet.getDouble("amount")));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load report", exception);
+        }
+        return rows;
+    }
+
+    private List<ReportRow> reportWithAccount(String sql) {
+        List<ReportRow> rows = new ArrayList<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                rows.add(new ReportRow(
+                        resultSet.getString("label"),
+                        resultSet.getString("account"),
+                        resultSet.getDouble("amount")
+                ));
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load report", exception);
