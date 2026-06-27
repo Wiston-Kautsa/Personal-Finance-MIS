@@ -17,56 +17,53 @@
 <VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.AccountsController">
     <TitledPane fx:id="accountFormPane" text="Add Account" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-        <HBox spacing="16">
-            <VBox spacing="14" HBox.hgrow="ALWAYS" styleClass="account-card account-card-flat">
-                <GridPane hgap="22" vgap="10">
+        <VBox spacing="16">
+            <HBox spacing="12" styleClass="account-summary-strip">
+                <VBox spacing="4" HBox.hgrow="ALWAYS" styleClass="account-summary-tile">
+                    <Label text="Total Accounts" styleClass="metric-title"/>
+                    <Label fx:id="totalAccountsLabel" text="0" styleClass="metric-value"/>
+                </VBox>
+                <VBox spacing="4" HBox.hgrow="ALWAYS" styleClass="account-summary-tile">
+                    <Label text="Active Accounts" styleClass="metric-title"/>
+                    <Label fx:id="activeAccountsOverviewLabel" text="0" styleClass="metric-value"/>
+                </VBox>
+                <VBox spacing="4" HBox.hgrow="ALWAYS" styleClass="account-summary-tile">
+                    <Label text="Default Currency" styleClass="metric-title"/>
+                    <Label fx:id="defaultCurrencyLabel" text="MWK - Malawian Kwacha" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+                <Label text="Current balance is calculated from transactions." wrapText="true" HBox.hgrow="ALWAYS" styleClass="account-info-box account-info-inline"/>
+            </HBox>
+
+            <VBox spacing="14" styleClass="account-form-panel">
+                <GridPane hgap="18" vgap="12">
                     <Label text="Account Name *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
-                    <TextField fx:id="accountNameField" promptText="e.g. Main Checking Account" prefWidth="360" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                    <TextField fx:id="accountNameField" promptText="e.g. Main Checking Account" minHeight="34" prefHeight="34" maxHeight="34" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
 
                     <Label text="Bank / Provider Name *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
-                    <TextField fx:id="bankProviderField" promptText="e.g. Standard Bank" prefWidth="360" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                    <TextField fx:id="bankProviderField" promptText="e.g. Standard Bank" minHeight="34" prefHeight="34" maxHeight="34" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
 
                     <Label text="Account Type *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-                    <ComboBox fx:id="accountTypeBox" editable="true" promptText="Select account type" prefWidth="360" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                    <ComboBox fx:id="accountTypeBox" editable="true" promptText="Select account type" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
 
                     <Label text="Account Number (Optional)" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
-                    <TextField fx:id="accountNumberField" promptText="e.g. 1234567890" prefWidth="360" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+                    <TextField fx:id="accountNumberField" promptText="e.g. 1234567890" minHeight="34" prefHeight="34" maxHeight="34" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
 
                     <Label text="Currency *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
-                    <ComboBox fx:id="currencyBox" editable="true" prefWidth="360" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+                    <ComboBox fx:id="currencyBox" editable="true" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
 
-                    <Label text="Notes (Optional)" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
-                    <TextArea fx:id="notesArea" promptText="Add any notes about this account..." prefRowCount="2" prefWidth="360" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+                    <Label text="Status *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+                    <ComboBox fx:id="statusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
 
-                    <Label text="Status *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
-                    <ComboBox fx:id="statusBox" prefWidth="360" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+                    <Label text="Notes (Optional)" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                    <TextArea fx:id="notesArea" promptText="Add any notes about this account..." prefRowCount="2" minHeight="74" prefHeight="74" maxHeight="74" GridPane.columnIndex="0" GridPane.rowIndex="7" GridPane.columnSpan="2"/>
                 </GridPane>
-                <HBox spacing="10">
+                <HBox spacing="10" alignment="CENTER_RIGHT" styleClass="account-form-actions">
                     <Button fx:id="saveAccountButton" text="Save Account" onAction="#addAccount" styleClass="account-save-button"/>
                     <Button text="Reset" onAction="#clearForm" styleClass="account-outline-button"/>
                     <Button text="Cancel" onAction="#clearForm" styleClass="account-outline-button"/>
                 </HBox>
             </VBox>
-
-            <VBox spacing="16" prefWidth="330" styleClass="account-card account-card-flat">
-                <Label text="Account Overview" styleClass="account-card-title"/>
-                <VBox spacing="16">
-                    <VBox spacing="4" styleClass="account-overview-row">
-                        <Label text="Total Accounts" styleClass="metric-title"/>
-                        <Label fx:id="totalAccountsLabel" text="0" styleClass="metric-value"/>
-                    </VBox>
-                    <VBox spacing="4" styleClass="account-overview-row">
-                        <Label text="Active Accounts" styleClass="metric-title"/>
-                        <Label fx:id="activeAccountsOverviewLabel" text="0" styleClass="metric-value"/>
-                    </VBox>
-                    <VBox spacing="4" styleClass="account-overview-row">
-                        <Label text="Default Currency" styleClass="metric-title"/>
-                        <Label fx:id="defaultCurrencyLabel" text="MWK - Malawian Kwacha" wrapText="true" styleClass="overview-value"/>
-                    </VBox>
-                </VBox>
-                <Label text="Current balance is calculated from transactions." wrapText="true" styleClass="account-info-box"/>
-            </VBox>
-        </HBox>
+        </VBox>
     </TitledPane>
 
     <TitledPane text="Existing Accounts" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">

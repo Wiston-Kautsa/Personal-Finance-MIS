@@ -481,6 +481,41 @@
     -fx-text-fill: #1e3a5f;
 }
 
+.account-info-inline {
+    -fx-min-width: 240;
+    -fx-max-width: 320;
+}
+
+.account-summary-strip {
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 12;
+}
+
+.account-summary-tile {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 10 12;
+    -fx-min-height: 74;
+}
+
+.account-form-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14;
+}
+
+.account-form-actions {
+    -fx-border-color: #edf1f7 transparent transparent transparent;
+    -fx-padding: 12 0 0 0;
+}
+
 .input-addon {
     -fx-background-color: #f4f7fb;
     -fx-border-color: #d8e0ea;
