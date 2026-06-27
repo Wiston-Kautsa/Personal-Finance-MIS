@@ -210,7 +210,8 @@ public class IncomeController {
             MenuItem viewItem = new MenuItem("View");
             MenuItem editItem = new MenuItem("Edit");
             MenuItem deleteItem = new MenuItem("Delete");
-            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem);
+            MenuItem refreshItem = new MenuItem("Refresh");
+            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem, refreshItem);
 
             viewItem.setOnAction(event -> {
                 recentIncomeTable.getSelectionModel().select(row.getItem());
@@ -224,6 +225,7 @@ public class IncomeController {
                 recentIncomeTable.getSelectionModel().select(row.getItem());
                 deleteIncome();
             });
+            refreshItem.setOnAction(event -> refresh());
 
             row.setOnMouseClicked(event -> {
                 if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
