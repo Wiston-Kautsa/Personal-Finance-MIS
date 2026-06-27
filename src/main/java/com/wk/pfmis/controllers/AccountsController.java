@@ -231,14 +231,20 @@ public class AccountsController {
 
             ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem, deleteItem, refreshItem);
             row.setOnMouseClicked(event -> {
-                if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
+                if (!row.isEmpty() && isLeftSingleClick(event)) {
                     accountsTable.getSelectionModel().select(row.getItem());
-                    menu.show(row, event.getScreenX(), event.getScreenY());
+                    menu.show(row, event.getScreenX() + 8, event.getScreenY() + 8);
                     event.consume();
                 }
             });
             return row;
         });
+    }
+
+    private boolean isLeftSingleClick(javafx.scene.input.MouseEvent event) {
+        return event.getButton() == MouseButton.PRIMARY
+                && event.getClickCount() == 1
+                && event.isStillSincePress();
     }
 
     private void editAccount(Account account) {
