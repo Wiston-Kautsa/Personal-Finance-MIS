@@ -2,6 +2,7 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.Account;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
@@ -18,6 +19,8 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.input.MouseButton;
+
+import java.util.List;
 
 public class AccountsController {
     @FXML private TitledPane accountFormPane;
@@ -43,6 +46,8 @@ public class AccountsController {
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private final ObservableList<Account> accounts = FXCollections.observableArrayList();
+    private List<String> currencyOptions = List.of();
+    private boolean updatingCurrencyBox;
     private Account editingAccount;
 
     @FXML
@@ -55,6 +60,7 @@ public class AccountsController {
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("status"));
         statusBox.setItems(FXCollections.observableArrayList("Active", "Inactive"));
         statusBox.getSelectionModel().select("Active");
+        configureCurrencySearch();
         searchField.textProperty().addListener((observable, oldValue, newValue) -> applySearch());
         configureAccountContextMenu();
         refresh();
@@ -112,7 +118,10 @@ public class AccountsController {
         bankProviderField.clear();
         accountNumberField.clear();
         notesArea.clear();
-        currencyBox.setValue(database.getDefaultCurrency());
+        if (!currencyOptions.isEmpty()) {
+            setCurrencyItems(currencyOptions);
+        }
+        setCurrencyValue(database.getDefaultCurrency());
         statusBox.getSelectionModel().select("Active");
         editingAccount = null;
         setEditMode(false);
@@ -185,8 +194,9 @@ public class AccountsController {
     private void refresh() {
         accountTypeBox.setItems(FXCollections.observableArrayList(database.listAccountTypeSuggestions()));
         String selectedCurrency = currencyBox.getEditor().getText();
-        currencyBox.setItems(FXCollections.observableArrayList(database.listCurrencySuggestions()));
-        currencyBox.setValue(selectedCurrency == null || selectedCurrency.isBlank() ? database.getDefaultCurrency() : selectedCurrency);
+        currencyOptions = database.listCurrencySuggestions();
+        setCurrencyItems(currencyOptions);
+        setCurrencyValue(selectedCurrency == null || selectedCurrency.isBlank() ? database.getDefaultCurrency() : selectedCurrency);
         accounts.setAll(database.listAccounts());
         applySearch();
         totalAccountsLabel.setText(String.valueOf(accounts.size()));
@@ -297,6 +307,49 @@ public class AccountsController {
         ));
     }
 
+    private void configureCurrencySearch() {
+        currencyBox.setEditable(true);
+        currencyBox.setPromptText("Select or type currency");
+        currencyBox.getEditor().textProperty().addListener((observable, oldValue, newValue) -> {
+            if (updatingCurrencyBox) {
+                return;
+            }
+            filterCurrencyOptions(newValue);
+        });
+    }
+
+    private void filterCurrencyOptions(String query) {
+        if (currencyOptions.isEmpty()) {
+            return;
+        }
+        String search = query == null ? "" : query.trim().toLowerCase();
+        List<String> filtered = currencyOptions.stream()
+                .filter(currency -> search.isEmpty() || currency.toLowerCase().contains(search))
+                .toList();
+        setCurrencyItems(filtered.isEmpty() ? currencyOptions : filtered);
+        if (!search.isEmpty() && currencyBox.isFocused()) {
+            Platform.runLater(currencyBox::show);
+        }
+    }
+
+    private void setCurrencyItems(List<String> currencies) {
+        updatingCurrencyBox = true;
+        try {
+            currencyBox.setItems(FXCollections.observableArrayList(currencies));
+        } finally {
+            updatingCurrencyBox = false;
+        }
+    }
+
+    private void setCurrencyValue(String currency) {
+        updatingCurrencyBox = true;
+        try {
+            currencyBox.setValue(currency);
+        } finally {
+            updatingCurrencyBox = false;
+        }
+    }
+
     private boolean contains(String value, String search) {
         return value != null && value.toLowerCase().contains(search);
     }
@@ -326,16 +379,20 @@ public class AccountsController {
     }
 
     private void selectCurrency(String currency) {
+        if (!currencyOptions.isEmpty()) {
+            setCurrencyItems(currencyOptions);
+        }
         if (currency == null || currency.isBlank()) {
-            currencyBox.setValue(database.getDefaultCurrency());
+            setCurrencyValue(database.getDefaultCurrency());
             return;
         }
-        for (String item : currencyBox.getItems()) {
+        List<String> items = currencyOptions.isEmpty() ? currencyBox.getItems() : currencyOptions;
+        for (String item : items) {
             if (item.equals(currency) || item.startsWith(currency + " - ")) {
-                currencyBox.setValue(item);
+                setCurrencyValue(item);
                 return;
             }
         }
-        currencyBox.setValue(currency);
+        setCurrencyValue(currency);
     }
 }

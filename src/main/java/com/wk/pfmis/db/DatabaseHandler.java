@@ -19,11 +19,16 @@ import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Currency;
 import java.util.List;
+import java.util.Locale;
 
 public class DatabaseHandler {
     private static final DatabaseHandler INSTANCE = new DatabaseHandler();
     private static final String DB_URL = "jdbc:sqlite:pfmis.db";
+    private static final String DEFAULT_CURRENCY_CODE = "MWK";
+    private static final String DEFAULT_CURRENCY_DISPLAY = "MWK - Malawian Kwacha";
 
     private DatabaseHandler() {
     }
@@ -307,7 +312,17 @@ public class DatabaseHandler {
     }
 
     public List<String> listCurrencySuggestions() {
-        List<String> suggestions = new ArrayList<>(List.of("MWK - Malawian Kwacha", "USD - US Dollar", "ZAR - South African Rand"));
+        List<String> suggestions = new ArrayList<>();
+        suggestions.add(DEFAULT_CURRENCY_DISPLAY);
+        Currency.getAvailableCurrencies().stream()
+                .sorted(Comparator.comparing(Currency::getCurrencyCode))
+                .map(currency -> currencyDisplayName(currency.getCurrencyCode()))
+                .forEach(currency -> {
+                    if (!suggestions.contains(currency)) {
+                        suggestions.add(currency);
+                    }
+                });
+
         String sql = "SELECT DISTINCT currency FROM accounts WHERE currency IS NOT NULL AND trim(currency) <> '' ORDER BY currency";
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
@@ -325,33 +340,33 @@ public class DatabaseHandler {
     }
 
     public String getDefaultCurrency() {
-        String sql = """
-                SELECT currency
-                FROM accounts
-                WHERE currency IS NOT NULL AND trim(currency) <> ''
-                GROUP BY currency
-                ORDER BY COUNT(*) DESC, currency
-                LIMIT 1
-                """;
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet resultSet = statement.executeQuery()) {
-            return resultSet.next() ? currencyDisplayName(resultSet.getString("currency")) : "MWK - Malawian Kwacha";
-        } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to load default currency", exception);
-        }
+        return DEFAULT_CURRENCY_DISPLAY;
     }
 
     private String currencyDisplayName(String currency) {
         if (currency == null || currency.isBlank()) {
-            return "MWK - Malawian Kwacha";
+            return DEFAULT_CURRENCY_DISPLAY;
         }
-        return switch (currency.trim()) {
-            case "MWK" -> "MWK - Malawian Kwacha";
-            case "USD" -> "USD - US Dollar";
-            case "ZAR" -> "ZAR - South African Rand";
-            default -> currency.trim();
-        };
+
+        String value = currency.trim();
+        int separator = value.indexOf(" - ");
+        String code = (separator > 0 ? value.substring(0, separator) : value)
+                .trim()
+                .toUpperCase(Locale.ENGLISH);
+        if (code.isEmpty()) {
+            return DEFAULT_CURRENCY_DISPLAY;
+        }
+
+        if (DEFAULT_CURRENCY_CODE.equals(code)) {
+            return DEFAULT_CURRENCY_DISPLAY;
+        }
+
+        try {
+            Currency isoCurrency = Currency.getInstance(code);
+            return isoCurrency.getCurrencyCode() + " - " + isoCurrency.getDisplayName(Locale.ENGLISH);
+        } catch (IllegalArgumentException exception) {
+            return value;
+        }
     }
 
     public void addAccount(
