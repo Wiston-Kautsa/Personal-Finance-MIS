@@ -41,7 +41,6 @@
                 <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">
                         <Button text="Add Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
-                        <Button text="Recent Expense Records" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
                     </VBox>
                 </TitledPane>
 
