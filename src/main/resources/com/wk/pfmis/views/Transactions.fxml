@@ -24,7 +24,7 @@
         <TextField fx:id="amountField" promptText="30000" GridPane.columnIndex="5" GridPane.rowIndex="0"/>
 
         <Label text="Category" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
-        <ComboBox fx:id="categoryBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+        <ComboBox fx:id="categoryBox" editable="true" promptText="Select or type category" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
         <Label text="Purpose" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
         <ComboBox fx:id="purposeBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
         <Label text="Status" GridPane.columnIndex="4" GridPane.rowIndex="1"/>

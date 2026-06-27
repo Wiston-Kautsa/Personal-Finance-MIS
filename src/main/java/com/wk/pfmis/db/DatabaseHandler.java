@@ -205,7 +205,8 @@ public class DatabaseHandler {
                 {"Project Expense", "EXPENSE"},
                 {"Savings", "BOTH"},
                 {"Loan Repayment", "BOTH"},
-                {"Emergency", "EXPENSE"}
+                {"Emergency", "EXPENSE"},
+                {"Other", "BOTH"}
         };
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT OR IGNORE INTO categories (category_name, category_type) VALUES (?, ?)")) {
@@ -462,6 +463,68 @@ public class DatabaseHandler {
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to add category", exception);
         }
+    }
+
+    public Category findOrCreateCategory(String name, String type) {
+        String categoryName = name == null ? "" : name.trim();
+        if (categoryName.isEmpty()) {
+            throw new IllegalArgumentException("Enter a category name.");
+        }
+        String requestedType = normalizedCategoryType(type);
+        try (Connection connection = connect()) {
+            try (PreparedStatement find = connection.prepareStatement(
+                    "SELECT id, category_name, category_type FROM categories WHERE lower(category_name) = lower(?)")) {
+                find.setString(1, categoryName);
+                try (ResultSet resultSet = find.executeQuery()) {
+                    if (resultSet.next()) {
+                        int id = resultSet.getInt("id");
+                        String existingName = resultSet.getString("category_name");
+                        String mergedType = mergedCategoryType(resultSet.getString("category_type"), requestedType);
+                        if (!mergedType.equals(resultSet.getString("category_type"))) {
+                            try (PreparedStatement update = connection.prepareStatement(
+                                    "UPDATE categories SET category_type = ? WHERE id = ?")) {
+                                update.setString(1, mergedType);
+                                update.setInt(2, id);
+                                update.executeUpdate();
+                            }
+                        }
+                        return new Category(id, existingName, mergedType);
+                    }
+                }
+            }
+
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO categories (category_name, category_type) VALUES (?, ?)",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                insert.setString(1, categoryName);
+                insert.setString(2, requestedType);
+                insert.executeUpdate();
+                try (ResultSet keys = insert.getGeneratedKeys()) {
+                    if (keys.next()) {
+                        return new Category(keys.getInt(1), categoryName, requestedType);
+                    }
+                }
+            }
+            throw new IllegalStateException("Failed to create category.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save category", exception);
+        }
+    }
+
+    private String normalizedCategoryType(String type) {
+        if ("INCOME".equals(type) || "EXPENSE".equals(type)) {
+            return type;
+        }
+        return "BOTH";
+    }
+
+    private String mergedCategoryType(String existingType, String requestedType) {
+        String existing = normalizedCategoryType(existingType);
+        String requested = normalizedCategoryType(requestedType);
+        if (existing.equals(requested)) {
+            return existing;
+        }
+        return "BOTH";
     }
 
     public List<Project> listProjects() {

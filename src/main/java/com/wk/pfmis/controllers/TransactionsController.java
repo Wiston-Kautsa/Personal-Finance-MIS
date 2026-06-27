@@ -64,6 +64,7 @@ public class TransactionsController {
         categoryColumn.setCellValueFactory(new PropertyValueFactory<>("categoryName"));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("transactionStatus"));
         amountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        CategoryInput.configure(categoryBox);
         configureTransactionRowActions();
         refresh();
     }
@@ -77,10 +78,11 @@ public class TransactionsController {
                 return;
             }
             double amount = Double.parseDouble(amountField.getText().replace(",", "").trim());
+            Integer categoryId = CategoryInput.resolveCategoryId(database, categoryBox, transactionCategoryType());
             if (editingTransaction == null) {
                 database.recordTransaction(
                         account.getId(),
-                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        categoryId,
                         projectBox.getValue() == null ? null : projectBox.getValue().getId(),
                         personBox.getValue() == null ? null : personBox.getValue().getId(),
                         typeBox.getValue(),
@@ -94,7 +96,7 @@ public class TransactionsController {
                 database.updateTransaction(
                         editingTransaction.getId(),
                         account.getId(),
-                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        categoryId,
                         projectBox.getValue() == null ? null : projectBox.getValue().getId(),
                         personBox.getValue() == null ? null : personBox.getValue().getId(),
                         typeBox.getValue(),
@@ -121,7 +123,7 @@ public class TransactionsController {
     @FXML
     private void refresh() {
         accountBox.setItems(FXCollections.observableArrayList(database.listAccounts()));
-        categoryBox.setItems(FXCollections.observableArrayList(database.listCategories()));
+        CategoryInput.setItems(categoryBox, database.listCategories());
         projectBox.setItems(FXCollections.observableArrayList(database.listProjects()));
         personBox.setItems(FXCollections.observableArrayList(database.listPeople()));
         transactionsTable.setItems(FXCollections.observableArrayList(database.listRecentTransactions(100)));
@@ -218,10 +220,7 @@ public class TransactionsController {
     }
 
     private void selectCategoryByName(String categoryName) {
-        categoryBox.getItems().stream()
-                .filter(category -> categoryName != null && category.getCategoryName().equals(categoryName))
-                .findFirst()
-                .ifPresent(categoryBox::setValue);
+        CategoryInput.selectByName(categoryBox, categoryName);
     }
 
     private void selectProjectByName(String projectName) {
@@ -236,5 +235,13 @@ public class TransactionsController {
                 .filter(person -> personName != null && person.getFullName().equals(personName))
                 .findFirst()
                 .ifPresent(personBox::setValue);
+    }
+
+    private String transactionCategoryType() {
+        return switch (typeBox.getValue()) {
+            case "INCOME" -> "INCOME";
+            case "EXPENSE" -> "EXPENSE";
+            default -> "BOTH";
+        };
     }
 }

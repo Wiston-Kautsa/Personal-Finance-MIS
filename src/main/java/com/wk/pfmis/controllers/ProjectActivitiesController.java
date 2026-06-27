@@ -61,6 +61,7 @@ public class ProjectActivitiesController {
         accountColumn.setCellValueFactory(new PropertyValueFactory<>("accountName"));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("status"));
         reasonColumn.setCellValueFactory(cell -> new SimpleStringProperty(reasonOrDescription(cell.getValue())));
+        CategoryInput.configure(categoryBox);
         refresh();
     }
 
@@ -82,10 +83,11 @@ public class ProjectActivitiesController {
                 UiAlerts.info("Enter an activity name.");
                 return;
             }
+            Integer categoryId = CategoryInput.resolveCategoryId(database, categoryBox, "EXPENSE");
             database.addProjectActivity(
                     project.getId(),
                     account.getId(),
-                    categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                    categoryId,
                     activityName,
                     textValue(descriptionArea),
                     amountUsedValue(),
@@ -137,11 +139,9 @@ public class ProjectActivitiesController {
         if (!accountBox.getItems().isEmpty() && accountBox.getValue() == null) {
             accountBox.getSelectionModel().selectFirst();
         }
-        categoryBox.setItems(FXCollections.observableArrayList(
-                database.listCategories().stream()
-                        .filter(category -> "EXPENSE".equals(category.getCategoryType()) || "BOTH".equals(category.getCategoryType()))
-                        .toList()
-        ));
+        CategoryInput.setItems(categoryBox, database.listCategories().stream()
+                .filter(category -> "EXPENSE".equals(category.getCategoryType()) || "BOTH".equals(category.getCategoryType()))
+                .toList());
         paymentMethodBox.setItems(FXCollections.observableArrayList(database.listPaymentMethodSuggestions()));
         if (paymentMethodBox.getValue() == null) {
             paymentMethodBox.getSelectionModel().select("Cash");

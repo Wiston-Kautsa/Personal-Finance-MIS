@@ -63,6 +63,7 @@ public class IncomeController {
         referenceColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getReferenceNumber())));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("incomeStatusLabel"));
         recentIncomeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        CategoryInput.configure(categoryBox);
         configureIncomeRowActions();
         refresh();
     }
@@ -77,10 +78,11 @@ public class IncomeController {
             }
             double amount = Double.parseDouble(amountField.getText().replace(",", "").trim());
             String status = incomeStatus();
+            Integer categoryId = CategoryInput.resolveCategoryId(database, categoryBox, "INCOME");
             if (editingIncome == null) {
                 database.recordTransaction(
                         account.getId(),
-                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        categoryId,
                         null,
                         null,
                         "INCOME",
@@ -96,7 +98,7 @@ public class IncomeController {
                 database.updateTransaction(
                         editingIncome.getId(),
                         account.getId(),
-                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        categoryId,
                         null,
                         null,
                         "INCOME",
@@ -127,11 +129,9 @@ public class IncomeController {
         String selectedPaymentMethod = paymentMethodBox.getEditor().getText();
         paymentMethodBox.setItems(FXCollections.observableArrayList(database.listPaymentMethodSuggestions()));
         paymentMethodBox.setValue(selectedPaymentMethod == null || selectedPaymentMethod.isBlank() ? "Bank Transfer" : selectedPaymentMethod);
-        categoryBox.setItems(FXCollections.observableArrayList(
-                database.listCategories().stream()
-                        .filter(category -> "INCOME".equals(category.getCategoryType()) || "BOTH".equals(category.getCategoryType()))
-                        .toList()
-        ));
+        CategoryInput.setItems(categoryBox, database.listCategories().stream()
+                .filter(category -> "INCOME".equals(category.getCategoryType()) || "BOTH".equals(category.getCategoryType()))
+                .toList());
         var incomeTransactions = database.listRecentTransactions(100).stream()
                 .filter(transaction -> "INCOME".equals(transaction.getTransactionType()))
                 .toList();
@@ -255,10 +255,7 @@ public class IncomeController {
     }
 
     private void selectCategoryByName(String categoryName) {
-        categoryBox.getItems().stream()
-                .filter(category -> category.getCategoryName().equals(categoryName))
-                .findFirst()
-                .ifPresent(categoryBox::setValue);
+        CategoryInput.selectByName(categoryBox, categoryName);
     }
 
     private String incomeStatus() {
