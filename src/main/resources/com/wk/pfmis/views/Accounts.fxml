@@ -73,8 +73,6 @@
             <HBox alignment="CENTER_LEFT" spacing="12" styleClass="account-table-header">
                 <TextField fx:id="searchField" promptText="Search Accounts..." prefWidth="260"/>
                 <Button text="View History" onAction="#viewHistory" styleClass="account-outline-button"/>
-                <Button text="Edit" onAction="#editSelectedAccount" styleClass="account-outline-button"/>
-                <Button text="Deactivate" onAction="#deactivateAccount" styleClass="account-outline-button"/>
                 <Button text="Delete Selected" onAction="#deleteAccount" styleClass="account-danger-button"/>
                 <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
             </HBox>

@@ -204,15 +204,11 @@ public class AccountsController {
     private void configureAccountContextMenu() {
         accountsTable.setRowFactory(table -> {
             TableRow<Account> row = new TableRow<>();
-            MenuItem editItem = new MenuItem("Edit");
             MenuItem activateItem = new MenuItem("Activate");
-            MenuItem deactivateItem = new MenuItem("Deactivate");
 
-            editItem.setOnAction(event -> editAccount(row.getItem()));
             activateItem.setOnAction(event -> updateStatus(row.getItem(), true));
-            deactivateItem.setOnAction(event -> updateStatus(row.getItem(), false));
 
-            ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem);
+            ContextMenu menu = new ContextMenu(activateItem);
             row.contextMenuProperty().bind(
                     javafx.beans.binding.Bindings.when(row.emptyProperty())
                             .then((ContextMenu) null)
