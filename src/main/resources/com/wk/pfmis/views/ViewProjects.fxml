@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ViewProjectsController">
+    <TitledPane text="Project Summary" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="14">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Project" styleClass="field-label"/>
+                <ComboBox fx:id="summaryProjectBox" prefWidth="430"/>
+                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
+            </HBox>
+            <GridPane hgap="8" vgap="8">
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Project Name" styleClass="metric-title"/>
+                    <Label fx:id="projectNameLabel" text="No Project Selected" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Status" styleClass="metric-title"/>
+                    <Label fx:id="statusLabel" text="-" styleClass="metric-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Start Date" styleClass="metric-title"/>
+                    <Label fx:id="startDateLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                    <Label text="End Date" styleClass="metric-title"/>
+                    <Label fx:id="endDateLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                    <Label text="Total Activities" styleClass="metric-title"/>
+                    <Label fx:id="totalActivitiesLabel" text="0" styleClass="metric-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                    <Label text="Total Spent" styleClass="metric-title"/>
+                    <Label fx:id="totalSpentLabel" text="MWK 0.00" styleClass="income-summary-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="1">
+                    <Label text="Average Activity Cost" styleClass="metric-title"/>
+                    <Label fx:id="averageActivityCostLabel" text="MWK 0.00" styleClass="income-summary-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="1">
+                    <Label text="Last Activity" styleClass="metric-title"/>
+                    <Label fx:id="lastActivityLabel" text="-" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="metric-card compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="2">
+                    <Label text="Most Used Category" styleClass="metric-title"/>
+                    <Label fx:id="mostUsedCategoryLabel" text="-" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="metric-card wide-compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="2" GridPane.columnSpan="3">
+                    <Label text="Accounts Used" styleClass="metric-title"/>
+                    <Label fx:id="accountsUsedLabel" text="-" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+            </GridPane>
+            <VBox spacing="4">
+                <Label text="Description" styleClass="field-label"/>
+                <Label fx:id="descriptionLabel" text="-" wrapText="true" styleClass="form-note"/>
+            </VBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Recent Activities" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <TableView fx:id="recentActivitiesTable" prefHeight="220">
+                <columns>
+                    <TableColumn fx:id="activityDateColumn" text="Date" prefWidth="110"/>
+                    <TableColumn fx:id="activityNameColumn" text="Activity" prefWidth="230"/>
+                    <TableColumn fx:id="activityCategoryColumn" text="Category" prefWidth="150"/>
+                    <TableColumn fx:id="activityAccountColumn" text="Account" prefWidth="180"/>
+                    <TableColumn fx:id="activityCostColumn" text="Cost" prefWidth="140"/>
+                    <TableColumn fx:id="activityNotesColumn" text="Notes" prefWidth="320"/>
+                </columns>
+            </TableView>
+            <HBox spacing="10">
+                <Button text="View All Activities" onAction="#viewAllActivities" styleClass="account-outline-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="All Projects" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
+        <VBox spacing="10">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <TextField fx:id="projectSearchField" promptText="Search projects..." prefWidth="260"/>
+                <ComboBox fx:id="statusFilterBox" prefWidth="180"/>
+            </HBox>
+            <TableView fx:id="projectsTable" prefHeight="280" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="nameColumn" text="Project" prefWidth="190"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="110"/>
+                    <TableColumn fx:id="activityCountColumn" text="Activities" prefWidth="90"/>
+                    <TableColumn fx:id="spentColumn" text="Total Spent" prefWidth="140"/>
+                    <TableColumn fx:id="lastActivityColumn" text="Last Activity" prefWidth="130"/>
+                    <TableColumn fx:id="startDateColumn" text="Start Date" prefWidth="110"/>
+                    <TableColumn fx:id="endDateColumn" text="End Date" prefWidth="110"/>
+                    <TableColumn fx:id="actionsColumn" text="Actions" prefWidth="320"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

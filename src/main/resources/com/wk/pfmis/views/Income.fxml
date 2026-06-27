@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.IncomeController">
+    <HBox alignment="CENTER_LEFT" spacing="18">
+        <HBox spacing="18" styleClass="income-summary-card">
+            <VBox spacing="4">
+                <Label text="Today's Income" styleClass="metric-title"/>
+                <Label fx:id="todayIncomeLabel" text="MWK 0.00" styleClass="income-summary-value"/>
+            </VBox>
+            <VBox spacing="4">
+                <Label text="This Month" styleClass="metric-title"/>
+                <Label fx:id="monthIncomeLabel" text="MWK 0.00" styleClass="income-summary-value"/>
+            </VBox>
+            <VBox spacing="4">
+                <Label text="Selected Account" styleClass="metric-title"/>
+                <Label fx:id="selectedAccountLabel" text="None" styleClass="overview-value"/>
+            </VBox>
+        </HBox>
+    </HBox>
+
+    <TitledPane text="Income Details" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="14">
+            <GridPane hgap="24" vgap="12">
+                <Label text="Account *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="accountBox" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+
+                <Label text="Income Source / Category *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="categoryBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+                <Label text="Amount *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <TextField fx:id="amountField" promptText="30000.00" prefWidth="430" styleClass="income-amount-field" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+
+                <Label text="Date Received *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <DatePicker fx:id="datePicker" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <Label text="Payment Method *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="paymentMethodBox" editable="true" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+
+                <Label text="Reference No. (optional)" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+                <TextField fx:id="referenceField" promptText="Reference number" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+
+                <Label text="Description / Notes (optional)" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                <TextArea fx:id="descriptionArea" prefRowCount="3" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+
+                <Label text="Status" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
+                <ComboBox fx:id="statusBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
+            </GridPane>
+            <HBox spacing="10">
+                <Button text="Save Income" onAction="#saveIncome" styleClass="income-save-button"/>
+                <Button text="Clear" onAction="#clearForm" styleClass="account-outline-button"/>
+                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Recent Income Transactions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <HBox spacing="10">
+                <Button text="View" onAction="#viewIncome" styleClass="account-outline-button"/>
+                <Button text="Edit" onAction="#editIncome" styleClass="account-outline-button"/>
+                <Button text="Delete" onAction="#deleteIncome" styleClass="account-outline-button"/>
+            </HBox>
+            <TableView fx:id="recentIncomeTable" prefHeight="260">
+                <columns>
+                    <TableColumn fx:id="dateColumn" text="Date" prefWidth="120"/>
+                    <TableColumn fx:id="sourceColumn" text="Source" prefWidth="180"/>
+                    <TableColumn fx:id="amountColumn" text="Amount" prefWidth="150"/>
+                    <TableColumn fx:id="accountColumn" text="Account" prefWidth="220"/>
+                    <TableColumn fx:id="paymentMethodColumn" text="Method" prefWidth="160"/>
+                    <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="140"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

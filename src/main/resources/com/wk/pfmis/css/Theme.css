@@ -1,0 +1,507 @@
+.app-root {
+    -fx-font-family: "Segoe UI", Arial, sans-serif;
+    -fx-background-color: #f5f7fb;
+}
+
+.sidebar {
+    -fx-background-color: #172033;
+    -fx-padding: 24 16;
+    -fx-pref-width: 250;
+}
+
+.sidebar-scroll {
+    -fx-background-color: #172033;
+    -fx-background: #172033;
+    -fx-pref-width: 250;
+}
+
+.sidebar-scroll > .viewport {
+    -fx-background-color: #172033;
+}
+
+.app-brand {
+    -fx-text-fill: white;
+    -fx-font-size: 24px;
+    -fx-font-weight: 700;
+}
+
+.app-subtitle {
+    -fx-text-fill: #b7c0d1;
+    -fx-font-size: 12px;
+    -fx-padding: 0 0 18 0;
+}
+
+.nav-section-label {
+    -fx-text-fill: #94a3b8;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-padding: 12 0 2 2;
+}
+
+.secondary-button,
+.primary-button,
+.nav-button,
+.nav-sub-button,
+.nav-pane,
+.refresh-pane {
+    -fx-cursor: hand;
+    -fx-background-radius: 6;
+}
+
+.secondary-button,
+.primary-button,
+.nav-button {
+    -fx-padding: 6 10;
+}
+
+.nav-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #e7edf8;
+    -fx-alignment: CENTER_LEFT;
+    -fx-font-size: 13px;
+}
+
+.nav-sub-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #cbd5e1;
+    -fx-alignment: CENTER_LEFT;
+    -fx-font-size: 12px;
+    -fx-padding: 5 10 5 20;
+}
+
+.nav-button:hover,
+.nav-sub-button:hover {
+    -fx-background-color: #24314d;
+}
+
+.nav-pane {
+    -fx-background-color: transparent;
+}
+
+.nav-pane > .title,
+.refresh-pane > .title {
+    -fx-background-radius: 8;
+    -fx-padding: 9 12;
+}
+
+.nav-pane > .title {
+    -fx-background-color: transparent;
+}
+
+.nav-pane:hover > .title {
+    -fx-background-color: #24314d;
+}
+
+.nav-pane > .title > .text {
+    -fx-fill: #e7edf8;
+    -fx-font-size: 13px;
+}
+
+.nav-pane > .title > .arrow-button,
+.refresh-pane > .title > .arrow-button {
+    -fx-padding: 0 8 0 0;
+}
+
+.nav-pane > .title > .arrow-button .arrow,
+.refresh-pane > .title > .arrow-button .arrow {
+    -fx-background-color: #e7edf8;
+}
+
+.nav-pane > .content,
+.refresh-pane > .content {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 4 0 8 0;
+}
+
+.nav-pane-button,
+.refresh-pane-button {
+    -fx-background-radius: 7;
+    -fx-cursor: hand;
+    -fx-padding: 6 10;
+    -fx-font-size: 13px;
+}
+
+.nav-pane-button {
+    -fx-background-color: #24314d;
+    -fx-text-fill: #e7edf8;
+    -fx-alignment: CENTER_LEFT;
+}
+
+.nav-pane-button:hover {
+    -fx-background-color: #30405f;
+}
+
+.refresh-pane-button {
+    -fx-background-color: #e9edf5;
+    -fx-text-fill: #172033;
+    -fx-alignment: CENTER;
+    -fx-background-radius: 7;
+    -fx-cursor: hand;
+    -fx-padding: 7 10;
+    -fx-font-size: 13px;
+}
+
+.refresh-pane-button:hover {
+    -fx-background-color: #dce3ef;
+}
+
+.refresh-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 12 0 0 0;
+}
+
+.refresh-pane > .title {
+    -fx-background-color: #e9edf5;
+    -fx-alignment: CENTER;
+    -fx-padding: 9 12;
+}
+
+.refresh-pane:hover > .title {
+    -fx-background-color: #dce3ef;
+}
+
+.refresh-pane > .title > .text {
+    -fx-fill: #172033;
+    -fx-font-size: 13px;
+}
+
+.workspace {
+    -fx-padding: 24;
+}
+
+.page-title {
+    -fx-font-size: 24px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #172033;
+}
+
+.metric-card,
+.panel {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+
+.metric-card {
+    -fx-padding: 16;
+    -fx-pref-width: 210;
+    -fx-min-height: 92;
+}
+
+.compact-metric-card {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 10 12;
+    -fx-pref-width: 170;
+    -fx-max-width: 190;
+    -fx-min-height: 58;
+}
+
+.wide-compact-metric-card {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 10 12;
+    -fx-pref-width: 360;
+    -fx-max-width: 520;
+    -fx-min-height: 58;
+}
+
+.metric-title {
+    -fx-text-fill: #617089;
+    -fx-font-size: 12px;
+}
+
+.metric-value {
+    -fx-text-fill: #172033;
+    -fx-font-size: 20px;
+    -fx-font-weight: 700;
+    -fx-padding: 8 0 0 0;
+}
+
+.metric-note {
+    -fx-text-fill: #718198;
+    -fx-font-size: 11px;
+    -fx-padding: 4 0 0 0;
+}
+
+.section-heading {
+    -fx-font-size: 18px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #172033;
+}
+
+.table-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #172033;
+}
+
+.section-pane {
+    -fx-background-color: transparent;
+}
+
+.section-pane > .title {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8 8 0 0;
+    -fx-background-radius: 8 8 0 0;
+    -fx-padding: 12 14;
+}
+
+.section-pane > .title > .text {
+    -fx-fill: #172033;
+    -fx-font-size: 16px;
+    -fx-font-weight: 700;
+}
+
+.section-pane > .content {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 0 0 8 8;
+    -fx-background-radius: 0 0 8 8;
+    -fx-padding: 16;
+}
+
+.form-note {
+    -fx-text-fill: #617089;
+    -fx-font-size: 12px;
+}
+
+.panel {
+    -fx-padding: 16;
+}
+
+.chart-panel {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14;
+}
+
+.dashboard-actions {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 12;
+}
+
+.alert-line {
+    -fx-background-color: #fff7ed;
+    -fx-border-color: #fed7aa;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 10;
+    -fx-text-fill: #7c2d12;
+}
+
+.primary-button {
+    -fx-background-color: #1f7a5c;
+    -fx-text-fill: white;
+    -fx-font-weight: 700;
+}
+
+.primary-button:hover {
+    -fx-background-color: #186349;
+}
+
+.secondary-button {
+    -fx-background-color: #e9edf5;
+    -fx-text-fill: #172033;
+}
+
+.secondary-button:hover {
+    -fx-background-color: #dce3ef;
+}
+
+.summary-line {
+    -fx-background-color: #eef7f3;
+    -fx-border-color: #cbe5da;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 12;
+    -fx-text-fill: #173b2e;
+}
+
+.overview-row {
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 12;
+}
+
+.overview-value {
+    -fx-text-fill: #172033;
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+}
+
+.accounts-title {
+    -fx-font-size: 24px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #10233f;
+}
+
+.account-card {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde5f0;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 16;
+}
+
+.account-card-flat {
+    -fx-border-color: transparent;
+    -fx-padding: 0;
+}
+
+.account-card-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #10233f;
+}
+
+.account-card-header {
+    -fx-border-color: transparent transparent #e4eaf3 transparent;
+    -fx-padding: 0 0 10 0;
+}
+
+.field-label {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #24324a;
+}
+
+.account-save-button {
+    -fx-background-color: #2563eb;
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: 700;
+    -fx-background-radius: 6;
+    -fx-padding: 6 12;
+    -fx-font-size: 12px;
+    -fx-cursor: hand;
+}
+
+.account-save-button:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+.account-outline-button {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d8e0ea;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-text-fill: #334155;
+    -fx-padding: 6 12;
+    -fx-font-size: 12px;
+    -fx-cursor: hand;
+}
+
+.account-outline-button:hover {
+    -fx-background-color: #f5f8fc;
+}
+
+.account-danger-button {
+    -fx-background-color: #dc2626;
+    -fx-border-color: #b91c1c;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: 700;
+    -fx-padding: 6 12;
+    -fx-font-size: 12px;
+    -fx-cursor: hand;
+}
+
+.account-danger-button:hover {
+    -fx-background-color: #b91c1c;
+}
+
+.income-summary-card {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde5f0;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14 18;
+}
+
+.income-summary-value {
+    -fx-text-fill: #15803d;
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+}
+
+.expense-summary-value {
+    -fx-text-fill: #dc2626;
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+}
+
+.income-amount-field {
+    -fx-text-fill: #15803d;
+    -fx-font-weight: 700;
+}
+
+.income-save-button {
+    -fx-background-color: #15803d;
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: 700;
+    -fx-background-radius: 6;
+    -fx-padding: 6 12;
+    -fx-font-size: 12px;
+    -fx-cursor: hand;
+}
+
+.income-save-button:hover {
+    -fx-background-color: #166534;
+}
+
+.account-overview-row {
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 12;
+}
+
+.account-info-box {
+    -fx-background-color: #f0f6ff;
+    -fx-border-color: #d7e6ff;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 12;
+    -fx-text-fill: #1e3a5f;
+}
+
+.input-addon {
+    -fx-background-color: #f4f7fb;
+    -fx-border-color: #d8e0ea;
+    -fx-border-radius: 0 6 6 0;
+    -fx-background-radius: 0 6 6 0;
+    -fx-text-fill: #334155;
+}
+
+.account-table-header {
+    -fx-padding: 0 0 12 0;
+}
+
+.text-field,
+.text-area,
+.combo-box {
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+}
+
+.table-view {
+    -fx-background-color: white;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 6;
+}

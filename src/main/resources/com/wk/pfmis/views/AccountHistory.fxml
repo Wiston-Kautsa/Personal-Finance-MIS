@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AccountHistoryController">
+    <TitledPane text="Accounts" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <ComboBox fx:id="accountNameFilter" prefWidth="220"/>
+                <ComboBox fx:id="providerFilter" prefWidth="210"/>
+                <ComboBox fx:id="accountTypeFilter" prefWidth="210"/>
+                <ComboBox fx:id="statusFilter" prefWidth="180"/>
+                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
+            </HBox>
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <DatePicker fx:id="accountDateFilter" prefWidth="180"/>
+                <ComboBox fx:id="accountDateModeFilter" prefWidth="180"/>
+            </HBox>
+            <TableView fx:id="accountsTable" prefHeight="250">
+                <columns>
+                    <TableColumn fx:id="accountNameColumn" text="Account" prefWidth="190"/>
+                    <TableColumn fx:id="accountTypeColumn" text="Type" prefWidth="150"/>
+                    <TableColumn fx:id="providerColumn" text="Bank / Provider" prefWidth="170"/>
+                    <TableColumn fx:id="accountNumberColumn" text="Account No." prefWidth="140"/>
+                    <TableColumn fx:id="currencyColumn" text="Currency" prefWidth="100"/>
+                    <TableColumn fx:id="balanceColumn" text="Amount" prefWidth="150"/>
+                    <TableColumn fx:id="accountStatusColumn" text="Status" prefWidth="120"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Selected Account Transaction History" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
+        <VBox spacing="12">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <DatePicker fx:id="historyDatePicker" prefWidth="180"/>
+                <ComboBox fx:id="historyPeriodFilter" prefWidth="210"/>
+                <ComboBox fx:id="historyYearsFilter" prefWidth="150"/>
+            </HBox>
+            <TableView fx:id="historyTable" prefHeight="340" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="dateColumn" text="Date" prefWidth="120"/>
+                    <TableColumn fx:id="typeColumn" text="Type" prefWidth="110"/>
+                    <TableColumn fx:id="categoryColumn" text="Category / Project" prefWidth="190"/>
+                    <TableColumn fx:id="amountColumn" text="Amount" prefWidth="150"/>
+                    <TableColumn fx:id="paymentMethodColumn" text="Method" prefWidth="150"/>
+                    <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="130"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

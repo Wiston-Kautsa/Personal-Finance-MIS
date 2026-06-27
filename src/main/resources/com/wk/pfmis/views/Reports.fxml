@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ReportsController" styleClass="panel">
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <Label text="Reports" styleClass="section-heading"/>
+        <ComboBox fx:id="reportTypeBox" prefWidth="190"/>
+        <ComboBox fx:id="monthBox" prefWidth="120"/>
+        <ComboBox fx:id="yearBox" prefWidth="100"/>
+        <Button text="Generate Report" onAction="#refresh" styleClass="primary-button"/>
+        <Button text="Export PDF" onAction="#exportPdf" styleClass="secondary-button"/>
+        <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
+        <Button text="Print" onAction="#printReport" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+    <Label fx:id="monthlySummaryLabel" text="Income: MWK 0.00" styleClass="summary-line"/>
+    <HBox spacing="12">
+        <VBox spacing="6">
+            <Label text="Category Spending" styleClass="table-title"/>
+            <TableView fx:id="categoryTable" prefWidth="300" prefHeight="220">
+                <columns>
+                    <TableColumn fx:id="categoryLabelColumn" text="Category" prefWidth="180"/>
+                    <TableColumn fx:id="categoryAmountColumn" text="Amount" prefWidth="110"/>
+                </columns>
+            </TableView>
+        </VBox>
+        <VBox spacing="6">
+            <Label text="Project Spending" styleClass="table-title"/>
+            <TableView fx:id="projectTable" prefWidth="300" prefHeight="220">
+                <columns>
+                    <TableColumn fx:id="projectLabelColumn" text="Project" prefWidth="180"/>
+                    <TableColumn fx:id="projectAmountColumn" text="Amount" prefWidth="110"/>
+                </columns>
+            </TableView>
+        </VBox>
+        <VBox spacing="6">
+            <Label text="Account Balances" styleClass="table-title"/>
+            <TableView fx:id="accountTable" prefWidth="300" prefHeight="220">
+                <columns>
+                    <TableColumn fx:id="accountLabelColumn" text="Account" prefWidth="180"/>
+                    <TableColumn fx:id="accountAmountColumn" text="Balance" prefWidth="110"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </HBox>
+</VBox>

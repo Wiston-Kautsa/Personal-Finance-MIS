@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ProjectActivitiesController">
+    <TitledPane text="Record Project Activity" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="14">
+            <GridPane hgap="24" vgap="12">
+                <Label text="Project *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="projectBox" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+
+                <Label text="Activity Name *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <TextField fx:id="activityNameField" promptText="e.g. Quartz Countertop Purchase" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+                <Label text="Activity Date *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <DatePicker fx:id="activityDatePicker" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+
+                <Label text="Amount Used *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <TextField fx:id="amountUsedField" promptText="0.00" prefWidth="430" styleClass="income-amount-field" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <Label text="Expense Category" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="categoryBox" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+
+                <Label text="Paid From Account *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="accountBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+
+                <Label text="Payment Method" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                <ComboBox fx:id="paymentMethodBox" editable="true" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+
+                <Label text="Activity Status" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
+                <ComboBox fx:id="statusBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
+
+                <Label text="What Happened / Description" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="8"/>
+                <TextArea fx:id="descriptionArea" prefRowCount="3" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="9"/>
+
+                <Label text="Reason for Activity" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="8"/>
+                <TextArea fx:id="reasonArea" prefRowCount="3" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="9"/>
+
+                <Label text="Project Status" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="10"/>
+                <ComboBox fx:id="projectStatusBox" maxWidth="Infinity" GridPane.columnIndex="0" GridPane.rowIndex="11" GridPane.columnSpan="2"/>
+            </GridPane>
+            <HBox spacing="10">
+                <Button text="Save Activity" onAction="#saveActivity" styleClass="income-save-button"/>
+                <Button text="Clear" onAction="#clearForm" styleClass="account-outline-button"/>
+                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Activity History" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
+        <TableView fx:id="activitiesTable" prefHeight="300" VBox.vgrow="ALWAYS">
+            <columns>
+                <TableColumn fx:id="dateColumn" text="Date" prefWidth="110"/>
+                <TableColumn fx:id="projectColumn" text="Project" prefWidth="180"/>
+                <TableColumn fx:id="activityColumn" text="Activity" prefWidth="210"/>
+                <TableColumn fx:id="categoryColumn" text="Category" prefWidth="140"/>
+                <TableColumn fx:id="amountUsedColumn" text="Amount Used" prefWidth="140"/>
+                <TableColumn fx:id="accountColumn" text="Account" prefWidth="180"/>
+                <TableColumn fx:id="statusColumn" text="Status" prefWidth="120"/>
+                <TableColumn fx:id="reasonColumn" text="Notes / Reason" prefWidth="220"/>
+            </columns>
+        </TableView>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>
