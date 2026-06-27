@@ -75,8 +75,6 @@
                 </VBox>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Button text="View History" onAction="#viewHistory" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-outline-button"/>
-                <Button text="Delete Selected" onAction="#deleteAccount" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-danger-button"/>
-                <Button text="Refresh" onAction="#refresh" minHeight="34" prefHeight="34" maxHeight="34" styleClass="account-outline-button"/>
             </HBox>
             <TableView fx:id="accountsTable" prefHeight="320" VBox.vgrow="ALWAYS">
                 <columns>

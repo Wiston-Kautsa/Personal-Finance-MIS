@@ -17,6 +17,7 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.input.MouseButton;
 
 public class AccountsController {
     @FXML private TitledPane accountFormPane;
@@ -204,16 +205,24 @@ public class AccountsController {
     private void configureAccountContextMenu() {
         accountsTable.setRowFactory(table -> {
             TableRow<Account> row = new TableRow<>();
+            MenuItem editItem = new MenuItem("Edit");
             MenuItem activateItem = new MenuItem("Activate");
+            MenuItem deactivateItem = new MenuItem("Deactivate");
+            MenuItem refreshItem = new MenuItem("Refresh");
 
+            editItem.setOnAction(event -> editAccount(row.getItem()));
             activateItem.setOnAction(event -> updateStatus(row.getItem(), true));
+            deactivateItem.setOnAction(event -> updateStatus(row.getItem(), false));
+            refreshItem.setOnAction(event -> refresh());
 
-            ContextMenu menu = new ContextMenu(activateItem);
-            row.contextMenuProperty().bind(
-                    javafx.beans.binding.Bindings.when(row.emptyProperty())
-                            .then((ContextMenu) null)
-                            .otherwise(menu)
-            );
+            ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem, refreshItem);
+            row.setOnMouseClicked(event -> {
+                if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
+                    accountsTable.getSelectionModel().select(row.getItem());
+                    menu.show(row, event.getScreenX(), event.getScreenY());
+                    event.consume();
+                }
+            });
             return row;
         });
     }
