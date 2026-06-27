@@ -8,52 +8,74 @@
 <?import javafx.scene.control.TableView?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
-<VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="com.wk.pfmis.controllers.TransactionsController" styleClass="panel">
-    <Label text="Manual Transactions" styleClass="section-heading"/>
-    <GridPane hgap="10" vgap="10">
-        <Label text="Account" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
-        <ComboBox fx:id="accountBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
-        <Label text="Type" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
-        <ComboBox fx:id="typeBox" prefWidth="150" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
-        <Label text="Amount" GridPane.columnIndex="4" GridPane.rowIndex="0"/>
-        <TextField fx:id="amountField" promptText="30000" GridPane.columnIndex="5" GridPane.rowIndex="0"/>
+<VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.TransactionLedgerController" styleClass="panel">
+    <Label text="Transaction Ledger" styleClass="section-heading"/>
 
-        <Label text="Category" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
-        <ComboBox fx:id="categoryBox" editable="true" promptText="Select or type category" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
-        <Label text="Purpose" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
-        <ComboBox fx:id="purposeBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
-        <Label text="Status" GridPane.columnIndex="4" GridPane.rowIndex="1"/>
-        <ComboBox fx:id="statusBox" prefWidth="170" GridPane.columnIndex="5" GridPane.rowIndex="1"/>
+    <VBox spacing="10" styleClass="report-control-panel" VBox.vgrow="NEVER">
+        <Label text="Review, filter, edit, and delete all money movements" styleClass="table-title"/>
+        <FlowPane hgap="10" vgap="8" alignment="CENTER_LEFT">
+            <ComboBox fx:id="typeFilterBox" prefWidth="145"/>
+            <ComboBox fx:id="accountFilterBox" promptText="All Accounts" prefWidth="210"/>
+            <ComboBox fx:id="statusFilterBox" prefWidth="175"/>
+            <DatePicker fx:id="dateFilterPicker" promptText="Date" prefWidth="150"/>
+            <Button text="Apply Filters" onAction="#refresh" styleClass="primary-button"/>
+            <Button text="Clear Filters" onAction="#clearFilters" styleClass="secondary-button"/>
+            <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
+            <Button text="Print" onAction="#printLedger" styleClass="secondary-button"/>
+            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+        </FlowPane>
+    </VBox>
 
-        <Label text="Project" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-        <ComboBox fx:id="projectBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
-        <Label text="Person" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
-        <ComboBox fx:id="personBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
-        <Label text="Date" GridPane.columnIndex="4" GridPane.rowIndex="2"/>
-        <DatePicker fx:id="datePicker" prefWidth="170" GridPane.columnIndex="5" GridPane.rowIndex="2"/>
-
-        <Label text="Description" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
-        <TextArea fx:id="descriptionArea" prefRowCount="2" GridPane.columnIndex="1" GridPane.rowIndex="3" GridPane.columnSpan="5"/>
-    </GridPane>
-    <HBox spacing="8">
-        <Button text="Add Manual Transaction" onAction="#saveTransaction" styleClass="primary-button"/>
-        <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
-        <Button text="Print" onAction="#printTransactions" styleClass="secondary-button"/>
-    </HBox>
-    <TableView fx:id="transactionsTable" prefHeight="260">
+    <TableView fx:id="transactionsTable" prefHeight="360" VBox.vgrow="ALWAYS">
         <columns>
             <TableColumn fx:id="dateColumn" text="Date" prefWidth="100"/>
             <TableColumn fx:id="typeColumn" text="Type" prefWidth="90"/>
             <TableColumn fx:id="purposeColumn" text="Purpose" prefWidth="150"/>
             <TableColumn fx:id="accountColumn" text="Account" prefWidth="180"/>
-            <TableColumn fx:id="categoryColumn" text="Category" prefWidth="130"/>
+            <TableColumn fx:id="categoryColumn" text="Category" prefWidth="150"/>
             <TableColumn fx:id="statusColumn" text="Status" prefWidth="130"/>
             <TableColumn fx:id="amountColumn" text="Amount" prefWidth="120"/>
         </columns>
     </TableView>
+
+    <TitledPane fx:id="editPane" text="Edit Selected Transaction" expanded="false" collapsible="true" styleClass="section-pane" VBox.vgrow="NEVER">
+        <VBox spacing="12">
+            <GridPane hgap="14" vgap="10">
+                <Label text="Account" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="editAccountBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <Label text="Type" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="editTypeBox" prefWidth="150" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <Label text="Amount" GridPane.columnIndex="4" GridPane.rowIndex="0"/>
+                <TextField fx:id="editAmountField" prefWidth="160" GridPane.columnIndex="5" GridPane.rowIndex="0"/>
+
+                <Label text="Category" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="editCategoryBox" editable="true" promptText="Select, type, or use Other" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label text="Purpose" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="editPurposeBox" prefWidth="150" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+                <Label text="Status" GridPane.columnIndex="4" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="editStatusBox" prefWidth="160" GridPane.columnIndex="5" GridPane.rowIndex="1"/>
+
+                <Label text="Project" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <ComboBox fx:id="editProjectBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <Label text="Person" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
+                <ComboBox fx:id="editPersonBox" prefWidth="150" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
+                <Label text="Date" GridPane.columnIndex="4" GridPane.rowIndex="2"/>
+                <DatePicker fx:id="editDatePicker" prefWidth="160" GridPane.columnIndex="5" GridPane.rowIndex="2"/>
+
+                <Label text="Description" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextArea fx:id="editDescriptionArea" prefRowCount="2" GridPane.columnIndex="1" GridPane.rowIndex="3" GridPane.columnSpan="5"/>
+            </GridPane>
+            <HBox spacing="8">
+                <Button text="Save Changes" onAction="#saveEdit" styleClass="primary-button"/>
+                <Button text="Cancel" onAction="#cancelEdit" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
 </VBox>

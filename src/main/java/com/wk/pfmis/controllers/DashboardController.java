@@ -146,13 +146,13 @@ public class DashboardController {
 
     @FXML
     private void showTransactions() {
-        loadView("Transactions.fxml", "All Transactions");
+        loadView("Transactions.fxml", "Transaction Ledger");
     }
 
     @FXML
     private void showExpenses() {
         NavigationBus.requestTransactionType("EXPENSE");
-        loadView("Transactions.fxml", "Add Expense");
+        loadView("Expenses.fxml", "Record Expense");
     }
 
     @FXML
@@ -162,9 +162,7 @@ public class DashboardController {
 
     @FXML
     private void showTransferMoney() {
-        NavigationBus.requestTransactionType("TRANSFER");
-        loadView("Transactions.fxml", "Transfer Money");
-        UiAlerts.info("Use the transaction register to record transfers. Dedicated transfer balancing is not implemented yet.");
+        loadPlaceholder("Transfer Money", "Transfer money needs a dedicated two-account workflow so one account decreases and another increases in the same operation.");
     }
 
     @FXML

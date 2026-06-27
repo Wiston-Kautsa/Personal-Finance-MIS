@@ -41,16 +41,14 @@
 
                 <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">
-                        <Button text="Add Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
+                        <Button text="Record Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
                         <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
                     </VBox>
                 </TitledPane>
 
-                <TitledPane text="Transactions" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                <TitledPane text="Transaction Ledger" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">
-                        <Button text="All Transactions" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
-                        <Button text="Filters" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
-                        <Button text="Export" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
+                        <Button text="View Ledger" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
                         <Button text="Transfer Money" maxWidth="Infinity" onAction="#showTransferMoney" styleClass="nav-sub-button"/>
                     </VBox>
                 </TitledPane>

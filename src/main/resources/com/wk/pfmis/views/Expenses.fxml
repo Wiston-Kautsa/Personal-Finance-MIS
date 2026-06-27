@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.TransactionsController" styleClass="panel">
+    <ComboBox fx:id="typeBox" managed="false" visible="false"/>
+    <Label text="Record Expense" styleClass="section-heading"/>
+
+    <GridPane hgap="14" vgap="12">
+        <Label text="Account" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+        <ComboBox fx:id="accountBox" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+        <Label text="Amount" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+        <TextField fx:id="amountField" promptText="30000" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+
+        <Label text="Expense Category" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+        <ComboBox fx:id="categoryBox" editable="true" promptText="Select, type, or use Other" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+        <Label text="Purpose" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+        <ComboBox fx:id="purposeBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+
+        <Label text="Status" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+        <ComboBox fx:id="statusBox" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+        <Label text="Date" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
+        <DatePicker fx:id="datePicker" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
+
+        <Label text="Project" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+        <ComboBox fx:id="projectBox" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+        <Label text="Person" GridPane.columnIndex="2" GridPane.rowIndex="3"/>
+        <ComboBox fx:id="personBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
+
+        <Label text="Description" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+        <TextArea fx:id="descriptionArea" prefRowCount="2" GridPane.columnIndex="1" GridPane.rowIndex="4" GridPane.columnSpan="3"/>
+    </GridPane>
+
+    <HBox spacing="8">
+        <Button text="Save Expense" onAction="#saveTransaction" styleClass="primary-button"/>
+        <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
+        <Button text="Print" onAction="#printTransactions" styleClass="secondary-button"/>
+    </HBox>
+
+    <Label text="Expense Records" styleClass="table-title"/>
+    <TableView fx:id="transactionsTable" prefHeight="320" VBox.vgrow="ALWAYS">
+        <columns>
+            <TableColumn fx:id="dateColumn" text="Date" prefWidth="100"/>
+            <TableColumn fx:id="typeColumn" text="Type" prefWidth="90" visible="false"/>
+            <TableColumn fx:id="purposeColumn" text="Purpose" prefWidth="150"/>
+            <TableColumn fx:id="accountColumn" text="Account" prefWidth="180"/>
+            <TableColumn fx:id="categoryColumn" text="Category" prefWidth="150"/>
+            <TableColumn fx:id="statusColumn" text="Status" prefWidth="130"/>
+            <TableColumn fx:id="amountColumn" text="Amount" prefWidth="120"/>
+        </columns>
+    </TableView>
+</VBox>
