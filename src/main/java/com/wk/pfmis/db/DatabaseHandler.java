@@ -1101,6 +1101,17 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> incomeSourceReport() {
+        return report("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label, COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'INCOME'
+                GROUP BY label
+                ORDER BY amount DESC
+                """);
+    }
+
     public List<ReportRow> projectSpendingReport() {
         return report("""
                 SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
@@ -1126,6 +1137,24 @@ public class DatabaseHandler {
                     AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY a.id
                 ORDER BY a.account_name
+                """);
+    }
+
+    public List<ReportRow> lendingByPersonReport() {
+        return report("""
+                SELECT COALESCE(pe.full_name, 'Unassigned') AS label,
+                       COALESCE(SUM(
+                           CASE
+                               WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
+                               WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
+                               ELSE 0
+                           END
+                       ), 0) AS amount
+                FROM transactions t
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID')
+                GROUP BY label
+                ORDER BY amount DESC
                 """);
     }
 

@@ -110,7 +110,7 @@ public class DashboardController {
 
     @FXML
     private void showDashboardProjectSpending() {
-        loadView("Reports.fxml", "Project Spending Summary");
+        showReport("Project Report", "Project Spending Summary");
     }
 
     @FXML
@@ -134,6 +134,16 @@ public class DashboardController {
     }
 
     @FXML
+    private void showIncomeRecords() {
+        loadView("Income.fxml", "Income Records");
+    }
+
+    @FXML
+    private void showIncomeReport() {
+        showReport("Income Report", "Income Report");
+    }
+
+    @FXML
     private void showCategories() {
         loadView("Categories.fxml", "Categories");
     }
@@ -145,11 +155,24 @@ public class DashboardController {
 
     @FXML
     private void showExpenses() {
+        NavigationBus.requestTransactionType("EXPENSE");
         loadView("Transactions.fxml", "Add Expense");
     }
 
     @FXML
+    private void showExpenseRecords() {
+        NavigationBus.requestTransactionType("EXPENSE");
+        loadView("Transactions.fxml", "Expense Records");
+    }
+
+    @FXML
+    private void showExpenseReport() {
+        showReport("Expense Report", "Expense Report");
+    }
+
+    @FXML
     private void showTransferMoney() {
+        NavigationBus.requestTransactionType("TRANSFER");
         loadView("Transactions.fxml", "Transfer Money");
         UiAlerts.info("Use the transaction register to record transfers. Dedicated transfer balancing is not implemented yet.");
     }
@@ -214,7 +237,27 @@ public class DashboardController {
 
     @FXML
     private void showReports() {
-        loadView("Reports.fxml", "Reports");
+        showMonthlySummaryReport();
+    }
+
+    @FXML
+    private void showMonthlySummaryReport() {
+        showReport("Monthly Summary", "Monthly Summary");
+    }
+
+    @FXML
+    private void showProjectReport() {
+        showReport("Project Report", "Project Report");
+    }
+
+    @FXML
+    private void showAccountReport() {
+        showReport("Account Balance Report", "Account Report");
+    }
+
+    @FXML
+    private void showLendingReport() {
+        showReport("Lending Report", "Lending Report");
     }
 
     @FXML
@@ -402,6 +445,11 @@ public class DashboardController {
 
     private String labelOrDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private void showReport(String reportType, String title) {
+        NavigationBus.requestReportType(reportType);
+        loadView("Reports.fxml", title);
     }
 
     private void loadView(String fileName, String title) {

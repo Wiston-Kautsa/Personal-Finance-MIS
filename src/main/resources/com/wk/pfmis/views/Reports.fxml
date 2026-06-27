@@ -23,8 +23,8 @@
     </HBox>
     <Label fx:id="monthlySummaryLabel" text="Income: MWK 0.00" styleClass="summary-line"/>
     <HBox spacing="12">
-        <VBox spacing="6">
-            <Label text="Category Spending" styleClass="table-title"/>
+        <VBox fx:id="categoryReportPane" spacing="6">
+            <Label fx:id="categoryReportTitle" text="Category Spending" styleClass="table-title"/>
             <TableView fx:id="categoryTable" prefWidth="300" prefHeight="220">
                 <columns>
                     <TableColumn fx:id="categoryLabelColumn" text="Category" prefWidth="180"/>
@@ -32,8 +32,8 @@
                 </columns>
             </TableView>
         </VBox>
-        <VBox spacing="6">
-            <Label text="Project Spending" styleClass="table-title"/>
+        <VBox fx:id="projectReportPane" spacing="6">
+            <Label fx:id="projectReportTitle" text="Project Spending" styleClass="table-title"/>
             <TableView fx:id="projectTable" prefWidth="300" prefHeight="220">
                 <columns>
                     <TableColumn fx:id="projectLabelColumn" text="Project" prefWidth="180"/>
@@ -41,8 +41,8 @@
                 </columns>
             </TableView>
         </VBox>
-        <VBox spacing="6">
-            <Label text="Account Balances" styleClass="table-title"/>
+        <VBox fx:id="accountReportPane" spacing="6">
+            <Label fx:id="accountReportTitle" text="Account Balances" styleClass="table-title"/>
             <TableView fx:id="accountTable" prefWidth="300" prefHeight="220">
                 <columns>
                     <TableColumn fx:id="accountLabelColumn" text="Account" prefWidth="180"/>

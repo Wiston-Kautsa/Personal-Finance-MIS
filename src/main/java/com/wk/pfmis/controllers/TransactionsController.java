@@ -22,6 +22,7 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.input.MouseButton;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public class TransactionsController {
     @FXML private ComboBox<Account> accountBox;
@@ -45,6 +46,7 @@ public class TransactionsController {
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private FinanceTransaction editingTransaction;
+    private String requestedTransactionType;
 
     @FXML
     public void initialize() {
@@ -53,7 +55,8 @@ public class TransactionsController {
                 "NORMAL", "PROJECT_EXPENSE", "MONEY_LENT", "MONEY_BORROWED",
                 "LENT_REPAID", "BORROWED_REPAID", "SUPPORT_GIVEN", "SAVINGS", "GOAL_CONTRIBUTION"));
         statusBox.setItems(FXCollections.observableArrayList("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED", "CANCELLED"));
-        typeBox.getSelectionModel().select("EXPENSE");
+        requestedTransactionType = NavigationBus.consumeRequestedTransactionType();
+        typeBox.getSelectionModel().select(requestedTransactionType == null ? "EXPENSE" : requestedTransactionType);
         purposeBox.getSelectionModel().select("NORMAL");
         statusBox.getSelectionModel().select("COMPLETED");
         datePicker.setValue(LocalDate.now());
@@ -127,7 +130,13 @@ public class TransactionsController {
         CategoryInput.setItems(categoryBox, database.listCategories());
         projectBox.setItems(FXCollections.observableArrayList(database.listProjects()));
         personBox.setItems(FXCollections.observableArrayList(database.listPeople()));
-        transactionsTable.setItems(FXCollections.observableArrayList(database.listRecentTransactions(100)));
+        List<FinanceTransaction> transactions = database.listRecentTransactions(100);
+        if (requestedTransactionType != null) {
+            transactions = transactions.stream()
+                    .filter(transaction -> requestedTransactionType.equals(transaction.getTransactionType()))
+                    .toList();
+        }
+        transactionsTable.setItems(FXCollections.observableArrayList(transactions));
     }
 
     @FXML
