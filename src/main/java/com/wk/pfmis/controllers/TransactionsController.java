@@ -8,13 +8,17 @@ import com.wk.pfmis.models.Person;
 import com.wk.pfmis.models.Project;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.input.MouseButton;
 
 import java.time.LocalDate;
 
@@ -39,6 +43,7 @@ public class TransactionsController {
     @FXML private TableColumn<FinanceTransaction, Double> amountColumn;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private FinanceTransaction editingTransaction;
 
     @FXML
     public void initialize() {
@@ -59,6 +64,7 @@ public class TransactionsController {
         categoryColumn.setCellValueFactory(new PropertyValueFactory<>("categoryName"));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("transactionStatus"));
         amountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        configureTransactionRowActions();
         refresh();
     }
 
@@ -71,18 +77,37 @@ public class TransactionsController {
                 return;
             }
             double amount = Double.parseDouble(amountField.getText().replace(",", "").trim());
-            database.recordTransaction(
-                    account.getId(),
-                    categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
-                    projectBox.getValue() == null ? null : projectBox.getValue().getId(),
-                    personBox.getValue() == null ? null : personBox.getValue().getId(),
-                    typeBox.getValue(),
-                    purposeBox.getValue(),
-                    statusBox.getValue(),
-                    amount,
-                    datePicker.getValue(),
-                    descriptionArea.getText().trim()
-            );
+            if (editingTransaction == null) {
+                database.recordTransaction(
+                        account.getId(),
+                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        projectBox.getValue() == null ? null : projectBox.getValue().getId(),
+                        personBox.getValue() == null ? null : personBox.getValue().getId(),
+                        typeBox.getValue(),
+                        purposeBox.getValue(),
+                        statusBox.getValue(),
+                        amount,
+                        datePicker.getValue(),
+                        descriptionArea.getText().trim()
+                );
+            } else {
+                database.updateTransaction(
+                        editingTransaction.getId(),
+                        account.getId(),
+                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        projectBox.getValue() == null ? null : projectBox.getValue().getId(),
+                        personBox.getValue() == null ? null : personBox.getValue().getId(),
+                        typeBox.getValue(),
+                        purposeBox.getValue(),
+                        statusBox.getValue(),
+                        amount,
+                        datePicker.getValue(),
+                        descriptionArea.getText().trim(),
+                        editingTransaction.getPaymentMethod(),
+                        editingTransaction.getReferenceNumber()
+                );
+                editingTransaction = null;
+            }
             amountField.clear();
             descriptionArea.clear();
             refresh();
@@ -104,20 +129,45 @@ public class TransactionsController {
 
     @FXML
     private void editSelected() {
-        if (transactionsTable.getSelectionModel().getSelectedItem() == null) {
+        FinanceTransaction selected = transactionsTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
             UiAlerts.info("Select a transaction to edit.");
             return;
         }
-        UiAlerts.info("Transaction editing is not implemented yet.");
+        editingTransaction = selected;
+        selectAccountByName(selected.getAccountName());
+        selectCategoryByName(selected.getCategoryName());
+        selectProjectByName(selected.getProjectName());
+        selectPersonByName(selected.getPersonName());
+        typeBox.getSelectionModel().select(selected.getTransactionType());
+        purposeBox.getSelectionModel().select(selected.getTransactionPurpose());
+        statusBox.getSelectionModel().select(selected.getTransactionStatus());
+        amountField.setText(String.valueOf(selected.getAmount()));
+        if (selected.getTransactionDate() != null && !selected.getTransactionDate().isBlank()) {
+            datePicker.setValue(LocalDate.parse(selected.getTransactionDate()));
+        }
+        descriptionArea.setText(selected.getDescription() == null ? "" : selected.getDescription());
     }
 
     @FXML
     private void deleteSelected() {
-        if (transactionsTable.getSelectionModel().getSelectedItem() == null) {
+        FinanceTransaction selected = transactionsTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
             UiAlerts.info("Select a transaction to delete.");
             return;
         }
-        UiAlerts.info("Transaction deletion is not implemented yet.");
+        try {
+            database.deleteTransaction(selected.getId());
+            if (editingTransaction != null && editingTransaction.getId() == selected.getId()) {
+                editingTransaction = null;
+                amountField.clear();
+                descriptionArea.clear();
+            }
+            refresh();
+            DataRefreshBus.notifyDataChanged();
+        } catch (RuntimeException exception) {
+            UiAlerts.error("Failed to delete transaction", exception);
+        }
     }
 
     @FXML
@@ -128,5 +178,63 @@ public class TransactionsController {
     @FXML
     private void printTransactions() {
         UiAlerts.info("Printing is not implemented yet.");
+    }
+
+    private void configureTransactionRowActions() {
+        transactionsTable.setRowFactory(table -> {
+            TableRow<FinanceTransaction> row = new TableRow<>();
+            MenuItem editItem = new MenuItem("Edit");
+            MenuItem deleteItem = new MenuItem("Delete");
+            MenuItem refreshItem = new MenuItem("Refresh");
+            ContextMenu menu = new ContextMenu(editItem, deleteItem, refreshItem);
+
+            editItem.setOnAction(event -> {
+                transactionsTable.getSelectionModel().select(row.getItem());
+                editSelected();
+            });
+            deleteItem.setOnAction(event -> {
+                transactionsTable.getSelectionModel().select(row.getItem());
+                deleteSelected();
+            });
+            refreshItem.setOnAction(event -> refresh());
+
+            row.setOnMouseClicked(event -> {
+                if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
+                    transactionsTable.getSelectionModel().select(row.getItem());
+                    menu.show(row, event.getScreenX(), event.getScreenY());
+                    event.consume();
+                }
+            });
+
+            return row;
+        });
+    }
+
+    private void selectAccountByName(String accountName) {
+        accountBox.getItems().stream()
+                .filter(account -> account.getAccountName().equals(accountName))
+                .findFirst()
+                .ifPresent(accountBox::setValue);
+    }
+
+    private void selectCategoryByName(String categoryName) {
+        categoryBox.getItems().stream()
+                .filter(category -> categoryName != null && category.getCategoryName().equals(categoryName))
+                .findFirst()
+                .ifPresent(categoryBox::setValue);
+    }
+
+    private void selectProjectByName(String projectName) {
+        projectBox.getItems().stream()
+                .filter(project -> projectName != null && project.getProjectName().equals(projectName))
+                .findFirst()
+                .ifPresent(projectBox::setValue);
+    }
+
+    private void selectPersonByName(String personName) {
+        personBox.getItems().stream()
+                .filter(person -> personName != null && person.getFullName().equals(personName))
+                .findFirst()
+                .ifPresent(personBox::setValue);
     }
 }

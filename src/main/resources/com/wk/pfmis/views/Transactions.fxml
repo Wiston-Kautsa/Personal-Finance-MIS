@@ -42,11 +42,8 @@
     </GridPane>
     <HBox spacing="8">
         <Button text="Add Manual Transaction" onAction="#saveTransaction" styleClass="primary-button"/>
-        <Button text="Edit Selected" onAction="#editSelected" styleClass="secondary-button"/>
-        <Button text="Delete Selected" onAction="#deleteSelected" styleClass="secondary-button"/>
         <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
         <Button text="Print" onAction="#printTransactions" styleClass="secondary-button"/>
-        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
     </HBox>
     <TableView fx:id="transactionsTable" prefHeight="260">
         <columns>
