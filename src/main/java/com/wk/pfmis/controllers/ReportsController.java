@@ -1,7 +1,6 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
-import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.ReportRow;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
@@ -23,7 +22,10 @@ public class ReportsController {
     @FXML private ComboBox<String> reportTypeBox;
     @FXML private ComboBox<String> monthBox;
     @FXML private ComboBox<Integer> yearBox;
-    @FXML private Label monthlySummaryLabel;
+    @FXML private Label summaryIncomeLabel;
+    @FXML private Label summaryExpenseLabel;
+    @FXML private Label summarySavingsLabel;
+    @FXML private Label summarySavingsRateLabel;
     @FXML private VBox categoryReportPane;
     @FXML private Label categoryReportTitle;
     @FXML private TableView<ReportRow> categoryTable;
@@ -51,7 +53,6 @@ public class ReportsController {
         String requestedReportType = NavigationBus.consumeRequestedReportType();
         reportTypeBox.getSelectionModel().select(
                 reportTypeBox.getItems().contains(requestedReportType) ? requestedReportType : "Monthly Summary");
-        reportTypeBox.setOnAction(event -> refresh());
         monthBox.setItems(FXCollections.observableArrayList(IntStream.rangeClosed(1, 12)
                 .mapToObj(month -> java.time.Month.of(month).getDisplayName(TextStyle.FULL, Locale.ENGLISH))
                 .toList()));
@@ -66,6 +67,9 @@ public class ReportsController {
         projectAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
         accountLabelColumn.setCellValueFactory(new PropertyValueFactory<>("label"));
         accountAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        reportTypeBox.setOnAction(event -> refresh());
+        monthBox.setOnAction(event -> refresh());
+        yearBox.setOnAction(event -> refresh());
         refresh();
     }
 
@@ -83,40 +87,44 @@ public class ReportsController {
     }
 
     private void refreshSummaryLine() {
-        DashboardStats stats = database.getDashboardStats();
-        double rate = stats.getMonthlyIncome() == 0 ? 0 : (stats.getMonthlySavings() / stats.getMonthlyIncome()) * 100;
-        monthlySummaryLabel.setText(
-                "Income: " + MoneyUtil.mwk(stats.getMonthlyIncome()) +
-                "    Expenses: " + MoneyUtil.mwk(stats.getMonthlyExpenses()) +
-                "    Savings: " + MoneyUtil.mwk(stats.getMonthlySavings()) +
-                "    Savings Rate: " + String.format("%.2f%%", rate)
-        );
+        String month = selectedMonthKey();
+        double income = database.transactionTotalByTypeForMonth("INCOME", month);
+        double expenses = database.transactionTotalByTypeForMonth("EXPENSE", month);
+        double savings = income - expenses;
+        double rate = income == 0 ? 0 : (savings / income) * 100;
+        summaryIncomeLabel.setText(MoneyUtil.mwk(income));
+        summaryExpenseLabel.setText(MoneyUtil.mwk(expenses));
+        summarySavingsLabel.setText(MoneyUtil.mwk(savings));
+        summarySavingsRateLabel.setText(String.format("%.2f%%", rate));
+        NavigationBus.updateReportTitle(reportTypeBox.getValue());
     }
 
     private void refreshMonthlySummary() {
-        setCategoryReport("Expense Categories", "Category", database.categorySpendingReport());
-        setProjectReport("Project Spending", database.projectSpendingReport());
-        setAccountReport("Account Balances", database.accountBalanceReport());
+        String month = selectedMonthKey();
+        setCategoryReport("Expense Categories", "Category", database.categorySpendingReport(month));
+        setProjectReport("Project Spending", database.projectSpendingReport(month));
+        setAccountReport("Account Balances", database.accountBalanceReportThroughMonth(month));
         showReportPanes(true, true, true);
     }
 
     private void refreshIncomeReport() {
-        setCategoryReport("Income Sources", "Source", true, database.incomeSourceByAccountReport());
+        setCategoryReport("Income Sources", "Source", true, database.incomeSourceByAccountReport(selectedMonthKey()));
         projectTable.getItems().clear();
         accountTable.getItems().clear();
         showReportPanes(true, false, false);
     }
 
     private void refreshExpenseReport() {
-        setCategoryReport("Expense Categories", "Category", true, database.categorySpendingByAccountReport());
-        setProjectReport("Project Expense Spending", database.projectSpendingReport());
+        String month = selectedMonthKey();
+        setCategoryReport("Expense Categories", "Category", true, database.categorySpendingByAccountReport(month));
+        setProjectReport("Project Expense Spending", database.projectSpendingReport(month));
         accountTable.getItems().clear();
         showReportPanes(true, true, false);
     }
 
     private void refreshProjectReport() {
         categoryTable.getItems().clear();
-        setProjectReport("Project Spending", database.projectSpendingReport());
+        setProjectReport("Project Spending", database.projectSpendingReport(selectedMonthKey()));
         accountTable.getItems().clear();
         showReportPanes(false, true, false);
     }
@@ -124,12 +132,12 @@ public class ReportsController {
     private void refreshAccountReport() {
         categoryTable.getItems().clear();
         projectTable.getItems().clear();
-        setAccountReport("Account Balances", database.accountBalanceReport());
+        setAccountReport("Account Balances", database.accountBalanceReportThroughMonth(selectedMonthKey()));
         showReportPanes(false, false, true);
     }
 
     private void refreshLendingReport() {
-        setCategoryReport("Lending By Person", "Person", database.lendingByPersonReport());
+        setCategoryReport("Lending By Person", "Person", database.lendingByPersonReport(selectedMonthKey()));
         projectTable.getItems().clear();
         accountTable.getItems().clear();
         showReportPanes(true, false, false);
@@ -167,6 +175,18 @@ public class ReportsController {
     private void setVisible(VBox pane, boolean visible) {
         pane.setVisible(visible);
         pane.setManaged(visible);
+    }
+
+    private String selectedMonthKey() {
+        int selectedMonth = monthBox.getSelectionModel().getSelectedIndex() + 1;
+        Integer selectedYear = yearBox.getValue();
+        if (selectedMonth <= 0) {
+            selectedMonth = java.time.LocalDate.now().getMonthValue();
+        }
+        if (selectedYear == null) {
+            selectedYear = Year.now().getValue();
+        }
+        return String.format("%04d-%02d", selectedYear, selectedMonth);
     }
 
     @FXML

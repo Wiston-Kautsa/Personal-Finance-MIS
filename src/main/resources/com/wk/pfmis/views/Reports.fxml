@@ -5,27 +5,50 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="com.wk.pfmis.controllers.ReportsController" styleClass="panel">
-    <HBox spacing="12" alignment="CENTER_LEFT">
+      fx:controller="com.wk.pfmis.controllers.ReportsController" styleClass="panel reports-panel">
+    <VBox spacing="10" styleClass="report-control-panel" VBox.vgrow="NEVER">
         <Label text="Reports" styleClass="section-heading"/>
-        <ComboBox fx:id="reportTypeBox" prefWidth="190"/>
-        <ComboBox fx:id="monthBox" prefWidth="120"/>
-        <ComboBox fx:id="yearBox" prefWidth="100"/>
-        <Button text="Generate Report" onAction="#refresh" styleClass="primary-button"/>
-        <Button text="Export PDF" onAction="#exportPdf" styleClass="secondary-button"/>
-        <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
-        <Button text="Print" onAction="#printReport" styleClass="secondary-button"/>
-        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
-    </HBox>
-    <Label fx:id="monthlySummaryLabel" text="Income: MWK 0.00" styleClass="summary-line"/>
-    <HBox spacing="12">
-        <VBox fx:id="categoryReportPane" spacing="6">
+        <FlowPane hgap="10" vgap="8" alignment="CENTER_LEFT" styleClass="report-toolbar">
+            <ComboBox fx:id="reportTypeBox" prefWidth="210"/>
+            <ComboBox fx:id="monthBox" prefWidth="135"/>
+            <ComboBox fx:id="yearBox" prefWidth="105"/>
+            <Button text="Generate Report" onAction="#refresh" styleClass="primary-button"/>
+            <Button text="Export PDF" onAction="#exportPdf" styleClass="secondary-button"/>
+            <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
+            <Button text="Print" onAction="#printReport" styleClass="secondary-button"/>
+            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+        </FlowPane>
+    </VBox>
+
+    <GridPane hgap="12" vgap="12" styleClass="report-summary-row" VBox.vgrow="NEVER">
+        <VBox spacing="4" styleClass="report-summary-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+            <Label text="Income" styleClass="report-summary-title"/>
+            <Label fx:id="summaryIncomeLabel" text="MWK 0.00" styleClass="report-summary-value"/>
+        </VBox>
+        <VBox spacing="4" styleClass="report-summary-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+            <Label text="Expenses" styleClass="report-summary-title"/>
+            <Label fx:id="summaryExpenseLabel" text="MWK 0.00" styleClass="report-summary-value"/>
+        </VBox>
+        <VBox spacing="4" styleClass="report-summary-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+            <Label text="Savings" styleClass="report-summary-title"/>
+            <Label fx:id="summarySavingsLabel" text="MWK 0.00" styleClass="report-summary-value"/>
+        </VBox>
+        <VBox spacing="4" styleClass="report-summary-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+            <Label text="Savings Rate" styleClass="report-summary-title"/>
+            <Label fx:id="summarySavingsRateLabel" text="0.00%" styleClass="report-summary-value"/>
+        </VBox>
+    </GridPane>
+
+    <HBox spacing="12" styleClass="report-table-row" VBox.vgrow="ALWAYS">
+        <VBox fx:id="categoryReportPane" spacing="8" styleClass="report-table-panel" HBox.hgrow="ALWAYS">
             <Label fx:id="categoryReportTitle" text="Category Spending" styleClass="table-title"/>
-            <TableView fx:id="categoryTable" prefWidth="300" prefHeight="220">
+            <TableView fx:id="categoryTable" prefWidth="360" prefHeight="360" VBox.vgrow="ALWAYS">
                 <columns>
                     <TableColumn fx:id="categoryLabelColumn" text="Category" prefWidth="180"/>
                     <TableColumn fx:id="categoryAccountColumn" text="Account" prefWidth="180"/>
@@ -33,18 +56,18 @@
                 </columns>
             </TableView>
         </VBox>
-        <VBox fx:id="projectReportPane" spacing="6">
+        <VBox fx:id="projectReportPane" spacing="8" styleClass="report-table-panel" HBox.hgrow="ALWAYS">
             <Label fx:id="projectReportTitle" text="Project Spending" styleClass="table-title"/>
-            <TableView fx:id="projectTable" prefWidth="300" prefHeight="220">
+            <TableView fx:id="projectTable" prefWidth="300" prefHeight="360" VBox.vgrow="ALWAYS">
                 <columns>
                     <TableColumn fx:id="projectLabelColumn" text="Project" prefWidth="180"/>
                     <TableColumn fx:id="projectAmountColumn" text="Amount" prefWidth="110"/>
                 </columns>
             </TableView>
         </VBox>
-        <VBox fx:id="accountReportPane" spacing="6">
+        <VBox fx:id="accountReportPane" spacing="8" styleClass="report-table-panel" HBox.hgrow="ALWAYS">
             <Label fx:id="accountReportTitle" text="Account Balances" styleClass="table-title"/>
-            <TableView fx:id="accountTable" prefWidth="300" prefHeight="220">
+            <TableView fx:id="accountTable" prefWidth="300" prefHeight="360" VBox.vgrow="ALWAYS">
                 <columns>
                     <TableColumn fx:id="accountLabelColumn" text="Account" prefWidth="180"/>
                     <TableColumn fx:id="accountAmountColumn" text="Balance" prefWidth="110"/>

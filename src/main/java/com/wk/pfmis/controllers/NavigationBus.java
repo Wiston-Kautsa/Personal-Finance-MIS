@@ -1,7 +1,10 @@
 package com.wk.pfmis.controllers;
 
+import java.util.function.Consumer;
+
 final class NavigationBus {
     private static Runnable accountHistoryHandler;
+    private static Consumer<String> reportTitleHandler;
     private static Integer requestedAccountHistoryId;
     private static String requestedReportType;
     private static String requestedTransactionType;
@@ -11,6 +14,10 @@ final class NavigationBus {
 
     static void onAccountHistoryRequested(Runnable handler) {
         accountHistoryHandler = handler;
+    }
+
+    static void onReportTitleChanged(Consumer<String> handler) {
+        reportTitleHandler = handler;
     }
 
     static void showAccountHistory(int accountId) {
@@ -34,6 +41,12 @@ final class NavigationBus {
         String reportType = requestedReportType;
         requestedReportType = null;
         return reportType;
+    }
+
+    static void updateReportTitle(String reportType) {
+        if (reportTitleHandler != null) {
+            reportTitleHandler.accept(reportType);
+        }
     }
 
     static void requestTransactionType(String transactionType) {

@@ -81,6 +81,7 @@ public class DashboardController {
     public void initialize() {
         DataRefreshBus.addListener(this::refreshDashboard);
         NavigationBus.onAccountHistoryRequested(this::showAccountHistory);
+        NavigationBus.onReportTitleChanged(reportType -> sectionTitleLabel.setText(reportTitle(reportType)));
         configureDashboardTable();
         showHome();
     }
@@ -452,6 +453,13 @@ public class DashboardController {
         loadView("Reports.fxml", title);
     }
 
+    private String reportTitle(String reportType) {
+        if ("Account Balance Report".equals(reportType)) {
+            return "Account Report";
+        }
+        return reportType == null || reportType.isBlank() ? "Reports" : reportType;
+    }
+
     private void loadView(String fileName, String title) {
         try {
             sectionTitleLabel.setText(title);
@@ -490,7 +498,9 @@ public class DashboardController {
             region.setMaxHeight(Double.MAX_VALUE);
         }
         if (!isMetricCard(node) && !isLeafControl(node)) {
-            VBox.setVgrow(node, Priority.ALWAYS);
+            if (VBox.getVgrow(node) == null && !(node instanceof HBox)) {
+                VBox.setVgrow(node, Priority.ALWAYS);
+            }
             HBox.setHgrow(node, Priority.ALWAYS);
         }
 
@@ -547,6 +557,7 @@ public class DashboardController {
 
     private boolean isLeafControl(Node node) {
         return node instanceof Button
+                || node instanceof Label
                 || node instanceof TextInputControl
                 || node instanceof ComboBoxBase<?>;
     }

@@ -330,6 +330,50 @@
     -fx-text-fill: #173b2e;
 }
 
+.reports-panel {
+    -fx-padding: 18;
+}
+
+.report-control-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14;
+}
+
+.report-toolbar {
+    -fx-padding: 2 0 0 0;
+}
+
+.report-summary-card {
+    -fx-background-color: #eef7f3;
+    -fx-border-color: #cbe5da;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 12 14;
+}
+
+.report-summary-title {
+    -fx-text-fill: #5f6f83;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.report-summary-value {
+    -fx-text-fill: #173b2e;
+    -fx-font-size: 16px;
+    -fx-font-weight: 800;
+}
+
+.report-table-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 12;
+}
+
 .overview-row {
     -fx-background-color: #f7f9fd;
     -fx-border-color: #e2e8f2;

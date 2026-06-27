@@ -1076,6 +1076,14 @@ public class DatabaseHandler {
         }
     }
 
+    public double transactionTotalByTypeForMonth(String type, String month) {
+        try (Connection connection = connect()) {
+            return queryMonthlyTotal(connection, month, type);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load monthly transaction total", exception);
+        }
+    }
+
     private double queryDouble(Connection connection, String sql) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -1099,6 +1107,18 @@ public class DatabaseHandler {
                 GROUP BY label
                 ORDER BY amount DESC
                 """);
+    }
+
+    public List<ReportRow> categorySpendingReport(String month) {
+        return report("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label, COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'EXPENSE'
+                  AND substr(t.transaction_date, 1, 7) = ?
+                GROUP BY label
+                ORDER BY amount DESC
+                """, month);
     }
 
     public List<ReportRow> incomeSourceReport() {
@@ -1126,6 +1146,21 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> incomeSourceByAccountReport(String month) {
+        return reportWithAccount("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       a.account_name AS account,
+                       COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'INCOME'
+                  AND substr(t.transaction_date, 1, 7) = ?
+                GROUP BY label, account
+                ORDER BY label, account
+                """, month);
+    }
+
     public List<ReportRow> categorySpendingByAccountReport() {
         return reportWithAccount("""
                 SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
@@ -1140,6 +1175,21 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> categorySpendingByAccountReport(String month) {
+        return reportWithAccount("""
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       a.account_name AS account,
+                       COALESCE(SUM(t.amount), 0) AS amount
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.transaction_type = 'EXPENSE'
+                  AND substr(t.transaction_date, 1, 7) = ?
+                GROUP BY label, account
+                ORDER BY label, account
+                """, month);
+    }
+
     public List<ReportRow> projectSpendingReport() {
         return report("""
                 SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
@@ -1148,6 +1198,18 @@ public class DatabaseHandler {
                 GROUP BY p.id
                 ORDER BY amount DESC
                 """);
+    }
+
+    public List<ReportRow> projectSpendingReport(String month) {
+        return report("""
+                SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
+                FROM projects p
+                LEFT JOIN transactions t ON t.project_id = p.id
+                    AND t.transaction_type = 'EXPENSE'
+                    AND substr(t.transaction_date, 1, 7) = ?
+                GROUP BY p.id
+                ORDER BY amount DESC
+                """, month);
     }
 
     public List<ReportRow> accountBalanceReport() {
@@ -1168,6 +1230,25 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> accountBalanceReportThroughMonth(String month) {
+        return report("""
+                SELECT a.account_name AS label,
+                       a.opening_balance + COALESCE(SUM(
+                           CASE
+                               WHEN t.transaction_type = 'INCOME' THEN t.amount
+                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                               ELSE 0
+                           END
+                       ), 0) AS amount
+                FROM accounts a
+                LEFT JOIN transactions t ON t.account_id = a.id
+                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    AND substr(t.transaction_date, 1, 7) <= ?
+                GROUP BY a.id
+                ORDER BY a.account_name
+                """, month);
+    }
+
     public List<ReportRow> lendingByPersonReport() {
         return report("""
                 SELECT COALESCE(pe.full_name, 'Unassigned') AS label,
@@ -1186,6 +1267,25 @@ public class DatabaseHandler {
                 """);
     }
 
+    public List<ReportRow> lendingByPersonReport(String month) {
+        return report("""
+                SELECT COALESCE(pe.full_name, 'Unassigned') AS label,
+                       COALESCE(SUM(
+                           CASE
+                               WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
+                               WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
+                               ELSE 0
+                           END
+                       ), 0) AS amount
+                FROM transactions t
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID')
+                  AND substr(t.transaction_date, 1, 7) = ?
+                GROUP BY label
+                ORDER BY amount DESC
+                """, month);
+    }
+
     private List<ReportRow> report(String sql) {
         List<ReportRow> rows = new ArrayList<>();
         try (Connection connection = connect();
@@ -1193,6 +1293,22 @@ public class DatabaseHandler {
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
                 rows.add(new ReportRow(resultSet.getString("label"), resultSet.getDouble("amount")));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load report", exception);
+        }
+        return rows;
+    }
+
+    private List<ReportRow> report(String sql, String value) {
+        List<ReportRow> rows = new ArrayList<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, value);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new ReportRow(resultSet.getString("label"), resultSet.getDouble("amount")));
+                }
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load report", exception);
@@ -1211,6 +1327,26 @@ public class DatabaseHandler {
                         resultSet.getString("account"),
                         resultSet.getDouble("amount")
                 ));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load report", exception);
+        }
+        return rows;
+    }
+
+    private List<ReportRow> reportWithAccount(String sql, String value) {
+        List<ReportRow> rows = new ArrayList<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, value);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new ReportRow(
+                            resultSet.getString("label"),
+                            resultSet.getString("account"),
+                            resultSet.getDouble("amount")
+                    ));
+                }
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load report", exception);
