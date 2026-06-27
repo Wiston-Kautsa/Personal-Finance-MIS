@@ -41,18 +41,33 @@ final class CategoryInput {
     static void setItems(ComboBox<Category> categoryBox, List<Category> categories) {
         String editorText = clean(categoryBox.getEditor().getText());
         Category selected = categoryBox.getValue();
-        List<Category> items = new ArrayList<>(categories);
-        boolean hasOther = items.stream()
-                .anyMatch(category -> "Other".equalsIgnoreCase(category.getCategoryName()));
-        if (!hasOther) {
-            items.add(OTHER_CATEGORY);
+        List<Category> items = new ArrayList<>();
+        Category other = null;
+        for (Category category : categories) {
+            if ("Other".equalsIgnoreCase(category.getCategoryName())) {
+                other = category;
+            } else {
+                items.add(category);
+            }
         }
+        items.add(other == null ? OTHER_CATEGORY : other);
         categoryBox.setItems(FXCollections.observableArrayList(items));
         if (selected != null && selected.getId() > 0) {
             selectById(categoryBox, selected.getId());
         } else if (!editorText.isEmpty()) {
             categoryBox.getEditor().setText(editorText);
         }
+    }
+
+    static void setItemsForType(ComboBox<Category> categoryBox, List<Category> categories, String categoryType) {
+        String requestedType = clean(categoryType).toUpperCase();
+        if (requestedType.isEmpty() || "BOTH".equals(requestedType)) {
+            setItems(categoryBox, categories);
+            return;
+        }
+        setItems(categoryBox, categories.stream()
+                .filter(category -> categorySupportsType(category, requestedType))
+                .toList());
     }
 
     static Integer resolveCategoryId(DatabaseHandler database, ComboBox<Category> categoryBox, String categoryType) {
@@ -85,6 +100,11 @@ final class CategoryInput {
                 .filter(category -> category.getId() == categoryId)
                 .findFirst()
                 .ifPresent(categoryBox::setValue);
+    }
+
+    private static boolean categorySupportsType(Category category, String requestedType) {
+        String categoryType = clean(category.getCategoryType()).toUpperCase();
+        return "BOTH".equals(categoryType) || requestedType.equals(categoryType);
     }
 
     private static String clean(String value) {

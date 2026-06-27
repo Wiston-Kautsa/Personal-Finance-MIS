@@ -69,6 +69,7 @@ public class TransactionsController {
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("transactionStatus"));
         amountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
         CategoryInput.configure(categoryBox);
+        typeBox.valueProperty().addListener((observable, oldValue, newValue) -> refreshCategories());
         configureTransactionRowActions();
         refresh();
     }
@@ -127,7 +128,7 @@ public class TransactionsController {
     @FXML
     private void refresh() {
         accountBox.setItems(FXCollections.observableArrayList(database.listAccounts()));
-        CategoryInput.setItems(categoryBox, database.listCategories());
+        refreshCategories();
         projectBox.setItems(FXCollections.observableArrayList(database.listProjects()));
         personBox.setItems(FXCollections.observableArrayList(database.listPeople()));
         List<FinanceTransaction> transactions = database.listRecentTransactions(100);
@@ -137,6 +138,10 @@ public class TransactionsController {
                     .toList();
         }
         transactionsTable.setItems(FXCollections.observableArrayList(transactions));
+    }
+
+    private void refreshCategories() {
+        CategoryInput.setItemsForType(categoryBox, database.listCategories(), transactionCategoryType());
     }
 
     @FXML
