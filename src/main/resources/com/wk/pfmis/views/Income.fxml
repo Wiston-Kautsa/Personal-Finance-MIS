@@ -70,15 +70,15 @@
 
     <TitledPane text="Recent Income Transactions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
         <VBox spacing="10">
-            <TableView fx:id="recentIncomeTable" prefHeight="260">
+            <TableView fx:id="recentIncomeTable" prefHeight="320" VBox.vgrow="ALWAYS">
                 <columns>
-                    <TableColumn fx:id="dateColumn" text="Date" prefWidth="120"/>
-                    <TableColumn fx:id="sourceColumn" text="Source" prefWidth="180"/>
-                    <TableColumn fx:id="amountColumn" text="Amount" prefWidth="150"/>
-                    <TableColumn fx:id="accountColumn" text="Account" prefWidth="220"/>
+                    <TableColumn fx:id="dateColumn" text="Date" prefWidth="115"/>
+                    <TableColumn fx:id="sourceColumn" text="Source" prefWidth="170"/>
+                    <TableColumn fx:id="amountColumn" text="Amount" prefWidth="170"/>
+                    <TableColumn fx:id="accountColumn" text="Account" prefWidth="210"/>
                     <TableColumn fx:id="paymentMethodColumn" text="Method" prefWidth="160"/>
                     <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
-                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="140"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="125"/>
                 </columns>
             </TableView>
         </VBox>

@@ -5,6 +5,7 @@ import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.Category;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.utils.MoneyUtil;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.ContextMenu;
@@ -38,7 +39,7 @@ public class IncomeController {
     @FXML private TableView<FinanceTransaction> recentIncomeTable;
     @FXML private TableColumn<FinanceTransaction, String> dateColumn;
     @FXML private TableColumn<FinanceTransaction, String> sourceColumn;
-    @FXML private TableColumn<FinanceTransaction, Double> amountColumn;
+    @FXML private TableColumn<FinanceTransaction, String> amountColumn;
     @FXML private TableColumn<FinanceTransaction, String> accountColumn;
     @FXML private TableColumn<FinanceTransaction, String> paymentMethodColumn;
     @FXML private TableColumn<FinanceTransaction, String> referenceColumn;
@@ -56,11 +57,12 @@ public class IncomeController {
                 selectedAccountLabel.setText(newValue == null ? "None" : newValue.getAccountName()));
         dateColumn.setCellValueFactory(new PropertyValueFactory<>("transactionDate"));
         sourceColumn.setCellValueFactory(new PropertyValueFactory<>("categoryName"));
-        amountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        amountColumn.setCellValueFactory(cell -> new SimpleStringProperty(MoneyUtil.mwk(cell.getValue().getAmount())));
         accountColumn.setCellValueFactory(new PropertyValueFactory<>("accountName"));
-        paymentMethodColumn.setCellValueFactory(new PropertyValueFactory<>("paymentMethod"));
-        referenceColumn.setCellValueFactory(new PropertyValueFactory<>("referenceNumber"));
+        paymentMethodColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getPaymentMethod())));
+        referenceColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getReferenceNumber())));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("incomeStatusLabel"));
+        recentIncomeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         configureIncomeRowActions();
         refresh();
     }
@@ -279,5 +281,9 @@ public class IncomeController {
 
     private String referenceValue() {
         return referenceField.getText() == null ? "" : referenceField.getText().trim();
+    }
+
+    private String blankToDash(String value) {
+        return value == null || value.isBlank() ? "-" : value;
     }
 }
