@@ -6,6 +6,7 @@ import com.wk.pfmis.models.Category;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Person;
 import com.wk.pfmis.models.Project;
+import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.ContextMenu;
@@ -152,6 +153,25 @@ public class TransactionsController {
     }
 
     @FXML
+    private void viewSelected() {
+        FinanceTransaction selected = transactionsTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            UiAlerts.info("Select a transaction to view.");
+            return;
+        }
+        UiAlerts.info(
+                "Date: " + selected.getTransactionDate()
+                        + "\nType: " + selected.getTransactionType()
+                        + "\nPurpose: " + selected.getTransactionPurpose()
+                        + "\nAccount: " + selected.getAccountName()
+                        + "\nCategory: " + blankToDash(selected.getCategoryName())
+                        + "\nStatus: " + selected.getTransactionStatus()
+                        + "\nAmount: " + MoneyUtil.mwk(selected.getAmount())
+                        + "\nDescription: " + blankToDash(selected.getDescription())
+        );
+    }
+
+    @FXML
     private void deleteSelected() {
         FinanceTransaction selected = transactionsTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
@@ -185,11 +205,16 @@ public class TransactionsController {
     private void configureTransactionRowActions() {
         transactionsTable.setRowFactory(table -> {
             TableRow<FinanceTransaction> row = new TableRow<>();
+            MenuItem viewItem = new MenuItem("View");
             MenuItem editItem = new MenuItem("Edit");
             MenuItem deleteItem = new MenuItem("Delete");
             MenuItem refreshItem = new MenuItem("Refresh");
-            ContextMenu menu = new ContextMenu(editItem, deleteItem, refreshItem);
+            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem, refreshItem);
 
+            viewItem.setOnAction(event -> {
+                transactionsTable.getSelectionModel().select(row.getItem());
+                viewSelected();
+            });
             editItem.setOnAction(event -> {
                 transactionsTable.getSelectionModel().select(row.getItem());
                 editSelected();
@@ -243,5 +268,9 @@ public class TransactionsController {
             case "EXPENSE" -> "EXPENSE";
             default -> "BOTH";
         };
+    }
+
+    private String blankToDash(String value) {
+        return value == null || value.isBlank() ? "-" : value;
     }
 }
