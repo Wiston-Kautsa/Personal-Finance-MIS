@@ -30,12 +30,7 @@
 
                 <Button text="Dashboard" maxWidth="Infinity" onAction="#showHome" styleClass="nav-button"/>
 
-                <TitledPane text="Accounts" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Add Account" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-sub-button"/>
-                        <Button text="Account History" maxWidth="Infinity" onAction="#showAccountHistory" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                <Button text="Accounts" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-button"/>
 
                 <TitledPane text="Income" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">

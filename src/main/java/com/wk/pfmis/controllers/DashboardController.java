@@ -80,6 +80,7 @@ public class DashboardController {
     @FXML
     public void initialize() {
         DataRefreshBus.addListener(this::refreshDashboard);
+        NavigationBus.onAccountHistoryRequested(this::showAccountHistory);
         configureDashboardTable();
         showHome();
     }
@@ -124,7 +125,7 @@ public class DashboardController {
 
     @FXML
     private void showAccountHistory() {
-        loadView("AccountHistory.fxml", "View Accounts");
+        loadView("AccountHistory.fxml", "Account History");
     }
 
     @FXML

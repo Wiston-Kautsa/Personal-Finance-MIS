@@ -146,7 +146,7 @@ public class AccountsController {
             UiAlerts.info("Select an account to view history.");
             return;
         }
-        UiAlerts.info("Open Account History from the sidebar to view transactions for " + selected.getAccountName() + ".");
+        NavigationBus.showAccountHistory(selected.getId());
     }
 
     @FXML

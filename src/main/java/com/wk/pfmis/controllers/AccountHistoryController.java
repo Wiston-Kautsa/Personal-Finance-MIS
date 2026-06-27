@@ -99,9 +99,10 @@ public class AccountHistoryController {
 
     @FXML
     private void refresh() {
-        Integer selectedId = accountsTable.getSelectionModel().getSelectedItem() == null
-                ? null
-                : accountsTable.getSelectionModel().getSelectedItem().getId();
+        Integer requestedId = NavigationBus.consumeRequestedAccountHistoryId();
+        Integer selectedId = requestedId != null
+                ? requestedId
+                : selectedAccountId();
         List<Account> accounts = database.listAccounts();
         allAccounts.setAll(accounts);
         refreshDatabaseTransactionDates(accounts);
@@ -123,6 +124,11 @@ public class AccountHistoryController {
         refreshSelectedAccountTransactionDates();
         refreshHistoryYearOptions();
         applyHistoryFilters();
+    }
+
+    private Integer selectedAccountId() {
+        Account selected = accountsTable.getSelectionModel().getSelectedItem();
+        return selected == null ? null : selected.getId();
     }
 
     private void refreshDatabaseTransactionDates(List<Account> accounts) {

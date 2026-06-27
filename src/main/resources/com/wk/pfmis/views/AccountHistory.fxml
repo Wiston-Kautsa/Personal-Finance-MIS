@@ -13,7 +13,7 @@
 
 <VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.AccountHistoryController">
-    <TitledPane text="Accounts" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+    <TitledPane text="Choose Account" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
         <VBox spacing="12">
             <HBox spacing="10" alignment="CENTER_LEFT">
                 <ComboBox fx:id="accountNameFilter" prefWidth="220"/>
