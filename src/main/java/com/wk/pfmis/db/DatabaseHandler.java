@@ -776,6 +776,70 @@ public class DatabaseHandler {
         }
     }
 
+    public void updateTransaction(
+            int transactionId,
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer personId,
+            String transactionType,
+            String purpose,
+            String status,
+            double amount,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+        String sql = """
+                UPDATE transactions
+                SET account_id = ?,
+                    category_id = ?,
+                    project_id = ?,
+                    person_id = ?,
+                    transaction_type = ?,
+                    transaction_purpose = ?,
+                    transaction_status = ?,
+                    amount = ?,
+                    transaction_date = ?,
+                    description = ?,
+                    payment_method = ?,
+                    reference_number = ?
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            setNullableInt(statement, 2, categoryId);
+            setNullableInt(statement, 3, projectId);
+            setNullableInt(statement, 4, personId);
+            statement.setString(5, transactionType);
+            statement.setString(6, purpose);
+            statement.setString(7, status);
+            statement.setDouble(8, amount);
+            statement.setString(9, date.toString());
+            statement.setString(10, description);
+            statement.setString(11, paymentMethod);
+            statement.setString(12, referenceNumber);
+            statement.setInt(13, transactionId);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update transaction", exception);
+        }
+    }
+
+    public void deleteTransaction(int transactionId) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM transactions WHERE id = ?")) {
+            statement.setInt(1, transactionId);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to delete transaction", exception);
+        }
+    }
+
     private void setNullableInt(PreparedStatement statement, int index, Integer value) throws SQLException {
         if (value == null) {
             statement.setNull(index, java.sql.Types.INTEGER);

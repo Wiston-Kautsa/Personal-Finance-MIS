@@ -7,14 +7,18 @@ import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.input.MouseButton;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -41,6 +45,7 @@ public class IncomeController {
     @FXML private TableColumn<FinanceTransaction, String> statusColumn;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private FinanceTransaction editingIncome;
 
     @FXML
     public void initialize() {
@@ -56,6 +61,7 @@ public class IncomeController {
         paymentMethodColumn.setCellValueFactory(new PropertyValueFactory<>("paymentMethod"));
         referenceColumn.setCellValueFactory(new PropertyValueFactory<>("referenceNumber"));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("incomeStatusLabel"));
+        configureIncomeRowActions();
         refresh();
     }
 
@@ -69,20 +75,39 @@ public class IncomeController {
             }
             double amount = Double.parseDouble(amountField.getText().replace(",", "").trim());
             String status = incomeStatus();
-            database.recordTransaction(
-                    account.getId(),
-                    categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
-                    null,
-                    null,
-                    "INCOME",
-                    "NORMAL",
-                    status,
-                    amount,
-                    datePicker.getValue(),
-                    descriptionValue(),
-                    paymentMethodValue(),
-                    referenceValue()
-            );
+            if (editingIncome == null) {
+                database.recordTransaction(
+                        account.getId(),
+                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        null,
+                        null,
+                        "INCOME",
+                        "NORMAL",
+                        status,
+                        amount,
+                        datePicker.getValue(),
+                        descriptionValue(),
+                        paymentMethodValue(),
+                        referenceValue()
+                );
+            } else {
+                database.updateTransaction(
+                        editingIncome.getId(),
+                        account.getId(),
+                        categoryBox.getValue() == null ? null : categoryBox.getValue().getId(),
+                        null,
+                        null,
+                        "INCOME",
+                        editingIncome.getTransactionPurpose(),
+                        status,
+                        amount,
+                        datePicker.getValue(),
+                        descriptionValue(),
+                        paymentMethodValue(),
+                        referenceValue()
+                );
+                editingIncome = null;
+            }
             amountField.clear();
             referenceField.clear();
             descriptionArea.clear();
@@ -133,6 +158,7 @@ public class IncomeController {
         paymentMethodBox.getSelectionModel().select("Bank Transfer");
         statusBox.getSelectionModel().select("Received");
         datePicker.setValue(LocalDate.now());
+        editingIncome = null;
     }
 
     @FXML
@@ -145,16 +171,68 @@ public class IncomeController {
 
     @FXML
     private void editIncome() {
-        if (selectedIncome("edit") != null) {
-            UiAlerts.info("Income editing is not implemented yet.");
+        FinanceTransaction selected = selectedIncome("edit");
+        if (selected != null) {
+            editingIncome = selected;
+            selectAccountByName(selected.getAccountName());
+            selectCategoryByName(selected.getCategoryName());
+            amountField.setText(String.valueOf(selected.getAmount()));
+            datePicker.setValue(LocalDate.parse(selected.getTransactionDate()));
+            paymentMethodBox.setValue(selected.getPaymentMethod());
+            referenceField.setText(selected.getReferenceNumber() == null ? "" : selected.getReferenceNumber());
+            descriptionArea.setText(selected.getDescription() == null ? "" : selected.getDescription());
+            statusBox.getSelectionModel().select(selected.getIncomeStatusLabel());
         }
     }
 
     @FXML
     private void deleteIncome() {
-        if (selectedIncome("delete") != null) {
-            UiAlerts.info("Income deletion is not implemented yet.");
+        FinanceTransaction selected = selectedIncome("delete");
+        if (selected != null) {
+            try {
+                database.deleteTransaction(selected.getId());
+                if (editingIncome != null && editingIncome.getId() == selected.getId()) {
+                    clearForm();
+                }
+                refresh();
+                DataRefreshBus.notifyDataChanged();
+            } catch (RuntimeException exception) {
+                UiAlerts.error("Failed to delete income", exception);
+            }
         }
+    }
+
+    private void configureIncomeRowActions() {
+        recentIncomeTable.setRowFactory(table -> {
+            TableRow<FinanceTransaction> row = new TableRow<>();
+            MenuItem viewItem = new MenuItem("View");
+            MenuItem editItem = new MenuItem("Edit");
+            MenuItem deleteItem = new MenuItem("Delete");
+            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem);
+
+            viewItem.setOnAction(event -> {
+                recentIncomeTable.getSelectionModel().select(row.getItem());
+                viewIncome();
+            });
+            editItem.setOnAction(event -> {
+                recentIncomeTable.getSelectionModel().select(row.getItem());
+                editIncome();
+            });
+            deleteItem.setOnAction(event -> {
+                recentIncomeTable.getSelectionModel().select(row.getItem());
+                deleteIncome();
+            });
+
+            row.setOnMouseClicked(event -> {
+                if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
+                    recentIncomeTable.getSelectionModel().select(row.getItem());
+                    menu.show(row, event.getScreenX(), event.getScreenY());
+                    event.consume();
+                }
+            });
+
+            return row;
+        });
     }
 
     private FinanceTransaction selectedIncome(String action) {
@@ -163,6 +241,20 @@ public class IncomeController {
             UiAlerts.info("Select an income record to " + action + ".");
         }
         return selected;
+    }
+
+    private void selectAccountByName(String accountName) {
+        accountBox.getItems().stream()
+                .filter(account -> account.getAccountName().equals(accountName))
+                .findFirst()
+                .ifPresent(accountBox::setValue);
+    }
+
+    private void selectCategoryByName(String categoryName) {
+        categoryBox.getItems().stream()
+                .filter(category -> category.getCategoryName().equals(categoryName))
+                .findFirst()
+                .ifPresent(categoryBox::setValue);
     }
 
     private String incomeStatus() {

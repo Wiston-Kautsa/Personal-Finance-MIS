@@ -70,11 +70,6 @@
 
     <TitledPane text="Recent Income Transactions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
         <VBox spacing="10">
-            <HBox spacing="10">
-                <Button text="View" onAction="#viewIncome" styleClass="account-outline-button"/>
-                <Button text="Edit" onAction="#editIncome" styleClass="account-outline-button"/>
-                <Button text="Delete" onAction="#deleteIncome" styleClass="account-outline-button"/>
-            </HBox>
             <TableView fx:id="recentIncomeTable" prefHeight="260">
                 <columns>
                     <TableColumn fx:id="dateColumn" text="Date" prefWidth="120"/>
