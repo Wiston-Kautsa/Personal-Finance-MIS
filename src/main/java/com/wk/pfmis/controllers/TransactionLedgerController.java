@@ -223,6 +223,10 @@ public class TransactionLedgerController {
             UiAlerts.info("Select a transaction to edit.");
             return;
         }
+        if ("TRANSFER".equals(selected.getTransactionType())) {
+            UiAlerts.info("Transfers are linked two-account records. Delete and re-record the transfer from Transfer Money if it needs correction.");
+            return;
+        }
         editingTransaction = selected;
         showEditPane();
         selectAccountByName(editAccountBox, selected.getAccountName());

@@ -181,6 +181,9 @@ public class DatabaseHandler {
     }
 
     private void migrateTransactionsTable(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "transactions", "related_transaction_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "transaction_purpose", "TEXT DEFAULT 'NORMAL'");
+        addColumnIfMissing(connection, "transactions", "transaction_status", "TEXT DEFAULT 'COMPLETED'");
         addColumnIfMissing(connection, "transactions", "payment_method", "TEXT");
         addColumnIfMissing(connection, "transactions", "reference_number", "TEXT");
     }
@@ -250,10 +253,12 @@ public class DatabaseHandler {
                        a.account_number, a.opening_balance, a.status, a.notes, a.created_at,
                        a.opening_balance + COALESCE(SUM(
                            CASE
-                               WHEN t.transaction_type = 'INCOME' THEN t.amount
-                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                               ELSE 0
-                           END
+                              WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              ELSE 0
+                          END
                        ), 0) AS current_balance
                 FROM accounts a
                 LEFT JOIN transactions t ON t.account_id = a.id
@@ -873,6 +878,129 @@ public class DatabaseHandler {
         }
     }
 
+    public void recordTransfer(
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) {
+        if (fromAccountId == toAccountId) {
+            throw new IllegalArgumentException("Choose two different accounts for a transfer");
+        }
+        if (amountSent <= 0 || amountReceived <= 0) {
+            throw new IllegalArgumentException("Transfer amounts must be greater than zero");
+        }
+        if (date == null) {
+            throw new IllegalArgumentException("Transfer date is required");
+        }
+
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                String fromAccountName = accountNameById(connection, fromAccountId);
+                String toAccountName = accountNameById(connection, toAccountId);
+                if (fromAccountName == null || toAccountName == null) {
+                    throw new IllegalArgumentException("Select valid source and destination accounts");
+                }
+
+                int outgoingId = insertTransferRow(
+                        connection,
+                        fromAccountId,
+                        null,
+                        "TRANSFER_OUT",
+                        amountSent,
+                        date,
+                        transferDescription("Transfer to " + toAccountName, description),
+                        paymentMethod,
+                        referenceNumber
+                );
+                int incomingId = insertTransferRow(
+                        connection,
+                        toAccountId,
+                        outgoingId,
+                        "TRANSFER_IN",
+                        amountReceived,
+                        date,
+                        transferDescription("Transfer from " + fromAccountName, description),
+                        paymentMethod,
+                        referenceNumber
+                );
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
+                    update.setInt(1, incomingId);
+                    update.setInt(2, outgoingId);
+                    update.executeUpdate();
+                }
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record transfer", exception);
+        }
+    }
+
+    private int insertTransferRow(
+            Connection connection,
+            int accountId,
+            Integer relatedTransactionId,
+            String purpose,
+            double amount,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        String sql = """
+                INSERT INTO transactions (
+                    account_id, related_transaction_id, transaction_type, transaction_purpose,
+                    transaction_status, amount, transaction_date, description, payment_method, reference_number
+                ) VALUES (?, ?, 'TRANSFER', ?, 'COMPLETED', ?, ?, ?, ?, ?)
+                """;
+        try (PreparedStatement insert = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            insert.setInt(1, accountId);
+            setNullableInt(insert, 2, relatedTransactionId);
+            insert.setString(3, purpose);
+            insert.setDouble(4, amount);
+            insert.setString(5, date.toString());
+            insert.setString(6, description);
+            insert.setString(7, cleanNullable(paymentMethod));
+            insert.setString(8, cleanNullable(referenceNumber));
+            insert.executeUpdate();
+            try (ResultSet keys = insert.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return keys.getInt(1);
+                }
+            }
+        }
+        throw new SQLException("Transfer row was saved without a generated id");
+    }
+
+    private String accountNameById(Connection connection, int accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT account_name FROM accounts WHERE id = ?")) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getString("account_name") : null;
+            }
+        }
+    }
+
+    private String transferDescription(String base, String note) {
+        String cleanNote = cleanNullable(note);
+        return cleanNote == null ? base : base + " - " + cleanNote;
+    }
+
+    private String cleanNullable(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     public void updateTransaction(
             int transactionId,
             int accountId,
@@ -928,13 +1056,37 @@ public class DatabaseHandler {
     }
 
     public void deleteTransaction(int transactionId) {
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement("DELETE FROM transactions WHERE id = ?")) {
-            statement.setInt(1, transactionId);
-            statement.executeUpdate();
+        try (Connection connection = connect()) {
+            Integer relatedTransactionId = null;
+            try (PreparedStatement relation = connection.prepareStatement(
+                    "SELECT related_transaction_id FROM transactions WHERE id = ?")) {
+                relation.setInt(1, transactionId);
+                try (ResultSet resultSet = relation.executeQuery()) {
+                    if (resultSet.next()) {
+                        relatedTransactionId = nullableInt(resultSet, "related_transaction_id");
+                    }
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    DELETE FROM transactions
+                    WHERE id = ?
+                       OR related_transaction_id = ?
+                       OR (? IS NOT NULL AND id = ?)
+                    """)) {
+                statement.setInt(1, transactionId);
+                statement.setInt(2, transactionId);
+                setNullableInt(statement, 3, relatedTransactionId);
+                setNullableInt(statement, 4, relatedTransactionId);
+                statement.executeUpdate();
+            }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to delete transaction", exception);
         }
+    }
+
+    private Integer nullableInt(ResultSet resultSet, String columnName) throws SQLException {
+        int value = resultSet.getInt(columnName);
+        return resultSet.wasNull() ? null : value;
     }
 
     private void setNullableInt(PreparedStatement statement, int index, Integer value) throws SQLException {
@@ -1077,6 +1229,8 @@ public class DatabaseHandler {
                                            CASE
                                                WHEN t.transaction_type = 'INCOME' THEN t.amount
                                                WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
                                                ELSE 0
                                            END
                                        ), 0) AS account_balance
@@ -1251,10 +1405,12 @@ public class DatabaseHandler {
                 SELECT a.account_name AS label,
                        a.opening_balance + COALESCE(SUM(
                            CASE
-                               WHEN t.transaction_type = 'INCOME' THEN t.amount
-                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                               ELSE 0
-                           END
+                              WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              ELSE 0
+                          END
                        ), 0) AS amount
                 FROM accounts a
                 LEFT JOIN transactions t ON t.account_id = a.id
@@ -1269,10 +1425,12 @@ public class DatabaseHandler {
                 SELECT a.account_name AS label,
                        a.opening_balance + COALESCE(SUM(
                            CASE
-                               WHEN t.transaction_type = 'INCOME' THEN t.amount
-                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                               ELSE 0
-                           END
+                              WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              ELSE 0
+                          END
                        ), 0) AS amount
                 FROM accounts a
                 LEFT JOIN transactions t ON t.account_id = a.id

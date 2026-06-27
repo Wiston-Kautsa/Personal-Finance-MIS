@@ -162,7 +162,7 @@ public class DashboardController {
 
     @FXML
     private void showTransferMoney() {
-        loadPlaceholder("Transfer Money", "Transfer money needs a dedicated two-account workflow so one account decreases and another increases in the same operation.");
+        loadView("TransferMoney.fxml", "Transfer Money");
     }
 
     @FXML
