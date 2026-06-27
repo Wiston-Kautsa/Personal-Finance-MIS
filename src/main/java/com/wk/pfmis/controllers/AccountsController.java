@@ -258,7 +258,7 @@ public class AccountsController {
     }
 
     private void setEditMode(boolean editing) {
-        accountFormPane.setText(editing ? "Edit Account" : "Open New Account");
+        accountFormPane.setText(editing ? "Edit Account" : "New Account");
         saveAccountButton.setText(editing ? "Update Account" : "Save Account");
         accountFormPane.setExpanded(true);
     }

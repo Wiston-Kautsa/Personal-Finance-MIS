@@ -394,6 +394,10 @@
     -fx-text-fill: #10233f;
 }
 
+.accounts-page {
+    -fx-padding: 0;
+}
+
 .account-card {
     -fx-background-color: #ffffff;
     -fx-border-color: #dde5f0;
@@ -517,11 +521,11 @@
 }
 
 .account-info-box {
-    -fx-background-color: #f0f6ff;
-    -fx-border-color: #d7e6ff;
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
     -fx-border-radius: 7;
     -fx-background-radius: 7;
-    -fx-padding: 12;
+    -fx-padding: 10 12;
     -fx-text-fill: #1e3a5f;
 }
 
@@ -531,33 +535,37 @@
 }
 
 .account-summary-strip {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 10;
+}
+
+.account-summary-tile {
     -fx-background-color: #f7f9fd;
     -fx-border-color: #e2e8f2;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 9 12;
+    -fx-min-height: 62;
+}
+
+.account-summary-wide {
+    -fx-min-width: 260;
+}
+
+.account-form-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent;
     -fx-border-radius: 8;
     -fx-background-radius: 8;
     -fx-padding: 12;
 }
 
-.account-summary-tile {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #e2e8f2;
-    -fx-border-radius: 7;
-    -fx-background-radius: 7;
-    -fx-padding: 10 12;
-    -fx-min-height: 74;
-}
-
-.account-form-panel {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #e2e8f2;
-    -fx-border-radius: 8;
-    -fx-background-radius: 8;
-    -fx-padding: 14;
-}
-
 .account-form-actions {
     -fx-border-color: #edf1f7 transparent transparent transparent;
-    -fx-padding: 12 0 0 0;
+    -fx-padding: 10 0 0 0;
 }
 
 .input-addon {
