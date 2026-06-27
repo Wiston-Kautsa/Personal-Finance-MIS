@@ -35,7 +35,6 @@
                 <TitledPane text="Income" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">
                         <Button text="Add Income" maxWidth="Infinity" onAction="#showIncome" styleClass="nav-sub-button"/>
-                        <Button text="Income Records" maxWidth="Infinity" onAction="#showIncomeRecords" styleClass="nav-sub-button"/>
                         <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
                     </VBox>
                 </TitledPane>
@@ -43,7 +42,6 @@
                 <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                     <VBox spacing="5">
                         <Button text="Add Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
-                        <Button text="Expense Records" maxWidth="Infinity" onAction="#showExpenseRecords" styleClass="nav-sub-button"/>
                         <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
                     </VBox>
                 </TitledPane>

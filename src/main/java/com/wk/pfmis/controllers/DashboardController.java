@@ -135,11 +135,6 @@ public class DashboardController {
     }
 
     @FXML
-    private void showIncomeRecords() {
-        loadView("Income.fxml", "Income Records");
-    }
-
-    @FXML
     private void showIncomeReport() {
         showReport("Income Report", "Income Report");
     }
@@ -158,12 +153,6 @@ public class DashboardController {
     private void showExpenses() {
         NavigationBus.requestTransactionType("EXPENSE");
         loadView("Transactions.fxml", "Add Expense");
-    }
-
-    @FXML
-    private void showExpenseRecords() {
-        NavigationBus.requestTransactionType("EXPENSE");
-        loadView("Transactions.fxml", "Expense Records");
     }
 
     @FXML
