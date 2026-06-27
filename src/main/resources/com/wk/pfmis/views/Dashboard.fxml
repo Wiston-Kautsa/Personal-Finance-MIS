@@ -160,15 +160,6 @@
                         </VBox>
                     </GridPane>
                 </TitledPane>
-                <TitledPane text="Quick Actions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                    <HBox spacing="10" styleClass="dashboard-actions">
-                        <Button text="Add Income" onAction="#showIncome" styleClass="primary-button"/>
-                        <Button text="Add Expense" onAction="#showExpenses" styleClass="secondary-button"/>
-                        <Button text="Add Project Activity" onAction="#showProjectActivities" styleClass="secondary-button"/>
-                        <Button text="Transfer Money" onAction="#showTransferMoney" styleClass="secondary-button"/>
-                        <Button text="Generate Report" onAction="#showReports" styleClass="secondary-button"/>
-                    </HBox>
-                </TitledPane>
                 <GridPane hgap="14" vgap="14">
                     <TitledPane text="Cash Flow Line Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="0">
                         <LineChart fx:id="cashFlowChart" legendVisible="true" animated="false" createSymbols="true" prefHeight="260">
