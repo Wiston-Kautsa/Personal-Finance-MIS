@@ -208,14 +208,28 @@ public class AccountsController {
             MenuItem editItem = new MenuItem("Edit");
             MenuItem activateItem = new MenuItem("Activate");
             MenuItem deactivateItem = new MenuItem("Deactivate");
+            MenuItem deleteItem = new MenuItem("Delete");
             MenuItem refreshItem = new MenuItem("Refresh");
 
-            editItem.setOnAction(event -> editAccount(row.getItem()));
-            activateItem.setOnAction(event -> updateStatus(row.getItem(), true));
-            deactivateItem.setOnAction(event -> updateStatus(row.getItem(), false));
+            editItem.setOnAction(event -> {
+                accountsTable.getSelectionModel().select(row.getItem());
+                editAccount(row.getItem());
+            });
+            activateItem.setOnAction(event -> {
+                accountsTable.getSelectionModel().select(row.getItem());
+                updateStatus(row.getItem(), true);
+            });
+            deactivateItem.setOnAction(event -> {
+                accountsTable.getSelectionModel().select(row.getItem());
+                updateStatus(row.getItem(), false);
+            });
+            deleteItem.setOnAction(event -> {
+                accountsTable.getSelectionModel().select(row.getItem());
+                deleteAccount();
+            });
             refreshItem.setOnAction(event -> refresh());
 
-            ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem, refreshItem);
+            ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem, deleteItem, refreshItem);
             row.setOnMouseClicked(event -> {
                 if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
                     accountsTable.getSelectionModel().select(row.getItem());
