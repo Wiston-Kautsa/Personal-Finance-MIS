@@ -2,15 +2,23 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.Category;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.scene.control.ComboBox;
 import javafx.util.StringConverter;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 final class CategoryInput {
     private static final Category OTHER_CATEGORY = new Category(-1, "Other", "BOTH");
+    private static final Map<ComboBox<Category>, List<Category>> CATEGORY_OPTIONS = new WeakHashMap<>();
+    private static final Set<ComboBox<Category>> CONFIGURED_BOXES = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final Set<ComboBox<Category>> UPDATING_BOXES = Collections.newSetFromMap(new WeakHashMap<>());
 
     private CategoryInput() {
     }
@@ -18,6 +26,14 @@ final class CategoryInput {
     static void configure(ComboBox<Category> categoryBox) {
         categoryBox.setEditable(true);
         categoryBox.setPromptText("Select or type category");
+        if (CONFIGURED_BOXES.add(categoryBox)) {
+            categoryBox.getEditor().textProperty().addListener((observable, oldValue, newValue) -> {
+                if (UPDATING_BOXES.contains(categoryBox)) {
+                    return;
+                }
+                filterItems(categoryBox, clean(newValue));
+            });
+        }
         categoryBox.setConverter(new StringConverter<>() {
             @Override
             public String toString(Category category) {
@@ -50,12 +66,14 @@ final class CategoryInput {
                 items.add(category);
             }
         }
-        items.add(other == null ? OTHER_CATEGORY : other);
-        categoryBox.setItems(FXCollections.observableArrayList(items));
+        items = withOtherLast(items, other);
+        CATEGORY_OPTIONS.put(categoryBox, items);
+        setVisibleItems(categoryBox, items);
         if (selected != null && selected.getId() > 0) {
             selectById(categoryBox, selected.getId());
         } else if (!editorText.isEmpty()) {
-            categoryBox.getEditor().setText(editorText);
+            setEditorText(categoryBox, editorText);
+            filterItems(categoryBox, editorText);
         }
     }
 
@@ -96,10 +114,56 @@ final class CategoryInput {
     }
 
     private static void selectById(ComboBox<Category> categoryBox, int categoryId) {
-        categoryBox.getItems().stream()
-                .filter(category -> category.getId() == categoryId)
-                .findFirst()
-                .ifPresent(categoryBox::setValue);
+        UPDATING_BOXES.add(categoryBox);
+        try {
+            categoryBox.getItems().stream()
+                    .filter(category -> category.getId() == categoryId)
+                    .findFirst()
+                    .ifPresent(categoryBox::setValue);
+        } finally {
+            UPDATING_BOXES.remove(categoryBox);
+        }
+    }
+
+    private static void filterItems(ComboBox<Category> categoryBox, String query) {
+        List<Category> sourceItems = CATEGORY_OPTIONS.getOrDefault(categoryBox, List.of());
+        if (sourceItems.isEmpty()) {
+            return;
+        }
+        String normalizedQuery = query.toLowerCase();
+        List<Category> filtered = sourceItems.stream()
+                .filter(category -> normalizedQuery.isEmpty()
+                        || "Other".equalsIgnoreCase(category.getCategoryName())
+                        || category.getCategoryName().toLowerCase().contains(normalizedQuery))
+                .toList();
+        setVisibleItems(categoryBox, filtered.isEmpty() ? sourceItems : filtered);
+        if (!normalizedQuery.isEmpty() && categoryBox.isFocused()) {
+            Platform.runLater(categoryBox::show);
+        }
+    }
+
+    private static List<Category> withOtherLast(List<Category> categories, Category other) {
+        List<Category> items = new ArrayList<>(categories);
+        items.add(other == null ? OTHER_CATEGORY : other);
+        return items;
+    }
+
+    private static void setVisibleItems(ComboBox<Category> categoryBox, List<Category> items) {
+        UPDATING_BOXES.add(categoryBox);
+        try {
+            categoryBox.setItems(FXCollections.observableArrayList(items));
+        } finally {
+            UPDATING_BOXES.remove(categoryBox);
+        }
+    }
+
+    private static void setEditorText(ComboBox<Category> categoryBox, String text) {
+        UPDATING_BOXES.add(categoryBox);
+        try {
+            categoryBox.getEditor().setText(text);
+        } finally {
+            UPDATING_BOXES.remove(categoryBox);
+        }
     }
 
     private static boolean categorySupportsType(Category category, String requestedType) {
