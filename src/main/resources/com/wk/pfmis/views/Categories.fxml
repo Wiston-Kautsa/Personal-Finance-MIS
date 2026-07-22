@@ -20,7 +20,9 @@
         <ComboBox fx:id="categoryTypeBox" prefWidth="160" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
     </GridPane>
     <HBox spacing="8">
-        <Button text="Add Category" onAction="#addCategory" styleClass="primary-button"/>
+        <Button fx:id="saveCategoryButton" text="Add Category" onAction="#saveCategory" styleClass="primary-button"/>
+        <Button text="Edit Selected" onAction="#editSelected" styleClass="secondary-button"/>
+        <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
         <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
     </HBox>
     <TableView fx:id="categoriesTable" prefHeight="240">

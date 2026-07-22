@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.RadioButton?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.SettingsController" styleClass="settings-scroll">
+    <content>
+        <VBox spacing="12" styleClass="settings-page">
+            <TitledPane text="Smart Analysis Settings" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <FlowPane hgap="18" vgap="8" prefWrapLength="820" styleClass="settings-mode-picker">
+                        <RadioButton fx:id="builtInLocalAiRadio" text="Built-in Local AI - Default" wrapText="true"/>
+                        <RadioButton fx:id="customAiProviderRadio" text="Configure My Own AI Provider" wrapText="true"/>
+                    </FlowPane>
+
+                    <VBox fx:id="builtInLocalAiPane" spacing="12" styleClass="settings-mode-panel">
+                        <FlowPane hgap="12" vgap="12" prefWrapLength="820">
+                            <VBox spacing="5" styleClass="settings-status-card">
+                                <Label text="Provider" wrapText="true" styleClass="field-label"/>
+                                <Label text="PFMIS Local AI" wrapText="true" styleClass="settings-status-title"/>
+                            </VBox>
+                            <VBox spacing="5" styleClass="settings-status-card">
+                                <Label text="Model" wrapText="true" styleClass="field-label"/>
+                                <Label text="Llama 3.2 3B Instruct" wrapText="true" styleClass="settings-status-title"/>
+                            </VBox>
+                            <VBox spacing="5" styleClass="settings-status-card">
+                                <Label text="Internet Required" wrapText="true" styleClass="field-label"/>
+                                <Label text="No" wrapText="true" styleClass="settings-status-title"/>
+                            </VBox>
+                            <VBox spacing="5" styleClass="settings-status-card">
+                                <Label text="API Key Required" wrapText="true" styleClass="field-label"/>
+                                <Label text="No" wrapText="true" styleClass="settings-status-title"/>
+                            </VBox>
+                            <VBox spacing="5" styleClass="settings-status-card-wide">
+                                <Label text="Status" wrapText="true" styleClass="field-label"/>
+                                <Label fx:id="localAiStatusLabel" text="Checking local provider..." wrapText="true" styleClass="settings-status-title"/>
+                            </VBox>
+                        </FlowPane>
+                        <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button text="Test AI" onAction="#testAiRegistration" minWidth="115" styleClass="primary-button"/>
+                            <Button text="Restart Local AI" onAction="#restartLocalAi" minWidth="155" styleClass="secondary-button"/>
+                            <Button text="Open AI Logs" onAction="#openAiLogs" minWidth="120" styleClass="secondary-button"/>
+                        </HBox>
+                    </VBox>
+
+                    <VBox fx:id="customAiProviderPane" spacing="12" styleClass="settings-mode-panel">
+                        <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                            <VBox spacing="6" styleClass="settings-field">
+                                <Label text="Provider Name" wrapText="true" styleClass="field-label"/>
+                                <ComboBox fx:id="providerBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            </VBox>
+                            <VBox spacing="6" styleClass="settings-field-wide">
+                                <Label text="Base URL" wrapText="true" styleClass="field-label"/>
+                                <TextField fx:id="endpointField" promptText="https://api.example.com/v1" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            </VBox>
+                            <VBox spacing="6" styleClass="settings-field">
+                                <Label text="Model Name" wrapText="true" styleClass="field-label"/>
+                                <ComboBox fx:id="modelBox" editable="true" promptText="Select or type model name" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            </VBox>
+                            <VBox spacing="6" styleClass="settings-field-wide">
+                                <Label text="API Key" wrapText="true" styleClass="field-label"/>
+                                <PasswordField fx:id="apiKeyField" promptText="Paste key, leave blank to keep saved key" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            </VBox>
+                        </FlowPane>
+                        <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button text="Test Connection" onAction="#testAiRegistration" minWidth="130" styleClass="secondary-button"/>
+                            <Button text="Save Configuration" onAction="#saveAiRegistration" minWidth="150" styleClass="primary-button"/>
+                            <Button text="Restore PFMIS Local AI" onAction="#restorePfmisLocalAi" minWidth="180" styleClass="secondary-button"/>
+                        </HBox>
+                    </VBox>
+
+                    <VBox spacing="5" styleClass="settings-status-box">
+                        <Label fx:id="registrationStatusLabel" text="Smart Analysis is not configured." wrapText="true" styleClass="settings-status-text"/>
+                        <Label fx:id="apiKeyStatusLabel" text="No API key saved" wrapText="true" styleClass="form-note"/>
+                    </VBox>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Profiles And Extensions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <FlowPane hgap="12" vgap="12" prefWrapLength="820">
+                        <VBox spacing="8" styleClass="ai-pack-card">
+                            <Label text="Profiles" wrapText="true" styleClass="table-title"/>
+                            <CheckBox fx:id="pfmisCopilotAgentBox" text="PFMIS Copilot" wrapText="true"/>
+                            <CheckBox fx:id="transactionCoachAgentBox" text="Transaction Coach" wrapText="true"/>
+                            <CheckBox fx:id="dataQualityGuardianAgentBox" text="Data Quality Guardian" wrapText="true"/>
+                            <CheckBox fx:id="goalCoachAgentBox" text="Goal Coach" wrapText="true"/>
+                            <CheckBox fx:id="budgetAnalystAgentBox" text="Budget Analyst" wrapText="true"/>
+                            <CheckBox fx:id="loanAdvisorAgentBox" text="Loan Review" wrapText="true"/>
+                            <CheckBox fx:id="projectAdvisorAgentBox" text="Project Spending Review" wrapText="true"/>
+                            <CheckBox fx:id="newUserAgentBox" text="New User Guide" wrapText="true"/>
+                            <CheckBox fx:id="backupGuardianAgentBox" text="Backup Guardian" wrapText="true"/>
+                        </VBox>
+                        <VBox spacing="8" styleClass="ai-pack-card">
+                            <Label text="Extensions" wrapText="true" styleClass="table-title"/>
+                            <CheckBox fx:id="openAiConnectorExtensionBox" text="OpenAI Connector" wrapText="true"/>
+                            <CheckBox fx:id="openRouterConnectorExtensionBox" text="OpenRouter Connector" wrapText="true"/>
+                            <CheckBox fx:id="geminiConnectorExtensionBox" text="Gemini Connector" wrapText="true"/>
+                            <CheckBox fx:id="claudeConnectorExtensionBox" text="Claude Connector" wrapText="true"/>
+                            <CheckBox fx:id="cohereConnectorExtensionBox" text="Cohere Connector" wrapText="true"/>
+                            <CheckBox fx:id="bundledLocalExtensionBox" text="Bundled Local Runtime" wrapText="true"/>
+                            <CheckBox fx:id="localAiExtensionBox" text="Local Provider Connector" wrapText="true"/>
+                            <CheckBox fx:id="csvInsightExtensionBox" text="CSV Insight Pack" wrapText="true"/>
+                            <CheckBox fx:id="receiptTemplateExtensionBox" text="Receipt Import Template" wrapText="true"/>
+                            <CheckBox fx:id="backupGuideExtensionBox" text="Backup Guide" wrapText="true"/>
+                        </VBox>
+                        <VBox spacing="8" styleClass="ai-pack-card-wide">
+                            <Label text="Starter Download" wrapText="true" styleClass="table-title"/>
+                            <Label text="Download selected profiles and extensions as local starter files for a new desktop user." wrapText="true" styleClass="goal-insight-text"/>
+                            <Button text="Download Selected" onAction="#downloadSelectedAiItems" minWidth="140" styleClass="primary-button"/>
+                            <Label fx:id="downloadStatusLabel" text="" wrapText="true" styleClass="settings-status-text"/>
+                        </VBox>
+                    </FlowPane>
+                </VBox>
+            </TitledPane>
+
+            <padding>
+                <Insets top="0" right="0" bottom="0" left="0"/>
+            </padding>
+        </VBox>
+    </content>
+</ScrollPane>

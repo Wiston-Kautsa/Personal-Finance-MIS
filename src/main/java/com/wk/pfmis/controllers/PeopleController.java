@@ -10,6 +10,8 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
 
+import java.util.List;
+
 public class PeopleController {
     @FXML private TextField fullNameField;
     @FXML private TextField phoneField;
@@ -27,6 +29,7 @@ public class PeopleController {
         nameColumn.setCellValueFactory(new PropertyValueFactory<>("fullName"));
         phoneColumn.setCellValueFactory(new PropertyValueFactory<>("phoneNumber"));
         relationshipColumn.setCellValueFactory(new PropertyValueFactory<>("relationship"));
+        configureContextMenu();
         refresh();
     }
 
@@ -65,17 +68,19 @@ public class PeopleController {
 
     @FXML
     private void giveMoney() {
-        Person selected = selectedPerson("give money");
+        Person selected = selectedOrEnteredPerson("lend money");
         if (selected != null) {
-            UiAlerts.info("Use Transactions with purpose MONEY_LENT or SUPPORT_GIVEN for " + selected.getFullName() + ".");
+            NavigationBus.requestTransaction("EXPENSE", "MONEY_LENT", selected.getFullName());
+            NavigationBus.showTransactionEntry("Lend Money");
         }
     }
 
     @FXML
     private void receiveMoney() {
-        Person selected = selectedPerson("receive money");
+        Person selected = selectedOrEnteredPerson("receive money");
         if (selected != null) {
-            UiAlerts.info("Use Transactions with purpose LENT_REPAID for " + selected.getFullName() + ".");
+            NavigationBus.requestTransaction("INCOME", "LENT_REPAID", selected.getFullName());
+            NavigationBus.showTransactionEntry("Receive Money");
         }
     }
 
@@ -93,5 +98,65 @@ public class PeopleController {
             UiAlerts.info("Select a person to " + action + ".");
         }
         return selected;
+    }
+
+    private void configureContextMenu() {
+        TableActions.installRowContextMenu(peopleTable, this::personMenuItems);
+    }
+
+    private List<javafx.scene.control.MenuItem> personMenuItems(Person person) {
+        return List.of(
+                TableActions.menuItem("Use Contact In Form", () -> populateForm(person)),
+                TableActions.menuItem("Lend Money", this::giveMoney),
+                TableActions.menuItem("Receive Repayment", this::receiveMoney),
+                TableActions.menuItem("View Ledger", this::viewLedger),
+                TableActions.menuItem("Print Statement", this::printStatement),
+                TableActions.separator(),
+                TableActions.copyRowItem(peopleTable, person),
+                TableActions.exportTableItem(peopleTable, "Loan Contacts"),
+                TableActions.printTableItem(peopleTable, "Loan Contacts"),
+                TableActions.refreshItem(this::refresh)
+        );
+    }
+
+    private void populateForm(Person person) {
+        if (person == null) {
+            return;
+        }
+        fullNameField.setText(person.getFullName());
+        phoneField.setText(person.getPhoneNumber() == null ? "" : person.getPhoneNumber());
+        relationshipField.setText(person.getRelationship() == null ? "" : person.getRelationship());
+        notesArea.setText(person.getNotes() == null ? "" : person.getNotes());
+    }
+
+    private Person selectedOrEnteredPerson(String action) {
+        Person selected = peopleTable.getSelectionModel().getSelectedItem();
+        if (selected != null) {
+            return selected;
+        }
+
+        String fullName = fullNameField.getText() == null ? "" : fullNameField.getText().trim();
+        if (fullName.isEmpty()) {
+            UiAlerts.info("Select a person or enter a name to " + action + ".");
+            return null;
+        }
+
+        return database.listPeople().stream()
+                .filter(person -> person.getFullName().equalsIgnoreCase(fullName))
+                .findFirst()
+                .orElseGet(() -> {
+                    database.addPerson(
+                            fullName,
+                            phoneField.getText() == null ? "" : phoneField.getText().trim(),
+                            relationshipField.getText() == null ? "" : relationshipField.getText().trim(),
+                            notesArea.getText() == null ? "" : notesArea.getText().trim()
+                    );
+                    refresh();
+                    DataRefreshBus.notifyDataChanged();
+                    return database.listPeople().stream()
+                            .filter(person -> person.getFullName().equalsIgnoreCase(fullName))
+                            .findFirst()
+                            .orElseThrow(() -> new IllegalStateException("Failed to create person"));
+                });
     }
 }

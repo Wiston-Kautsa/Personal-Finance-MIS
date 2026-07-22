@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.PaymentMethodsController" styleClass="settings-scroll">
+    <content>
+        <VBox spacing="12" styleClass="settings-page">
+            <TitledPane text="Payment Method Setup" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Method Name" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="methodNameField" promptText="Cash, Airtel Money, bank transfer" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Payment Type" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="methodTypeBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Provider" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="providerField" promptText="Bank, wallet, card issuer" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Default Account" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="defaultAccountField" promptText="Linked account" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Status" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="statusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Save Method" onAction="#saveMethod" minWidth="120" styleClass="primary-button"/>
+                        <Button text="Clear Form" onAction="#clearForm" minWidth="105" styleClass="secondary-button"/>
+                    </HBox>
+                    <Label fx:id="statusLabel" text="Payment methods screen ready." wrapText="true" styleClass="settings-status-text"/>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Registered Payment Methods" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="10" styleClass="settings-section">
+                    <TableView fx:id="paymentMethodsTable" prefHeight="250" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+                        <placeholder>
+                            <Label text="Saved payment methods will appear here." wrapText="true"/>
+                        </placeholder>
+                        <columns>
+                            <TableColumn fx:id="methodNameColumn" text="Method" prefWidth="170" minWidth="170"/>
+                            <TableColumn fx:id="methodTypeColumn" text="Type" prefWidth="130" minWidth="130"/>
+                            <TableColumn fx:id="providerColumn" text="Provider" prefWidth="170" minWidth="170"/>
+                            <TableColumn fx:id="defaultAccountColumn" text="Default Account" prefWidth="190" minWidth="190"/>
+                            <TableColumn fx:id="methodStatusColumn" text="Status" prefWidth="120" minWidth="120"/>
+                            <TableColumn fx:id="lastUsedColumn" text="Last Used" prefWidth="130" minWidth="130"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Transaction Defaults" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <FlowPane hgap="12" vgap="12" prefWrapLength="820">
+                        <VBox spacing="5" styleClass="settings-status-card-wide">
+                            <Label text="Income Default" wrapText="true" styleClass="field-label"/>
+                            <Label text="Choose the method normally used when money enters an account." wrapText="true" styleClass="settings-status-text"/>
+                        </VBox>
+                        <VBox spacing="5" styleClass="settings-status-card-wide">
+                            <Label text="Expense Default" wrapText="true" styleClass="field-label"/>
+                            <Label text="Choose the method normally used for payments and purchases." wrapText="true" styleClass="settings-status-text"/>
+                        </VBox>
+                        <VBox spacing="5" styleClass="settings-status-card-wide">
+                            <Label text="Transfer Default" wrapText="true" styleClass="field-label"/>
+                            <Label text="Use this for money moved between registered accounts." wrapText="true" styleClass="settings-status-text"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Save Defaults" onAction="#saveDefaults" minWidth="120" styleClass="secondary-button"/>
+                    </HBox>
+                </VBox>
+            </TitledPane>
+            <padding>
+                <Insets top="0" right="0" bottom="0" left="0"/>
+            </padding>
+        </VBox>
+    </content>
+</ScrollPane>

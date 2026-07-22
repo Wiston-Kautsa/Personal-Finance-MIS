@@ -10,17 +10,13 @@ import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.ContextMenu;
 import javafx.scene.control.DatePicker;
-import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.input.MouseButton;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -150,53 +146,29 @@ public class TransactionLedgerController {
 
     @FXML
     private void exportExcel() {
-        UiAlerts.info("Excel export is not implemented yet.");
+        TableActions.exportVisibleTableToCsv(transactionsTable, "Transaction Ledger");
     }
 
     @FXML
     private void printLedger() {
-        UiAlerts.info("Printing is not implemented yet.");
+        TableActions.printTable(transactionsTable, "Transaction Ledger");
     }
 
     private void configureTransactionRowActions() {
-        transactionsTable.setRowFactory(table -> {
-            TableRow<FinanceTransaction> row = new TableRow<>();
-            MenuItem viewItem = new MenuItem("View");
-            MenuItem editItem = new MenuItem("Edit");
-            MenuItem deleteItem = new MenuItem("Delete");
-            MenuItem refreshItem = new MenuItem("Refresh");
-            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem, refreshItem);
-
-            viewItem.setOnAction(event -> {
-                transactionsTable.getSelectionModel().select(row.getItem());
-                viewSelected();
-            });
-            editItem.setOnAction(event -> {
-                transactionsTable.getSelectionModel().select(row.getItem());
-                editSelected();
-            });
-            deleteItem.setOnAction(event -> {
-                transactionsTable.getSelectionModel().select(row.getItem());
-                deleteSelected();
-            });
-            refreshItem.setOnAction(event -> refresh());
-
-            row.setOnMouseClicked(event -> {
-                if (!row.isEmpty() && isLeftSingleClick(event)) {
-                    transactionsTable.getSelectionModel().select(row.getItem());
-                    menu.show(row, event.getScreenX() + 8, event.getScreenY() + 8);
-                    event.consume();
-                }
-            });
-
-            return row;
-        });
+        TableActions.installRowContextMenu(transactionsTable, this::transactionMenuItems);
     }
 
-    private boolean isLeftSingleClick(javafx.scene.input.MouseEvent event) {
-        return event.getButton() == MouseButton.PRIMARY
-                && event.getClickCount() == 1
-                && event.isStillSincePress();
+    private List<javafx.scene.control.MenuItem> transactionMenuItems(FinanceTransaction transaction) {
+        return List.of(
+                TableActions.menuItem("View Transaction", this::viewSelected),
+                TableActions.menuItem("Edit Transaction", this::editSelected),
+                TableActions.menuItem("Void Transaction", this::deleteSelected),
+                TableActions.separator(),
+                TableActions.copyRowItem(transactionsTable, transaction),
+                TableActions.exportTableItem(transactionsTable, "Transaction Ledger"),
+                TableActions.printTableItem(transactionsTable, "Transaction Ledger"),
+                TableActions.refreshItem(this::refresh)
+        );
     }
 
     private void viewSelected() {

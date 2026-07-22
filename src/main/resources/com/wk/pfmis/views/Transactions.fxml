@@ -27,9 +27,9 @@
             <DatePicker fx:id="dateFilterPicker" promptText="Date" prefWidth="150"/>
             <Button text="Apply Filters" onAction="#refresh" styleClass="primary-button"/>
             <Button text="Clear Filters" onAction="#clearFilters" styleClass="secondary-button"/>
+            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
             <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
             <Button text="Print" onAction="#printLedger" styleClass="secondary-button"/>
-            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
         </FlowPane>
     </VBox>
 

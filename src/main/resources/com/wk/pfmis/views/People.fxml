@@ -12,7 +12,7 @@
 
 <VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.PeopleController" styleClass="panel">
-    <Label text="People" styleClass="section-heading"/>
+    <Label text="Loan Contacts" styleClass="section-heading"/>
     <GridPane hgap="10" vgap="10">
         <Label text="Full Name" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
         <TextField fx:id="fullNameField" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
@@ -24,10 +24,10 @@
         <TextArea fx:id="notesArea" prefRowCount="2" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
     </GridPane>
     <HBox spacing="8">
-        <Button text="Add Person" onAction="#addPerson" styleClass="primary-button"/>
+        <Button text="Save Contact" onAction="#addPerson" styleClass="primary-button"/>
+        <Button text="Lend Money" onAction="#giveMoney" styleClass="secondary-button"/>
+        <Button text="Receive Repayment" onAction="#receiveMoney" styleClass="secondary-button"/>
         <Button text="View Ledger" onAction="#viewLedger" styleClass="secondary-button"/>
-        <Button text="Give Money" onAction="#giveMoney" styleClass="secondary-button"/>
-        <Button text="Receive Money" onAction="#receiveMoney" styleClass="secondary-button"/>
         <Button text="Print Statement" onAction="#printStatement" styleClass="secondary-button"/>
         <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
     </HBox>

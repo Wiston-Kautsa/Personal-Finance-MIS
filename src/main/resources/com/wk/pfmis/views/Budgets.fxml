@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.BudgetsController" styleClass="settings-scroll">
+    <content>
+        <VBox spacing="12" styleClass="settings-page">
+            <TitledPane text="Register Monthly Budget" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Budget Name" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="budgetNameField" promptText="e.g. Food budget" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Category" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="categoryBox" promptText="All expense categories" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Budget Month" wrapText="true" styleClass="field-label"/>
+                            <DatePicker fx:id="budgetMonthPicker" promptText="Choose month" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Limit Amount" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="amountLimitField" promptText="Amount in MWK" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Monthly Status" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="statusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Rollover" wrapText="true" styleClass="field-label"/>
+                            <CheckBox fx:id="rolloverBox" text="Carry unused amount forward later" wrapText="true"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="Notes" wrapText="true" styleClass="field-label"/>
+                            <TextArea fx:id="notesArea" promptText="Budget rule or reminder" wrapText="true" prefRowCount="2" maxWidth="Infinity"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Save Budget" onAction="#saveBudget" minWidth="120" styleClass="primary-button"/>
+                        <Button text="Update Selected" onAction="#updateBudget" minWidth="140" styleClass="secondary-button"/>
+                        <Button text="Delete Selected" onAction="#deleteBudget" minWidth="135" styleClass="secondary-button"/>
+                        <Button text="Clear" onAction="#clearForm" minWidth="90" styleClass="secondary-button"/>
+                    </HBox>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Household For Selected Month" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <Label fx:id="householdSummaryLabel" text="Household budget picture will appear here." wrapText="true" styleClass="settings-status-text"/>
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Person Name" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="personNameField" promptText="e.g. Mary Banda" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Relationship" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="relationshipField" promptText="e.g. Parent, child, tenant" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Presence" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="presenceStatusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Duration" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="durationScopeBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Start Date" wrapText="true" styleClass="field-label"/>
+                            <DatePicker fx:id="joinedDatePicker" promptText="Optional" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="End Date" wrapText="true" styleClass="field-label"/>
+                            <DatePicker fx:id="leftDatePicker" promptText="Optional" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Budget Share" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="shareWeightField" text="1" promptText="1, 0.5, or 0" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="Household Notes" wrapText="true" styleClass="field-label"/>
+                            <TextArea fx:id="householdNotesArea" promptText="Reason for joining, leaving, or partial-month share" wrapText="true" prefRowCount="2" maxWidth="Infinity"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Add Person" onAction="#saveHouseholdMember" minWidth="110" styleClass="primary-button"/>
+                        <Button text="Update Person" onAction="#updateHouseholdMember" minWidth="120" styleClass="secondary-button"/>
+                        <Button text="Remove From Month" onAction="#deleteHouseholdMember" minWidth="150" styleClass="secondary-button"/>
+                        <Button text="Clear Person" onAction="#clearHouseholdForm" minWidth="110" styleClass="secondary-button"/>
+                    </HBox>
+                    <TableView fx:id="householdTable" prefHeight="230" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+                        <columns>
+                            <TableColumn fx:id="householdNameColumn" text="Person" prefWidth="155"/>
+                            <TableColumn fx:id="householdRelationshipColumn" text="Relationship" prefWidth="130"/>
+                            <TableColumn fx:id="householdStatusColumn" text="Status" prefWidth="105"/>
+                            <TableColumn fx:id="householdScopeColumn" text="Duration" prefWidth="125"/>
+                            <TableColumn fx:id="householdJoinedColumn" text="Joined" prefWidth="105"/>
+                            <TableColumn fx:id="householdLeftColumn" text="Left" prefWidth="105"/>
+                            <TableColumn fx:id="householdShareColumn" text="Share" prefWidth="80"/>
+                            <TableColumn fx:id="householdNotesColumn" text="Notes" prefWidth="260"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Budget Tracking" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="10" styleClass="settings-section">
+                    <Label fx:id="summaryLabel" text="Budget summary will appear here." wrapText="true" styleClass="settings-status-text"/>
+                    <FlowPane hgap="12" vgap="12" prefWrapLength="820">
+                        <VBox spacing="5" styleClass="settings-status-card">
+                            <Label text="Planned" wrapText="true" styleClass="field-label"/>
+                            <Label fx:id="plannedCountLabel" text="0" wrapText="true" styleClass="settings-status-title"/>
+                        </VBox>
+                        <VBox spacing="5" styleClass="settings-status-card">
+                            <Label text="On Budget" wrapText="true" styleClass="field-label"/>
+                            <Label fx:id="onBudgetCountLabel" text="0" wrapText="true" styleClass="settings-status-title"/>
+                        </VBox>
+                        <VBox spacing="5" styleClass="settings-status-card">
+                            <Label text="Fulfilled" wrapText="true" styleClass="field-label"/>
+                            <Label fx:id="fulfilledCountLabel" text="0" wrapText="true" styleClass="settings-status-title"/>
+                        </VBox>
+                        <VBox spacing="5" styleClass="settings-status-card">
+                            <Label text="Not Met" wrapText="true" styleClass="field-label"/>
+                            <Label fx:id="notMetCountLabel" text="0" wrapText="true" styleClass="settings-status-title"/>
+                        </VBox>
+                    </FlowPane>
+                    <TableView fx:id="budgetTable" prefHeight="330" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+                        <columns>
+                            <TableColumn fx:id="nameColumn" text="Budget" prefWidth="190" minWidth="190"/>
+                            <TableColumn fx:id="categoryColumn" text="Category" prefWidth="185" minWidth="185"/>
+                            <TableColumn fx:id="monthColumn" text="Month" prefWidth="115" minWidth="115"/>
+                            <TableColumn fx:id="limitColumn" text="Limit" prefWidth="135" minWidth="135"/>
+                            <TableColumn fx:id="spentColumn" text="Spent" prefWidth="135" minWidth="135"/>
+                            <TableColumn fx:id="remainingColumn" text="Remaining" prefWidth="150" minWidth="150"/>
+                            <TableColumn fx:id="usedColumn" text="Used" prefWidth="100" minWidth="100"/>
+                            <TableColumn fx:id="peopleColumn" text="People" prefWidth="100" minWidth="100"/>
+                            <TableColumn fx:id="limitPerPersonColumn" text="Limit / Person" prefWidth="160" minWidth="160"/>
+                            <TableColumn fx:id="spentPerPersonColumn" text="Spent / Person" prefWidth="160" minWidth="160"/>
+                            <TableColumn fx:id="planStatusColumn" text="Plan Status" prefWidth="150" minWidth="150"/>
+                            <TableColumn fx:id="monthResultColumn" text="Month Result" prefWidth="160" minWidth="160"/>
+                            <TableColumn fx:id="actionColumn" text="Action" prefWidth="460" minWidth="460"/>
+                        </columns>
+                    </TableView>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Refresh Budgets" onAction="#refresh" minWidth="130" styleClass="secondary-button"/>
+                    </HBox>
+                </VBox>
+            </TitledPane>
+
+            <padding>
+                <Insets top="0" right="0" bottom="0" left="0"/>
+            </padding>
+        </VBox>
+    </content>
+</ScrollPane>

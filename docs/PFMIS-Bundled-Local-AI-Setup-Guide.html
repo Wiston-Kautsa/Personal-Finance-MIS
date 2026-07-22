@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>PFMIS Bundled Local AI Setup Guide</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 18mm;
+        }
+
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            color: #172033;
+            line-height: 1.45;
+            font-size: 11.5pt;
+        }
+
+        h1 {
+            font-size: 24pt;
+            margin: 0 0 4mm 0;
+        }
+
+        h2 {
+            font-size: 15pt;
+            margin: 9mm 0 3mm 0;
+            border-bottom: 1px solid #d8e0ea;
+            padding-bottom: 2mm;
+        }
+
+        h3 {
+            font-size: 12.5pt;
+            margin: 5mm 0 2mm 0;
+        }
+
+        p {
+            margin: 0 0 3mm 0;
+        }
+
+        ul, ol {
+            margin-top: 2mm;
+            margin-bottom: 4mm;
+        }
+
+        li {
+            margin-bottom: 1.5mm;
+        }
+
+        code, pre {
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        pre {
+            background: #f4f7fb;
+            border: 1px solid #d8e0ea;
+            border-radius: 6px;
+            padding: 3mm;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .note {
+            background: #eef7f3;
+            border: 1px solid #cbe5da;
+            border-radius: 6px;
+            padding: 3mm;
+            margin: 4mm 0;
+        }
+
+        .warning {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            border-radius: 6px;
+            padding: 3mm;
+            margin: 4mm 0;
+        }
+
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .checklist li::before {
+            content: "[ ] ";
+            font-family: Consolas, "Courier New", monospace;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<h1>PFMIS Bundled Local AI Setup Guide</h1>
+<p><strong>Use this after the large downloads finish.</strong></p>
+<p>This guide explains how to place <code>llama-server.exe</code> and the <code>.gguf</code> model where PFMIS expects them.</p>
+
+<div class="note">
+    <p><strong>PFMIS project folder:</strong></p>
+    <pre>D:\School\JAVA\MyFin_MIS</pre>
+</div>
+
+<h2>1. Files You Need</h2>
+<ul class="checklist">
+    <li>llama.cpp Windows files, including <code>llama-server.exe</code></li>
+    <li>One GGUF model file, for example <code>Llama-3.2-3B-Instruct-Q4_K_M.gguf</code></li>
+    <li>Licence files for llama.cpp and the model</li>
+</ul>
+
+<h2>2. Copy llama-server.exe</h2>
+<p>Open the downloaded llama.cpp ZIP file. Copy <code>llama-server.exe</code> into this folder:</p>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\</pre>
+
+<p>If the llama.cpp ZIP contains DLL files, copy those DLL files into the same folder as <code>llama-server.exe</code>.</p>
+
+<h3>Expected result</h3>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\llama-server.exe</pre>
+
+<h2>3. Copy The Model</h2>
+<p>Find the downloaded model file. It must end with <code>.gguf</code>.</p>
+<p>Rename the model file to:</p>
+<pre>pfmis-model.gguf</pre>
+
+<p>Copy it into this folder:</p>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\</pre>
+
+<h3>Expected result</h3>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\pfmis-model.gguf</pre>
+
+<div class="warning">
+    <p><strong>Important:</strong> Make sure the final filename is exactly <code>pfmis-model.gguf</code>. It should not become <code>pfmis-model.gguf.gguf</code> or <code>pfmis-model.gguf.txt</code>.</p>
+</div>
+
+<h2>4. Confirm The Folder Structure</h2>
+<p>After copying, the folders should look like this:</p>
+<pre>D:\School\JAVA\MyFin_MIS
+|-- local-ai
+    |-- runtime
+    |   |-- llama-server.exe
+    |   |-- other DLL files, if included
+    |-- models
+    |   |-- pfmis-model.gguf
+    |-- agents
+    |   |-- pfmis-finance-agent.json
+    |-- licenses
+        |-- llama.cpp licence
+        |-- model licence</pre>
+
+<h2>5. Start PFMIS</h2>
+<ol>
+    <li>Open PFMIS.</li>
+    <li>Go to <strong>Settings</strong>.</li>
+    <li>Open <strong>AI Registration</strong>.</li>
+    <li>Select <strong>Bundled Local AI</strong>.</li>
+    <li>Make sure <strong>Enable AI recommendations</strong> is checked.</li>
+    <li>Click <strong>Save AI</strong>.</li>
+    <li>Click <strong>Test AI</strong>.</li>
+</ol>
+
+<p>PFMIS will automatically use:</p>
+<pre>Provider: Bundled Local AI
+Endpoint: http://127.0.0.1:11435/v1
+Model: pfmis-local
+API key: Not required</pre>
+
+<h2>6. What Happens When You Test AI</h2>
+<p>PFMIS will start this command internally:</p>
+<pre>local-ai\runtime\llama-server.exe --model local-ai\models\pfmis-model.gguf --alias pfmis-local --host 127.0.0.1 --port 11435 --ctx-size 4096</pre>
+
+<p>The first start can be slow because the model is large. Wait until the status says the local AI is ready.</p>
+
+<h2>7. Use AI In Goals</h2>
+<ol>
+    <li>Go to <strong>Goals</strong>.</li>
+    <li>Register or enter a goal.</li>
+    <li>Click <strong>Generate AI Advice</strong>.</li>
+    <li>The AI will fill Achievement Plan, Spending Insight, Where To Adjust, and Advice.</li>
+</ol>
+
+<h2>8. Troubleshooting</h2>
+
+<h3>PFMIS says the runtime is missing</h3>
+<p>Check that this file exists:</p>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\llama-server.exe</pre>
+
+<h3>PFMIS says the model is missing</h3>
+<p>Check that this file exists:</p>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\pfmis-model.gguf</pre>
+
+<h3>The model takes long to load</h3>
+<p>This is normal for large files. A smaller quantized model such as Q4 is better for older computers.</p>
+
+<h3>The computer becomes slow</h3>
+<p>Use a smaller model. For example, use a 1B or 3B GGUF model before trying an 8B model.</p>
+
+<h3>Antivirus blocks llama-server.exe</h3>
+<p>Allow the file only if it came from the official llama.cpp release and you trust the download source.</p>
+
+<h3>Port 11435 is already in use</h3>
+<p>Close any old local AI process, then open PFMIS again.</p>
+
+<h2>9. Licence Reminder</h2>
+<p>Before distributing PFMIS with the model, confirm that the selected model licence allows redistribution, offline installation, and your intended use.</p>
+<p>The llama.cpp runtime licence and the model licence are separate. Include both licence notices in:</p>
+<pre>D:\School\JAVA\MyFin_MIS\local-ai\licenses\</pre>
+
+<h2>Final Checklist</h2>
+<ul class="checklist">
+    <li><code>llama-server.exe</code> is inside <code>local-ai\runtime</code></li>
+    <li>Required DLL files are inside <code>local-ai\runtime</code></li>
+    <li>The model is renamed to <code>pfmis-model.gguf</code></li>
+    <li>The model is inside <code>local-ai\models</code></li>
+    <li>PFMIS provider is set to <strong>Bundled Local AI</strong></li>
+    <li><strong>Enable AI recommendations</strong> is checked</li>
+    <li><strong>Test AI</strong> passes</li>
+</ul>
+</body>
+</html>

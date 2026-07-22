@@ -8,6 +8,8 @@ public class FinanceTransaction {
     private final String transactionStatus;
     private final String categoryName;
     private final String projectName;
+    private final Integer projectActivityId;
+    private final String projectActivityName;
     private final String personName;
     private final double amount;
     private final String transactionDate;
@@ -30,6 +32,42 @@ public class FinanceTransaction {
             String paymentMethod,
             String referenceNumber
     ) {
+        this(
+                id,
+                accountName,
+                transactionType,
+                transactionPurpose,
+                transactionStatus,
+                categoryName,
+                projectName,
+                personName,
+                amount,
+                transactionDate,
+                description,
+                paymentMethod,
+                referenceNumber,
+                null,
+                null
+        );
+    }
+
+    public FinanceTransaction(
+            int id,
+            String accountName,
+            String transactionType,
+            String transactionPurpose,
+            String transactionStatus,
+            String categoryName,
+            String projectName,
+            String personName,
+            double amount,
+            String transactionDate,
+            String description,
+            String paymentMethod,
+            String referenceNumber,
+            Integer projectActivityId,
+            String projectActivityName
+    ) {
         this.id = id;
         this.accountName = accountName;
         this.transactionType = transactionType;
@@ -37,6 +75,8 @@ public class FinanceTransaction {
         this.transactionStatus = transactionStatus;
         this.categoryName = categoryName;
         this.projectName = projectName;
+        this.projectActivityId = projectActivityId;
+        this.projectActivityName = projectActivityName;
         this.personName = personName;
         this.amount = amount;
         this.transactionDate = transactionDate;
@@ -71,6 +111,14 @@ public class FinanceTransaction {
 
     public String getProjectName() {
         return projectName;
+    }
+
+    public Integer getProjectActivityId() {
+        return projectActivityId;
+    }
+
+    public String getProjectActivityName() {
+        return projectActivityName;
     }
 
     public String getPersonName() {

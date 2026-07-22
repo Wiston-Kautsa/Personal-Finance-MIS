@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="18" styleClass="project-list-page" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ProjectListController">
+    <VBox spacing="12" maxWidth="Infinity" styleClass="project-list-section" VBox.vgrow="ALWAYS">
+        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="project-section-header">
+            <Label text="Project List" styleClass="project-section-title"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <TextField fx:id="projectSearchField" promptText="Search projects..." prefWidth="420" styleClass="project-list-search"/>
+            <ComboBox fx:id="statusFilterBox" prefWidth="190" styleClass="project-list-filter"/>
+        </HBox>
+        <TableView fx:id="projectsTable" prefHeight="280" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+            <columns>
+                <TableColumn fx:id="nameColumn" text="Project" prefWidth="220"/>
+                <TableColumn fx:id="plannedColumn" text="Planned Budget" prefWidth="150"/>
+                <TableColumn fx:id="spentColumn" text="Spent" prefWidth="140"/>
+                <TableColumn fx:id="remainingColumn" text="Remaining" prefWidth="150"/>
+                <TableColumn fx:id="startDateColumn" text="Start Date" prefWidth="120"/>
+                <TableColumn fx:id="endDateColumn" text="End Date" prefWidth="120"/>
+                <TableColumn fx:id="statusColumn" text="Status" prefWidth="110"/>
+            </columns>
+        </TableView>
+    </VBox>
+
+    <VBox spacing="12" maxWidth="Infinity" styleClass="project-list-section" VBox.vgrow="ALWAYS">
+        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="project-section-header">
+            <Label text="Activity List" styleClass="project-section-title"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label text="Project" styleClass="project-filter-label"/>
+            <ComboBox fx:id="activityProjectFilterBox" promptText="Choose project" prefWidth="380" maxWidth="Infinity" styleClass="project-list-filter"/>
+            <ComboBox fx:id="activityStatusFilterBox" prefWidth="210" styleClass="project-list-filter"/>
+        </HBox>
+        <TableView fx:id="activitiesTable" prefHeight="240" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+            <columns>
+                <TableColumn fx:id="activityDateColumn" text="Date" prefWidth="110"/>
+                <TableColumn fx:id="activityProjectColumn" text="Project" prefWidth="190"/>
+                <TableColumn fx:id="activityNameColumn" text="Activity" prefWidth="240"/>
+                <TableColumn fx:id="activityStatusColumn" text="Status" prefWidth="120"/>
+                <TableColumn fx:id="activityNotesColumn" text="Notes / Reason" prefWidth="460"/>
+            </columns>
+        </TableView>
+    </VBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

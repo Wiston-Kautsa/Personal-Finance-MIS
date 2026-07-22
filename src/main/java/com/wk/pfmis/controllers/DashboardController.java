@@ -1,10 +1,13 @@
 package com.wk.pfmis.controllers;
 
+import com.wk.pfmis.MainApp;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.models.ReportRow;
+import com.wk.pfmis.models.SystemUser;
+import com.wk.pfmis.security.UserSession;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -16,8 +19,10 @@ import javafx.scene.chart.LineChart;
 import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextInputControl;
@@ -58,6 +63,10 @@ public class DashboardController {
     @FXML private Label activeGoalsLabel;
     @FXML private Label moneyGivenLabel;
     @FXML private Label sectionTitleLabel;
+    @FXML private Label signedInUserLabel;
+    @FXML private Label activeWorkspaceLabel;
+    @FXML private Button userManagementSidebarButton;
+    @FXML private Button returnWorkspaceButton;
     @FXML private VBox dashboardSummaryPane;
     @FXML private StackPane contentPane;
     @FXML private LineChart<String, Number> cashFlowChart;
@@ -73,24 +82,37 @@ public class DashboardController {
     @FXML private TableColumn<FinanceTransaction, String> dashboardCategoryColumn;
     @FXML private TableColumn<FinanceTransaction, Double> dashboardAmountColumn;
     @FXML private VBox alertsBox;
-
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private static final DateTimeFormatter MONTH_LABEL_FORMAT = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH);
+    private String currentViewFileName;
+    private String currentViewTitle = "Dashboard";
+    private boolean currentViewIsDashboard = true;
+    private String previousViewFileName;
+    private String previousViewTitle = "Dashboard";
+    private boolean previousViewIsDashboard = true;
+    private boolean navigatingBack;
 
     @FXML
     public void initialize() {
+        configureUserSecurityHeader();
         DataRefreshBus.addListener(this::refreshDashboard);
         NavigationBus.onAccountHistoryRequested(this::showAccountHistory);
+        NavigationBus.onBackRequested(this::goBack);
         NavigationBus.onReportTitleChanged(reportType -> sectionTitleLabel.setText(reportTitle(reportType)));
+        NavigationBus.onTransactionEntryRequested(title -> loadView("Expenses.fxml", title));
         configureDashboardTable();
         showHome();
     }
 
     @FXML
     private void showHome() {
+        rememberCurrentView();
         sectionTitleLabel.setText("Dashboard");
         setDashboardSummaryVisible(true);
         contentPane.getChildren().clear();
+        currentViewFileName = null;
+        currentViewTitle = "Dashboard";
+        currentViewIsDashboard = true;
         refreshDashboard();
     }
 
@@ -102,6 +124,35 @@ public class DashboardController {
     @FXML
     private void showDashboardRecentTransactions() {
         loadView("Transactions.fxml", "Recent Transactions");
+    }
+
+    @FXML
+    private void showAiCenter() {
+        loadView("AiCenter.fxml", "Smart Analysis");
+    }
+
+    @FXML
+    private void showMyAccount() {
+        loadView("MyAccount.fxml", "My Account");
+    }
+
+    @FXML
+    private void showUserManagement() {
+        if (!UserSession.isSuperAdmin()) {
+            UiAlerts.info("Only a super administrator can manage users.");
+            return;
+        }
+        loadView("UserManagement.fxml", "User Management");
+    }
+
+    @FXML
+    private void returnToMyWorkspace() {
+        MainApp.returnToOwnWorkspace();
+    }
+
+    @FXML
+    private void logout() {
+        MainApp.logout();
     }
 
     @FXML
@@ -167,7 +218,7 @@ public class DashboardController {
 
     @FXML
     private void showProjects() {
-        loadView("Projects.fxml", "Projects");
+        loadView("Projects.fxml", "Add Project");
     }
 
     @FXML
@@ -176,41 +227,53 @@ public class DashboardController {
     }
 
     @FXML
-    private void showProjectActivities() {
-        loadView("ProjectActivities.fxml", "Add Project Activity");
+    private void showProjectList() {
+        loadView("ProjectList.fxml", "Project List");
     }
 
     @FXML
-    private void showProjectStatus() {
-        loadView("ProjectStatus.fxml", "Project Status");
+    private void showProjectActivities() {
+        loadView("ProjectActivities.fxml", "Register Project Activity");
     }
 
     @FXML
     private void showPeople() {
-        loadView("People.fxml", "People");
+        loadView("People.fxml", "Loan Contacts");
     }
 
     @FXML
-    private void showGiveMoney() {
-        loadView("People.fxml", "Give Money");
-        UiAlerts.info("Select a person, then use Give Money. The transaction can be recorded with MONEY_LENT or SUPPORT_GIVEN.");
+    private void showLendMoney() {
+        showLoanTransaction("Lend Money", "EXPENSE", "MONEY_LENT");
+    }
+
+    @FXML
+    private void showBorrowMoney() {
+        showLoanTransaction("Borrow Money", "INCOME", "MONEY_BORROWED");
     }
 
     @FXML
     private void showReceiveRepayment() {
-        loadView("People.fxml", "Receive Repayment");
-        UiAlerts.info("Select a person, then use Receive Money. The transaction can be recorded with LENT_REPAID.");
+        showLoanTransaction("Receive Repayment", "INCOME", "LENT_REPAID");
     }
 
     @FXML
-    private void showPersonLedger() {
-        loadView("People.fxml", "Person Ledger");
-        UiAlerts.info("Select a person, then use View Ledger.");
+    private void showRepayBorrowedMoney() {
+        showLoanTransaction("Repay Borrowed Money", "EXPENSE", "BORROWED_REPAID");
+    }
+
+    @FXML
+    private void showLoanLedger() {
+        showReport("Loan Report", "Loan Ledger");
     }
 
     @FXML
     private void showGoals() {
-        loadView("Goals.fxml", "Goals");
+        loadView("Goals.fxml", "Add Goal");
+    }
+
+    @FXML
+    private void showGoalProgress() {
+        loadView("Goals.fxml", "Goal Progress");
     }
 
     @FXML
@@ -219,8 +282,28 @@ public class DashboardController {
     }
 
     @FXML
+    private void showGoalProject() {
+        loadView("GoalProject.fxml", "Turn Goal Into Project");
+    }
+
+    @FXML
+    private void showGoalSteps() {
+        loadView("GoalSteps.fxml", "Goal Steps");
+    }
+
+    @FXML
     private void showBudgets() {
-        loadPlaceholder("Budgets", "Budget tracking is part of the wireframe but does not have a database table or screen yet.");
+        loadView("Budgets.fxml", "Budgets");
+    }
+
+    @FXML
+    private void showSettings() {
+        showAdministration();
+    }
+
+    @FXML
+    private void showAdministration() {
+        loadView("Administration.fxml", "Administration");
     }
 
     @FXML
@@ -245,22 +328,50 @@ public class DashboardController {
 
     @FXML
     private void showLendingReport() {
-        showReport("Lending Report", "Lending Report");
+        showReport("Loan Report", "Loan Report");
     }
 
     @FXML
     private void showPaymentMethods() {
-        loadPlaceholder("Payment Methods", "Payment methods are currently collected from transactions. A dedicated settings screen can be added later.");
+        loadView("PaymentMethods.fxml", "Payment Methods");
     }
 
     @FXML
     private void showCurrencies() {
-        loadPlaceholder("Currencies", "Currencies are currently configured per account. A dedicated currency settings screen can be added later.");
+        loadView("Currencies.fxml", "Currencies");
     }
 
     @FXML
     private void showBackupRestore() {
-        loadPlaceholder("Backup / Restore", "Backup and restore is not implemented yet. Copy pfmis.db manually before making major changes.");
+        showAdministration();
+    }
+
+    @FXML
+    private void showAuditLogs() {
+        loadView("AuditLogs.fxml", "Audit Logs");
+    }
+
+    @FXML
+    private void showSyncCenter() {
+        loadView("SyncCenter.fxml", "Sync Center");
+    }
+
+    @FXML
+    private void showMaintenance() {
+        loadView("Maintenance.fxml", "Maintenance");
+    }
+
+    private void configureUserSecurityHeader() {
+        SystemUser signedIn = UserSession.getAuthenticatedUser();
+        SystemUser workspace = UserSession.getWorkspaceUser();
+        signedInUserLabel.setText("Signed in: " + signedIn.getDisplayName() + " · " + signedIn.getRoleDisplay());
+        activeWorkspaceLabel.setText("Workspace: " + workspace.getDisplayName() + " (" + workspace.getUsername() + ")");
+        boolean superAdmin = signedIn.isSuperAdmin();
+        userManagementSidebarButton.setVisible(superAdmin);
+        userManagementSidebarButton.setManaged(superAdmin);
+        boolean anotherWorkspace = superAdmin && !UserSession.isViewingOwnWorkspace();
+        returnWorkspaceButton.setVisible(anotherWorkspace);
+        returnWorkspaceButton.setManaged(anotherWorkspace);
     }
 
     @FXML
@@ -300,6 +411,35 @@ public class DashboardController {
         dashboardAccountColumn.setCellValueFactory(new PropertyValueFactory<>("accountName"));
         dashboardCategoryColumn.setCellValueFactory(new PropertyValueFactory<>("categoryName"));
         dashboardAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        TableActions.configureScrollableTable(dashboardTransactionsTable);
+        TableActions.installRowContextMenu(dashboardTransactionsTable, this::dashboardTransactionMenuItems);
+    }
+
+    private List<javafx.scene.control.MenuItem> dashboardTransactionMenuItems(FinanceTransaction transaction) {
+        return List.of(
+                TableActions.menuItem("View Transaction", () -> viewDashboardTransaction(transaction)),
+                TableActions.menuItem("Open Full Ledger", this::showTransactions),
+                TableActions.separator(),
+                TableActions.copyRowItem(dashboardTransactionsTable, transaction),
+                TableActions.exportTableItem(dashboardTransactionsTable, "Dashboard Recent Transactions"),
+                TableActions.printTableItem(dashboardTransactionsTable, "Dashboard Recent Transactions"),
+                TableActions.refreshItem(this::refreshDashboard)
+        );
+    }
+
+    private void viewDashboardTransaction(FinanceTransaction transaction) {
+        if (transaction == null) {
+            return;
+        }
+        UiAlerts.info(
+                "Date: " + transaction.getTransactionDate()
+                        + "\nType: " + transaction.getTransactionType()
+                        + "\nAccount: " + transaction.getAccountName()
+                        + "\nCategory: " + labelOrDefault(transaction.getCategoryName(), "-")
+                        + "\nAmount: " + MoneyUtil.mwk(transaction.getAmount())
+                        + "\nStatus: " + labelOrDefault(transaction.getTransactionStatus(), "-")
+                        + "\nDescription: " + labelOrDefault(transaction.getDescription(), "-")
+        );
     }
 
     private void refreshDashboardCharts(DashboardStats stats, List<FinanceTransaction> transactions) {
@@ -341,7 +481,7 @@ public class DashboardController {
         rows.add(new ReportRow("Available Balance", Math.max(stats.getTotalBalance(), 0)));
         rows.add(new ReportRow("Expenses", Math.max(stats.getMonthlyExpenses(), 0)));
         rows.add(new ReportRow("Savings", Math.max(stats.getMonthlySavings(), 0)));
-        rows.add(new ReportRow("Lent Out", Math.max(stats.getMoneyGivenOut(), 0)));
+        rows.add(new ReportRow("Loans Receivable", Math.max(stats.getMoneyGivenOut(), 0)));
         return rows;
     }
 
@@ -404,7 +544,9 @@ public class DashboardController {
             }
         }
         if (stats.getMoneyGivenOut() > 0) {
-            alertsBox.getChildren().add(alertLabel(MoneyUtil.mwk(stats.getMoneyGivenOut()) + " is still lent out."));
+            alertsBox.getChildren().add(alertLabel(MoneyUtil.mwk(stats.getMoneyGivenOut()) + " is still owed to you."));
+        } else if (stats.getMoneyGivenOut() < 0) {
+            alertsBox.getChildren().add(alertLabel(MoneyUtil.mwk(Math.abs(stats.getMoneyGivenOut())) + " is still owed by you."));
         }
         if (alertsBox.getChildren().isEmpty()) {
             alertsBox.getChildren().add(alertLabel("No urgent reminders."));
@@ -447,17 +589,58 @@ public class DashboardController {
         return reportType == null || reportType.isBlank() ? "Reports" : reportType;
     }
 
+    private void showLoanTransaction(String title, String transactionType, String purpose) {
+        NavigationBus.requestTransaction(transactionType, purpose, null);
+        loadView("Expenses.fxml", title);
+    }
+
     private void loadView(String fileName, String title) {
         try {
+            rememberCurrentView();
             sectionTitleLabel.setText(title);
             setDashboardSummaryVisible(false);
             Parent view = FXMLLoader.load(getClass().getResource("/com/wk/pfmis/views/" + fileName));
-            makeDynamic(view);
-            contentPane.getChildren().setAll(view);
+            Node displayView = unwrapScrollPane(view);
+            makeDynamic(displayView);
+            contentPane.getChildren().setAll(displayView);
+            currentViewFileName = fileName;
+            currentViewTitle = title;
+            currentViewIsDashboard = false;
             refreshDashboard();
         } catch (IOException exception) {
             UiAlerts.error("Failed to open " + title, exception);
         }
+    }
+
+    private void rememberCurrentView() {
+        if (navigatingBack) {
+            return;
+        }
+        previousViewFileName = currentViewFileName;
+        previousViewTitle = currentViewTitle;
+        previousViewIsDashboard = currentViewIsDashboard;
+    }
+
+    private void goBack() {
+        navigatingBack = true;
+        try {
+            if (previousViewIsDashboard || previousViewFileName == null) {
+                showHome();
+            } else {
+                loadView(previousViewFileName, previousViewTitle);
+            }
+        } finally {
+            navigatingBack = false;
+        }
+    }
+
+    private Node unwrapScrollPane(Parent view) {
+        if (view instanceof ScrollPane scrollPane && scrollPane.getContent() != null) {
+            Node content = scrollPane.getContent();
+            scrollPane.setContent(null);
+            return content;
+        }
+        return view;
     }
 
     private void loadPlaceholder(String title, String message) {
@@ -492,8 +675,7 @@ public class DashboardController {
         }
 
         if (node instanceof TableView<?> tableView) {
-            tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-            VBox.setVgrow(tableView, Priority.ALWAYS);
+            TableActions.configureScrollableTable(tableView);
         }
 
         if (node instanceof GridPane gridPane) {
@@ -544,6 +726,7 @@ public class DashboardController {
 
     private boolean isLeafControl(Node node) {
         return node instanceof Button
+                || node instanceof CheckBox
                 || node instanceof Label
                 || node instanceof TextInputControl
                 || node instanceof ComboBoxBase<?>;

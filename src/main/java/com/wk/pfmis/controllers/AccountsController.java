@@ -8,18 +8,15 @@ import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.TableRow;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.input.MouseButton;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class AccountsController {
@@ -213,48 +210,26 @@ public class AccountsController {
     }
 
     private void configureAccountContextMenu() {
-        accountsTable.setRowFactory(table -> {
-            TableRow<Account> row = new TableRow<>();
-            MenuItem editItem = new MenuItem("Edit");
-            MenuItem activateItem = new MenuItem("Activate");
-            MenuItem deactivateItem = new MenuItem("Deactivate");
-            MenuItem deleteItem = new MenuItem("Delete");
-            MenuItem refreshItem = new MenuItem("Refresh");
-
-            editItem.setOnAction(event -> {
-                accountsTable.getSelectionModel().select(row.getItem());
-                editAccount(row.getItem());
-            });
-            activateItem.setOnAction(event -> {
-                accountsTable.getSelectionModel().select(row.getItem());
-                updateStatus(row.getItem(), true);
-            });
-            deactivateItem.setOnAction(event -> {
-                accountsTable.getSelectionModel().select(row.getItem());
-                updateStatus(row.getItem(), false);
-            });
-            deleteItem.setOnAction(event -> {
-                accountsTable.getSelectionModel().select(row.getItem());
-                deleteAccount();
-            });
-            refreshItem.setOnAction(event -> refresh());
-
-            ContextMenu menu = new ContextMenu(editItem, activateItem, deactivateItem, deleteItem, refreshItem);
-            row.setOnMouseClicked(event -> {
-                if (!row.isEmpty() && isLeftSingleClick(event)) {
-                    accountsTable.getSelectionModel().select(row.getItem());
-                    menu.show(row, event.getScreenX() + 8, event.getScreenY() + 8);
-                    event.consume();
-                }
-            });
-            return row;
-        });
+        TableActions.installRowContextMenu(accountsTable, this::accountMenuItems);
     }
 
-    private boolean isLeftSingleClick(javafx.scene.input.MouseEvent event) {
-        return event.getButton() == MouseButton.PRIMARY
-                && event.getClickCount() == 1
-                && event.isStillSincePress();
+    private List<javafx.scene.control.MenuItem> accountMenuItems(Account account) {
+        List<javafx.scene.control.MenuItem> items = new ArrayList<>();
+        items.add(TableActions.menuItem("View History", () -> NavigationBus.showAccountHistory(account.getId())));
+        items.add(TableActions.menuItem("Edit Account", () -> editAccount(account)));
+        if ("ACTIVE".equals(account.getStatus())) {
+            items.add(TableActions.menuItem("Deactivate Account", () -> updateStatus(account, false)));
+        } else {
+            items.add(TableActions.menuItem("Activate Account", () -> updateStatus(account, true)));
+        }
+        items.add(TableActions.separator());
+        items.add(TableActions.copyRowItem(accountsTable, account));
+        items.add(TableActions.exportTableItem(accountsTable, "Accounts"));
+        items.add(TableActions.printTableItem(accountsTable, "Accounts"));
+        items.add(TableActions.refreshItem(this::refresh));
+        items.add(TableActions.separator());
+        items.add(TableActions.menuItem("Delete Account", this::deleteAccount));
+        return items;
     }
 
     private void editAccount(Account account) {

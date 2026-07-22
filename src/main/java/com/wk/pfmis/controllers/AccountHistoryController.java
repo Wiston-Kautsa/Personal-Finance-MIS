@@ -80,6 +80,7 @@ public class AccountHistoryController {
 
         filteredAccounts = new FilteredList<>(allAccounts);
         accountsTable.setItems(filteredAccounts);
+        configureContextMenus();
         accountsTable.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> refreshSelectedAccount());
         accountNameFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyAccountFilters());
         providerFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyAccountFilters());
@@ -124,6 +125,70 @@ public class AccountHistoryController {
         refreshSelectedAccountTransactionDates();
         refreshHistoryYearOptions();
         applyHistoryFilters();
+    }
+
+    private void configureContextMenus() {
+        TableActions.installRowContextMenu(accountsTable, this::accountMenuItems);
+        TableActions.installRowContextMenu(historyTable, this::historyMenuItems);
+    }
+
+    private List<javafx.scene.control.MenuItem> accountMenuItems(Account account) {
+        return List.of(
+                TableActions.menuItem("View Account Details", () -> viewAccountDetails(account)),
+                TableActions.menuItem("Refresh Account History", this::refreshSelectedAccount),
+                TableActions.separator(),
+                TableActions.copyRowItem(accountsTable, account),
+                TableActions.exportTableItem(accountsTable, "Account History Accounts"),
+                TableActions.printTableItem(accountsTable, "Account History Accounts"),
+                TableActions.refreshItem(this::refresh)
+        );
+    }
+
+    private List<javafx.scene.control.MenuItem> historyMenuItems(FinanceTransaction transaction) {
+        return List.of(
+                TableActions.menuItem("View Transaction Details", () -> viewTransactionDetails(transaction)),
+                TableActions.separator(),
+                TableActions.copyRowItem(historyTable, transaction),
+                TableActions.exportTableItem(historyTable, selectedAccountTitle()),
+                TableActions.printTableItem(historyTable, selectedAccountTitle()),
+                TableActions.refreshItem(this::refreshSelectedAccount)
+        );
+    }
+
+    private void viewAccountDetails(Account account) {
+        if (account == null) {
+            return;
+        }
+        UiAlerts.info(
+                "Account: " + account.getAccountName()
+                        + "\nType: " + account.getAccountType()
+                        + "\nProvider: " + blankToDash(account.getBankProviderName())
+                        + "\nAccount Number: " + blankToDash(account.getAccountNumber())
+                        + "\nCurrency: " + blankToDash(account.getCurrency())
+                        + "\nBalance: " + MoneyUtil.mwk(account.getCurrentBalance())
+                        + "\nStatus: " + blankToDash(account.getStatus())
+        );
+    }
+
+    private void viewTransactionDetails(FinanceTransaction transaction) {
+        if (transaction == null) {
+            return;
+        }
+        UiAlerts.info(
+                "Date: " + transaction.getTransactionDate()
+                        + "\nType: " + transaction.getTransactionType()
+                        + "\nCategory/Project: " + displayCategory(transaction)
+                        + "\nAmount: " + MoneyUtil.mwk(transaction.getAmount())
+                        + "\nMethod: " + blankToDash(transaction.getPaymentMethod())
+                        + "\nReference: " + blankToDash(transaction.getReferenceNumber())
+                        + "\nStatus: " + displayStatus(transaction.getTransactionStatus())
+                        + "\nDescription: " + blankToDash(transaction.getDescription())
+        );
+    }
+
+    private String selectedAccountTitle() {
+        Account account = accountsTable.getSelectionModel().getSelectedItem();
+        return account == null ? "Account Transactions" : account.getAccountName() + " Transactions";
     }
 
     private Integer selectedAccountId() {
@@ -365,6 +430,12 @@ public class AccountHistoryController {
     private String displayStatus(String status) {
         if ("OPEN".equals(status)) {
             return "Pending";
+        }
+        if ("PARTIALLY_CLEARED".equals(status)) {
+            return "Partially Cleared";
+        }
+        if ("CLEARED".equals(status)) {
+            return "Cleared";
         }
         if ("CANCELLED".equals(status)) {
             return "Cancelled";

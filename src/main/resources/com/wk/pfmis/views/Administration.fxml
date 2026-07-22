@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AdministrationController"
+      spacing="14" maxWidth="Infinity" styleClass="page-section administration-page">
+    <children>
+        <VBox spacing="7" styleClass="panel admin-hero">
+            <Label text="System Operations" styleClass="section-heading"/>
+            <Label fx:id="administrationStatusLabel" text="One administration workspace for settings, backup and maintenance." wrapText="true" styleClass="form-note"/>
+        </VBox>
+
+        <FlowPane hgap="12" vgap="12" prefWrapLength="920" styleClass="admin-overview-strip">
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Smart Analysis" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminSettingsStatusLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Latest Backup" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminBackupStatusLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Database" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminMaintenanceStatusLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Records" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminRecordsStatusLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+        </FlowPane>
+
+        <TabPane tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="admin-tab-pane">
+            <tabs>
+                <Tab text="Settings">
+                    <content>
+                        <fx:include source="Settings.fxml"/>
+                    </content>
+                </Tab>
+                <Tab text="Backup &amp; Restore">
+                    <content>
+                        <fx:include source="BackupRestore.fxml"/>
+                    </content>
+                </Tab>
+                <Tab text="Maintenance Check">
+                    <content>
+                        <fx:include source="Maintenance.fxml"/>
+                    </content>
+                </Tab>
+            </tabs>
+        </TabPane>
+    </children>
+    <padding>
+        <Insets top="4" right="4" bottom="12" left="4"/>
+    </padding>
+</VBox>

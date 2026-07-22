@@ -23,95 +23,120 @@
             fx:controller="com.wk.pfmis.controllers.DashboardController"
             styleClass="app-root">
     <left>
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="sidebar-scroll">
-            <VBox spacing="6" styleClass="sidebar">
-                <Label text="PFMIS" styleClass="app-brand"/>
-                <Label text="Personal Finance MIS" styleClass="app-subtitle"/>
+        <VBox styleClass="sidebar-frame">
+            <ScrollPane fitToWidth="true" hbarPolicy="NEVER" minHeight="0" styleClass="sidebar-scroll" VBox.vgrow="ALWAYS">
+                <VBox spacing="6" styleClass="sidebar">
+                    <Label text="PFMIS" styleClass="app-brand"/>
+                    <Label text="Personal Finance MIS" styleClass="app-subtitle"/>
 
-                <Button text="Dashboard" maxWidth="Infinity" onAction="#showHome" styleClass="nav-button"/>
+                    <Button text="Dashboard" maxWidth="Infinity" onAction="#showHome" styleClass="nav-button"/>
+                    <Button text="Smart Analysis" maxWidth="Infinity" onAction="#showAiCenter" styleClass="nav-button"/>
+                    <Button text="Accounts" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-button"/>
 
-                <Button text="Accounts" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-button"/>
+                    <TitledPane text="Income" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Add Income" maxWidth="Infinity" onAction="#showIncome" styleClass="nav-sub-button"/>
+                            <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Income" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Add Income" maxWidth="Infinity" onAction="#showIncome" styleClass="nav-sub-button"/>
-                        <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Record Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
+                            <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Record Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
-                        <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Transaction Ledger" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Transfer Money" maxWidth="Infinity" onAction="#showTransferMoney" styleClass="nav-sub-button"/>
+                            <Button text="View Ledger" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Transaction Ledger" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="View Ledger" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
-                        <Button text="Transfer Money" maxWidth="Infinity" onAction="#showTransferMoney" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Loans" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Lend Money" maxWidth="Infinity" onAction="#showLendMoney" styleClass="nav-sub-button"/>
+                            <Button text="Borrow Money" maxWidth="Infinity" onAction="#showBorrowMoney" styleClass="nav-sub-button"/>
+                            <Button text="Receive Repayment" maxWidth="Infinity" onAction="#showReceiveRepayment" styleClass="nav-sub-button"/>
+                            <Button text="Repay Borrowed Money" maxWidth="Infinity" onAction="#showRepayBorrowedMoney" styleClass="nav-sub-button"/>
+                            <Button text="Loan Ledger" maxWidth="Infinity" onAction="#showLoanLedger" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Projects" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Project List" maxWidth="Infinity" onAction="#showProjects" styleClass="nav-sub-button"/>
-                        <Button text="Add Project" maxWidth="Infinity" onAction="#showProjects" styleClass="nav-sub-button"/>
-                        <Button text="Add Project Activity" maxWidth="Infinity" onAction="#showProjectActivities" styleClass="nav-sub-button"/>
-                        <Button text="Project Details" maxWidth="Infinity" onAction="#showViewProjects" styleClass="nav-sub-button"/>
-                        <Button text="Project Status" maxWidth="Infinity" onAction="#showProjectStatus" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Goals" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Add Goal" maxWidth="Infinity" onAction="#showGoals" styleClass="nav-sub-button"/>
+                            <Button text="Turn Goal Into Project" maxWidth="Infinity" onAction="#showGoalProject" styleClass="nav-sub-button"/>
+                            <Button text="Goal Steps" maxWidth="Infinity" onAction="#showGoalSteps" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="People &amp; Lending" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="People List" maxWidth="Infinity" onAction="#showPeople" styleClass="nav-sub-button"/>
-                        <Button text="Give Money" maxWidth="Infinity" onAction="#showGiveMoney" styleClass="nav-sub-button"/>
-                        <Button text="Receive Repayment" maxWidth="Infinity" onAction="#showReceiveRepayment" styleClass="nav-sub-button"/>
-                        <Button text="Person Ledger" maxWidth="Infinity" onAction="#showPersonLedger" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Budgets" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Manage Budgets" maxWidth="Infinity" onAction="#showBudgets" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Goals" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Add Goal" maxWidth="Infinity" onAction="#showGoals" styleClass="nav-sub-button"/>
-                        <Button text="Goal Progress" maxWidth="Infinity" onAction="#showGoals" styleClass="nav-sub-button"/>
-                        <Button text="Goal Status" maxWidth="Infinity" onAction="#showGoalStatus" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Projects" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Add Project" maxWidth="Infinity" onAction="#showProjects" styleClass="nav-sub-button"/>
+                            <Button text="Register Project Activity" maxWidth="Infinity" onAction="#showProjectActivities" styleClass="nav-sub-button"/>
+                            <Button text="Project Details" maxWidth="Infinity" onAction="#showViewProjects" styleClass="nav-sub-button"/>
+                            <Button text="Project List" maxWidth="Infinity" onAction="#showProjectList" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Reports" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Monthly Summary" maxWidth="Infinity" onAction="#showMonthlySummaryReport" styleClass="nav-sub-button"/>
-                        <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
-                        <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
-                        <Button text="Project Report" maxWidth="Infinity" onAction="#showProjectReport" styleClass="nav-sub-button"/>
-                        <Button text="Account Report" maxWidth="Infinity" onAction="#showAccountReport" styleClass="nav-sub-button"/>
-                        <Button text="Lending Report" maxWidth="Infinity" onAction="#showLendingReport" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
+                    <TitledPane text="Reports" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Monthly Summary" maxWidth="Infinity" onAction="#showMonthlySummaryReport" styleClass="nav-sub-button"/>
+                            <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
+                            <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
+                            <Button text="Project Report" maxWidth="Infinity" onAction="#showProjectReport" styleClass="nav-sub-button"/>
+                            <Button text="Account Report" maxWidth="Infinity" onAction="#showAccountReport" styleClass="nav-sub-button"/>
+                            <Button text="Loan Report" maxWidth="Infinity" onAction="#showLendingReport" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
-                <TitledPane text="Settings" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                    <VBox spacing="5">
-                        <Button text="Categories" maxWidth="Infinity" onAction="#showCategories" styleClass="nav-sub-button"/>
-                        <Button text="Payment Methods" maxWidth="Infinity" onAction="#showPaymentMethods" styleClass="nav-sub-button"/>
-                        <Button text="Currencies" maxWidth="Infinity" onAction="#showCurrencies" styleClass="nav-sub-button"/>
-                        <Button text="Backup / Restore" maxWidth="Infinity" onAction="#showBackupRestore" styleClass="nav-sub-button"/>
-                    </VBox>
-                </TitledPane>
-                <Button text="Refresh Dashboard" maxWidth="Infinity" onAction="#refreshDashboard" styleClass="refresh-pane-button"/>
-            </VBox>
-        </ScrollPane>
+                    <TitledPane text="Data And Records" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Audit Logs" maxWidth="Infinity" onAction="#showAuditLogs" styleClass="nav-sub-button"/>
+                            <Button text="Sync Center" maxWidth="Infinity" onAction="#showSyncCenter" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
+
+                    <TitledPane text="Setup" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Administration" maxWidth="Infinity" onAction="#showAdministration" styleClass="nav-sub-button"/>
+                            <Button fx:id="userManagementSidebarButton" text="User Management" maxWidth="Infinity" onAction="#showUserManagement" styleClass="nav-sub-button"/>
+                            <Button text="Categories" maxWidth="Infinity" onAction="#showCategories" styleClass="nav-sub-button"/>
+                            <Button text="Payment Methods" maxWidth="Infinity" onAction="#showPaymentMethods" styleClass="nav-sub-button"/>
+                            <Button text="Currencies" maxWidth="Infinity" onAction="#showCurrencies" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
+                </VBox>
+            </ScrollPane>
+        </VBox>
     </left>
     <center>
-        <VBox spacing="18" styleClass="workspace">
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="sectionTitleLabel" text="Dashboard" styleClass="page-title"/>
-            </HBox>
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="ALWAYS" styleClass="workspace-scroll">
+            <VBox spacing="18" styleClass="workspace">
+                <HBox spacing="12" alignment="CENTER_LEFT" styleClass="user-session-bar">
+                    <VBox spacing="2" HBox.hgrow="ALWAYS">
+                        <Label fx:id="sectionTitleLabel" text="Dashboard" styleClass="page-title"/>
+                        <HBox spacing="12">
+                            <Label fx:id="signedInUserLabel" text="Signed in" styleClass="session-user-label"/>
+                            <Label fx:id="activeWorkspaceLabel" text="Workspace" styleClass="workspace-security-label"/>
+                        </HBox>
+                    </VBox>
+                    <Button text="My Account" onAction="#showMyAccount" styleClass="secondary-button"/>
+                    <Button fx:id="returnWorkspaceButton" text="My Workspace" onAction="#returnToMyWorkspace" styleClass="secondary-button"/>
+                    <Button text="Sign Out" onAction="#logout" styleClass="danger-button"/>
+                </HBox>
 
-            <VBox fx:id="dashboardSummaryPane" spacing="14" maxWidth="Infinity">
-                <TitledPane text="Financial Summary Cards" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                    <GridPane hgap="12" vgap="12">
+                <VBox fx:id="dashboardSummaryPane" spacing="14" maxWidth="Infinity">
+                    <TitledPane text="Financial Summary Cards" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                        <GridPane hgap="12" vgap="12">
                         <VBox styleClass="metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
                             <Label text="Total Balance" styleClass="metric-title"/>
                             <Label fx:id="totalBalanceLabel" text="MWK 0.00" styleClass="metric-value"/>
@@ -148,13 +173,13 @@
                             <Label text="View goals" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="3" GridPane.rowIndex="1">
-                            <Label text="Money Given / Lent Out" styleClass="metric-title"/>
+                            <Label text="Net Loan Position" styleClass="metric-title"/>
                             <Label fx:id="moneyGivenLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label text="View lending ledger" styleClass="metric-note"/>
+                            <Label text="View loan ledger" styleClass="metric-note"/>
                         </VBox>
-                    </GridPane>
-                </TitledPane>
-                <GridPane hgap="14" vgap="14">
+                        </GridPane>
+                    </TitledPane>
+                    <GridPane hgap="14" vgap="14">
                     <TitledPane text="Cash Flow Line Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="0">
                         <LineChart fx:id="cashFlowChart" legendVisible="true" animated="false" createSymbols="true" prefHeight="260">
                             <xAxis>
@@ -201,11 +226,12 @@
                     <TitledPane text="Alerts / Reminders" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="1" GridPane.rowIndex="3">
                         <VBox fx:id="alertsBox" spacing="8"/>
                     </TitledPane>
-                </GridPane>
-            </VBox>
+                    </GridPane>
+                </VBox>
 
-            <StackPane fx:id="contentPane" maxWidth="Infinity" maxHeight="Infinity" VBox.vgrow="ALWAYS"/>
-        </VBox>
+                <StackPane fx:id="contentPane" maxWidth="Infinity" maxHeight="Infinity" VBox.vgrow="ALWAYS"/>
+            </VBox>
+        </ScrollPane>
     </center>
     <padding>
         <Insets top="0" right="0" bottom="0" left="0"/>

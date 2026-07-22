@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="aiCenterRoot" xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AiCenterController"
+      spacing="14" maxWidth="Infinity" styleClass="page-section smart-analysis-page">
+    <children>
+        <VBox spacing="10" styleClass="panel ai-center-hero">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Button text="Back" onAction="#goBack" minWidth="78" styleClass="secondary-button"/>
+                <VBox spacing="5" HBox.hgrow="ALWAYS">
+                    <Label text="Smart Analysis" styleClass="section-heading"/>
+                    <Label text="Professional system-wide analysis for transactions, planning, projects, loans, reports, controls, and logs." wrapText="true" styleClass="form-note"/>
+                </VBox>
+                <VBox spacing="4" styleClass="analysis-status-box">
+                    <Label text="Provider" styleClass="field-label"/>
+                    <Label fx:id="providerStatusLabel" text="Connection status" wrapText="true" styleClass="ai-provider-status"/>
+                </VBox>
+            </HBox>
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label fx:id="privacyStatusLabel" text="Privacy mode" wrapText="true" styleClass="ai-privacy-note" HBox.hgrow="ALWAYS"/>
+            </HBox>
+        </VBox>
+
+        <TitledPane text="Analysis Command Center" expanded="true" collapsible="false" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10" styleClass="analysis-section">
+                <Label fx:id="financialOverviewLabel" text="No financial overview yet." wrapText="true" styleClass="ai-overview-text"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="860">
+                    <Button text="Deep System Analysis" onAction="#runDeepSystemAnalysis" styleClass="primary-button"/>
+                    <Button text="Reports Analysis" onAction="#runReportsAnalysis" styleClass="primary-button"/>
+                    <Button text="Budget And Household" onAction="#reviewBudgetPlan" styleClass="secondary-button"/>
+                    <Button text="Goal To Project Path" onAction="#reviewGoalReadiness" styleClass="secondary-button"/>
+                    <Button text="Loan And Repayment Review" onAction="#reviewLoanPosition" styleClass="secondary-button"/>
+                    <Button text="Data Quality Review" onAction="#reviewDataQuality" styleClass="secondary-button"/>
+                    <Button text="7-Day Action Plan" onAction="#buildActionPlan" styleClass="primary-button"/>
+                    <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+                </FlowPane>
+            </VBox>
+        </TitledPane>
+
+        <FlowPane hgap="14" vgap="14" prefWrapLength="900" maxWidth="Infinity">
+            <VBox spacing="8" styleClass="analysis-scope-card">
+                <Label text="System" styleClass="table-title"/>
+                <Label fx:id="systemCoverageLabel" text="Loading system coverage..." wrapText="true" styleClass="goal-insight-text"/>
+            </VBox>
+            <VBox spacing="8" styleClass="analysis-scope-card">
+                <Label text="Reports" styleClass="table-title"/>
+                <Label fx:id="reportCoverageLabel" text="Loading report coverage..." wrapText="true" styleClass="goal-insight-text"/>
+            </VBox>
+            <VBox spacing="8" styleClass="analysis-scope-card">
+                <Label text="Checks" styleClass="table-title"/>
+                <VBox fx:id="actionQueueBox" spacing="7"/>
+            </VBox>
+        </FlowPane>
+
+        <TitledPane text="Analysis Result" expanded="true" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10" styleClass="analysis-section">
+                <Label fx:id="requestStatusLabel" text="Ready." wrapText="true" styleClass="form-note"/>
+                <TextArea fx:id="answerArea" editable="false" wrapText="true" prefRowCount="12" promptText="Run an analysis to see findings, risks, recommendations, and next actions." styleClass="ai-answer-area"/>
+            </VBox>
+        </TitledPane>
+
+        <TitledPane text="Ask Follow-Up Question" expanded="false" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10" styleClass="analysis-section">
+                <TextArea fx:id="questionArea" promptText="Ask about budgets, reports, goals, projects, loans, missing records, risks, or what to do next..." prefRowCount="3" wrapText="true"/>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Button text="Ask" onAction="#askQuestion" styleClass="primary-button"/>
+                    <Button text="Clear" onAction="#clearConversation" styleClass="secondary-button"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                </HBox>
+            </VBox>
+        </TitledPane>
+    </children>
+    <padding>
+        <Insets top="4" right="4" bottom="12" left="4"/>
+    </padding>
+</VBox>

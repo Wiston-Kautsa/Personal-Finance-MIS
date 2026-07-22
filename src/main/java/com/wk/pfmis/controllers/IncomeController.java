@@ -8,21 +8,18 @@ import com.wk.pfmis.utils.MoneyUtil;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
-import javafx.scene.control.ContextMenu;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.input.MouseButton;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.List;
 
 public class IncomeController {
     @FXML private Label todayIncomeLabel;
@@ -62,7 +59,7 @@ public class IncomeController {
         paymentMethodColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getPaymentMethod())));
         referenceColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getReferenceNumber())));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("incomeStatusLabel"));
-        recentIncomeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableActions.configureScrollableTable(recentIncomeTable);
         CategoryInput.configure(categoryBox);
         configureIncomeRowActions();
         refresh();
@@ -205,44 +202,20 @@ public class IncomeController {
     }
 
     private void configureIncomeRowActions() {
-        recentIncomeTable.setRowFactory(table -> {
-            TableRow<FinanceTransaction> row = new TableRow<>();
-            MenuItem viewItem = new MenuItem("View");
-            MenuItem editItem = new MenuItem("Edit");
-            MenuItem deleteItem = new MenuItem("Delete");
-            MenuItem refreshItem = new MenuItem("Refresh");
-            ContextMenu menu = new ContextMenu(viewItem, editItem, deleteItem, refreshItem);
-
-            viewItem.setOnAction(event -> {
-                recentIncomeTable.getSelectionModel().select(row.getItem());
-                viewIncome();
-            });
-            editItem.setOnAction(event -> {
-                recentIncomeTable.getSelectionModel().select(row.getItem());
-                editIncome();
-            });
-            deleteItem.setOnAction(event -> {
-                recentIncomeTable.getSelectionModel().select(row.getItem());
-                deleteIncome();
-            });
-            refreshItem.setOnAction(event -> refresh());
-
-            row.setOnMouseClicked(event -> {
-                if (!row.isEmpty() && isLeftSingleClick(event)) {
-                    recentIncomeTable.getSelectionModel().select(row.getItem());
-                    menu.show(row, event.getScreenX() + 8, event.getScreenY() + 8);
-                    event.consume();
-                }
-            });
-
-            return row;
-        });
+        TableActions.installRowContextMenu(recentIncomeTable, this::incomeMenuItems);
     }
 
-    private boolean isLeftSingleClick(javafx.scene.input.MouseEvent event) {
-        return event.getButton() == MouseButton.PRIMARY
-                && event.getClickCount() == 1
-                && event.isStillSincePress();
+    private List<javafx.scene.control.MenuItem> incomeMenuItems(FinanceTransaction income) {
+        return List.of(
+                TableActions.menuItem("View Income", this::viewIncome),
+                TableActions.menuItem("Edit Income", this::editIncome),
+                TableActions.menuItem("Void Income", this::deleteIncome),
+                TableActions.separator(),
+                TableActions.copyRowItem(recentIncomeTable, income),
+                TableActions.exportTableItem(recentIncomeTable, "Recent Income"),
+                TableActions.printTableItem(recentIncomeTable, "Recent Income"),
+                TableActions.refreshItem(this::refresh)
+        );
     }
 
     private FinanceTransaction selectedIncome(String action) {

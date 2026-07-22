@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.SyncCenterController"
+      spacing="12" maxWidth="Infinity" styleClass="page-section data-record-page">
+    <children>
+        <VBox spacing="6" styleClass="panel data-record-hero">
+            <Label text="Sync Center" styleClass="section-heading"/>
+            <Label text="Local record readiness, backup snapshot, and future external sync controls." wrapText="true" styleClass="form-note"/>
+        </VBox>
+
+        <FlowPane hgap="12" vgap="12" prefWrapLength="900">
+            <VBox spacing="6" styleClass="sync-status-card-wide">
+                <Label text="Data Store" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="dataStoreLabel" text="Local data store" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="sync-status-card-wide">
+                <Label text="Latest Snapshot" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="backupStateLabel" text="Latest daily backup" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="sync-status-card">
+                <Label text="Mode" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="syncModeLabel" text="Sync mode" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="sync-status-card">
+                <Label text="Status" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="syncStatusLabel" text="Status" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+        </FlowPane>
+
+        <TitledPane text="Record Sync Actions" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10" styleClass="settings-section">
+                <Label fx:id="syncDetailLabel" text="Run sync check before moving data." wrapText="true" styleClass="settings-status-text"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="880" styleClass="account-form-actions">
+                    <Button text="Run Sync Check" onAction="#runSyncCheck" minWidth="130" styleClass="primary-button"/>
+                    <Button text="Open Data Folder" onAction="#openDataFolder" minWidth="145" styleClass="secondary-button"/>
+                </FlowPane>
+            </VBox>
+        </TitledPane>
+    </children>
+    <padding>
+        <Insets top="4" right="4" bottom="12" left="4"/>
+    </padding>
+</VBox>

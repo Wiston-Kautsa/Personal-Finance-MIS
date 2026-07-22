@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.LoginController"
+            prefWidth="980" prefHeight="690"
+            styleClass="auth-root">
+    <left>
+        <VBox prefWidth="400" spacing="22" alignment="CENTER_LEFT" styleClass="auth-hero">
+            <VBox spacing="5">
+                <Label text="PFMIS" styleClass="auth-brand"/>
+                <Label text="Private finance workspaces" styleClass="auth-title-light"/>
+            </VBox>
+            <Label text="Every account opens a separate financial database. The Super Administrator can manage users and open active workspaces when administration is required." wrapText="true" styleClass="auth-copy-light"/>
+            <VBox spacing="10" styleClass="auth-feature-box">
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="01" styleClass="auth-step-index"/>
+                    <Label text="User-isolated databases" styleClass="auth-feature"/>
+                </HBox>
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="02" styleClass="auth-step-index"/>
+                    <Label text="Email-based password resets" styleClass="auth-feature"/>
+                </HBox>
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="03" styleClass="auth-step-index"/>
+                    <Label text="Super Administrator controls" styleClass="auth-feature"/>
+                </HBox>
+            </VBox>
+            <Region VBox.vgrow="ALWAYS"/>
+            <VBox spacing="4" styleClass="auth-mail-box">
+                <Label text="Default system email" styleClass="auth-mini-label"/>
+                <Label fx:id="systemEmailLabel" text="System email" wrapText="true" styleClass="auth-mail-label"/>
+            </VBox>
+            <padding><Insets top="48" right="42" bottom="42" left="42"/></padding>
+        </VBox>
+    </left>
+    <center>
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="auth-form-scroll">
+            <VBox spacing="18" alignment="CENTER" styleClass="auth-content">
+                <VBox maxWidth="460" spacing="14" alignment="CENTER_LEFT" styleClass="auth-card">
+                    <VBox spacing="4">
+                        <Label text="Sign in" styleClass="auth-form-title"/>
+                        <Label fx:id="setupHintLabel" wrapText="true" styleClass="auth-hint"/>
+                    </VBox>
+
+                    <VBox spacing="6">
+                        <Label text="Username or email" styleClass="form-label"/>
+                        <TextField fx:id="usernameField" promptText="name@example.com" styleClass="auth-field"/>
+                    </VBox>
+
+                    <VBox spacing="6">
+                        <Label text="Password" styleClass="form-label"/>
+                        <PasswordField fx:id="passwordField" promptText="Enter password" styleClass="auth-field"/>
+                    </VBox>
+
+                    <Label fx:id="messageLabel" minHeight="22" wrapText="true"/>
+
+                    <Button text="Sign In" maxWidth="Infinity" onAction="#signIn" styleClass="primary-button auth-primary-button"/>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="registerButton" text="Create First Administrator" onAction="#createAccount" styleClass="secondary-button"/>
+                    </HBox>
+
+                    <Separator/>
+
+                    <VBox fx:id="resetPanel" spacing="10" styleClass="auth-reset-panel">
+                        <VBox spacing="3">
+                            <Label text="Password reset" styleClass="auth-section-title"/>
+                            <Label text="Enter a registered account email or username. PFMIS will email a temporary password through the configured system email account." wrapText="true" styleClass="auth-footnote"/>
+                        </VBox>
+                        <VBox spacing="6">
+                            <Label text="Reset account" styleClass="form-label"/>
+                            <TextField fx:id="resetEmailField" promptText="Registered email or username" styleClass="auth-field"/>
+                        </VBox>
+                        <Button text="Send Reset Email" maxWidth="Infinity" onAction="#resetPasswordByEmail" styleClass="secondary-button auth-reset-button"/>
+                    </VBox>
+                    <padding><Insets top="28" right="32" bottom="28" left="32"/></padding>
+                </VBox>
+            </VBox>
+        </ScrollPane>
+    </center>
+</BorderPane>

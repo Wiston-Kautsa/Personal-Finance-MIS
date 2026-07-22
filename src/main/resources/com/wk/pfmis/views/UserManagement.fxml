@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.UserManagementController"
+      spacing="14" styleClass="content-view">
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <VBox spacing="3">
+            <Label text="User Management" styleClass="view-title"/>
+            <Label text="Each user has a separate financial database. Open a user's workspace only when administrative access is required." wrapText="true" styleClass="muted-label"/>
+            <Label fx:id="workspaceLabel" styleClass="workspace-security-label"/>
+        </VBox>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button text="Back Up User Registry" onAction="#backupUserRegistry" styleClass="secondary-button"/>
+        <Button text="My Workspace" onAction="#returnToMyWorkspace" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <TitledPane text="Registered Users" expanded="true" collapsible="false" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <TableView fx:id="usersTable" prefHeight="310" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="idColumn" text="ID" prefWidth="55"/>
+                    <TableColumn fx:id="fullNameColumn" text="Full Name" prefWidth="180"/>
+                    <TableColumn fx:id="usernameColumn" text="Username" prefWidth="120"/>
+                    <TableColumn fx:id="emailColumn" text="Email" prefWidth="190"/>
+                    <TableColumn fx:id="roleColumn" text="Role" prefWidth="150"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="90"/>
+                    <TableColumn fx:id="lastLoginColumn" text="Last Login" prefWidth="150"/>
+                </columns>
+            </TableView>
+            <HBox spacing="10">
+                <Button text="Open Selected Workspace" onAction="#openSelectedWorkspace" styleClass="primary-button"/>
+                <Button text="Activate" onAction="#activateSelected" styleClass="secondary-button"/>
+                <Button text="Deactivate" onAction="#deactivateSelected" styleClass="danger-button"/>
+                <Button text="Email Password Reset" onAction="#resetSelectedPassword" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Create a User" expanded="true" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
+        <GridPane hgap="12" vgap="12">
+            <VBox spacing="5" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                <Label text="Full name *" styleClass="form-label"/>
+                <TextField fx:id="fullNameField" promptText="Full name" prefWidth="230"/>
+            </VBox>
+            <VBox spacing="5" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                <Label text="Username *" styleClass="form-label"/>
+                <TextField fx:id="usernameField" promptText="Username" prefWidth="200"/>
+            </VBox>
+            <VBox spacing="5" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                <Label text="Email" styleClass="form-label"/>
+                <TextField fx:id="emailField" promptText="Optional" prefWidth="230"/>
+            </VBox>
+            <VBox spacing="5" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                <Label text="Temporary password *" styleClass="form-label"/>
+                <PasswordField fx:id="temporaryPasswordField" promptText="Temporary password" prefWidth="230"/>
+            </VBox>
+            <VBox spacing="5" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                <Label text="Role" styleClass="form-label"/>
+                <ComboBox fx:id="roleCombo" prefWidth="200"/>
+            </VBox>
+            <Button text="Create User" onAction="#createUser" styleClass="primary-button" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+        </GridPane>
+    </TitledPane>
+    <TitledPane text="Authentication and Workspace Access Log" expanded="true" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
+        <TableView fx:id="authenticationTable" prefHeight="230">
+            <columns>
+                <TableColumn fx:id="authDateColumn" text="Date" prefWidth="150"/>
+                <TableColumn fx:id="authUsernameColumn" text="User" prefWidth="120"/>
+                <TableColumn fx:id="authEventColumn" text="Event" prefWidth="145"/>
+                <TableColumn fx:id="authResultColumn" text="Result" prefWidth="90"/>
+                <TableColumn fx:id="authDetailsColumn" text="Details" prefWidth="380"/>
+            </columns>
+        </TableView>
+    </TitledPane>
+    <Label fx:id="messageLabel" wrapText="true" styleClass="status-message"/>
+    <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+</VBox>

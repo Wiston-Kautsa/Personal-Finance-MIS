@@ -14,6 +14,7 @@ import javafx.scene.layout.VBox;
 
 import java.time.Year;
 import java.time.format.TextStyle;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.IntStream;
@@ -49,7 +50,7 @@ public class ReportsController {
     public void initialize() {
         reportTypeBox.setItems(FXCollections.observableArrayList(
                 "Monthly Summary", "Income Report", "Expense Report", "Project Report",
-                "Account Balance Report", "Lending Report"));
+                "Account Balance Report", "Loan Report"));
         String requestedReportType = NavigationBus.consumeRequestedReportType();
         reportTypeBox.getSelectionModel().select(
                 reportTypeBox.getItems().contains(requestedReportType) ? requestedReportType : "Monthly Summary");
@@ -70,6 +71,7 @@ public class ReportsController {
         reportTypeBox.setOnAction(event -> refresh());
         monthBox.setOnAction(event -> refresh());
         yearBox.setOnAction(event -> refresh());
+        configureContextMenus();
         refresh();
     }
 
@@ -81,7 +83,7 @@ public class ReportsController {
             case "Expense Report" -> refreshExpenseReport();
             case "Project Report" -> refreshProjectReport();
             case "Account Balance Report" -> refreshAccountReport();
-            case "Lending Report" -> refreshLendingReport();
+            case "Loan Report", "Lending Report" -> refreshLoanReport();
             default -> refreshMonthlySummary();
         }
     }
@@ -136,8 +138,8 @@ public class ReportsController {
         showReportPanes(false, false, true);
     }
 
-    private void refreshLendingReport() {
-        setCategoryReport("Lending By Person", "Person", database.lendingByPersonReport(selectedMonthKey()));
+    private void refreshLoanReport() {
+        setCategoryReport("Net Loan Position By Person", "Person", database.lendingByPersonReport(selectedMonthKey()));
         projectTable.getItems().clear();
         accountTable.getItems().clear();
         showReportPanes(true, false, false);
@@ -196,11 +198,74 @@ public class ReportsController {
 
     @FXML
     private void exportExcel() {
-        UiAlerts.info("Excel export is not implemented yet.");
+        List<ReportTable> tables = visibleReportTables();
+        if (tables.isEmpty()) {
+            UiAlerts.info("No visible report table to export.");
+            return;
+        }
+        for (ReportTable reportTable : tables) {
+            TableActions.exportVisibleTableToCsv(reportTable.table(), reportTable.title());
+        }
     }
 
     @FXML
     private void printReport() {
-        UiAlerts.info("Printing is not implemented yet.");
+        List<ReportTable> tables = visibleReportTables();
+        if (tables.isEmpty()) {
+            UiAlerts.info("No visible report table to print.");
+            return;
+        }
+        for (ReportTable reportTable : tables) {
+            TableActions.printTable(reportTable.table(), reportTable.title());
+        }
+    }
+
+    private void configureContextMenus() {
+        TableActions.installRowContextMenu(categoryTable, row -> reportRowMenuItems(row, categoryTable, categoryReportTitle.getText()));
+        TableActions.installRowContextMenu(projectTable, row -> reportRowMenuItems(row, projectTable, projectReportTitle.getText()));
+        TableActions.installRowContextMenu(accountTable, row -> reportRowMenuItems(row, accountTable, accountReportTitle.getText()));
+    }
+
+    private List<javafx.scene.control.MenuItem> reportRowMenuItems(ReportRow row, TableView<ReportRow> table, String title) {
+        return List.of(
+                TableActions.menuItem("View Report Row", () -> viewReportRow(row, title)),
+                TableActions.separator(),
+                TableActions.copyRowItem(table, row),
+                TableActions.exportTableItem(table, title),
+                TableActions.printTableItem(table, title),
+                TableActions.refreshItem(this::refresh)
+        );
+    }
+
+    private void viewReportRow(ReportRow row, String title) {
+        if (row == null) {
+            return;
+        }
+        String accountLine = row.getAccount() == null || row.getAccount().isBlank()
+                ? ""
+                : "\nAccount: " + row.getAccount();
+        UiAlerts.info(
+                title
+                        + "\nLabel: " + row.getLabel()
+                        + accountLine
+                        + "\nAmount: " + MoneyUtil.mwk(row.getAmount())
+        );
+    }
+
+    private List<ReportTable> visibleReportTables() {
+        List<ReportTable> tables = new ArrayList<>();
+        if (categoryReportPane.isVisible() && categoryReportPane.isManaged()) {
+            tables.add(new ReportTable(categoryTable, categoryReportTitle.getText()));
+        }
+        if (projectReportPane.isVisible() && projectReportPane.isManaged()) {
+            tables.add(new ReportTable(projectTable, projectReportTitle.getText()));
+        }
+        if (accountReportPane.isVisible() && accountReportPane.isManaged()) {
+            tables.add(new ReportTable(accountTable, accountReportTitle.getText()));
+        }
+        return tables;
+    }
+
+    private record ReportTable(TableView<ReportRow> table, String title) {
     }
 }

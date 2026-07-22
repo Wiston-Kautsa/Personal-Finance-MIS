@@ -19,10 +19,10 @@
             <ComboBox fx:id="monthBox" prefWidth="135"/>
             <ComboBox fx:id="yearBox" prefWidth="105"/>
             <Button text="Generate Report" onAction="#refresh" styleClass="primary-button"/>
+            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
             <Button text="Export PDF" onAction="#exportPdf" styleClass="secondary-button"/>
             <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
             <Button text="Print" onAction="#printReport" styleClass="secondary-button"/>
-            <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
         </FlowPane>
     </VBox>
 

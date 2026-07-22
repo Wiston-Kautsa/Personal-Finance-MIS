@@ -5,3 +5,10 @@ out/
 pfmis.db
 pfmis.lock
 *.log
+.env
+*.zip
+ai-starter-pack/
+local-ai/logs/
+local-ai/models/*.gguf
+local-ai/runtime/*
+!local-ai/runtime/README.txt

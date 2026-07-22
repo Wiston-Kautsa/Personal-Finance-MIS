@@ -1,26 +1,25 @@
-# PFMIS - Personal Finance Management Information System
+# PFMIS
 
-PFMIS Version 1 is a JavaFX desktop app backed by SQLite.
+Personal Finance Management Information System built with Java 21, JavaFX and SQLite.
 
-## Run
+## Multi-user start-up
 
-Use:
+Run PFMIS and create the first account. The first account becomes the **Super Administrator**. Every user created by the Super Administrator receives a separate private financial workspace and separate SQLite database.
 
-```bat
-run-pfmis.bat
+Normal users can access only their own accounts, transactions, budgets, projects, goals, contacts, reports, AI settings and backups. The Super Administrator can manage users and open any active user's workspace from **Manage Users**.
+
+## Run during development
+
+```bash
+mvn clean javafx:run
 ```
 
-The app creates `pfmis.db` automatically in the project root.
+The application stores system data in the operating-system application-data directory rather than the project folder.
 
-## Version 1 Modules
+```text
+PFMIS/
+├── pfmis-auth.db
+└── users/<user-id>/pfmis.db
+```
 
-- Dashboard
-- Accounts
-- Categories
-- Manual Transactions
-- Projects
-- People
-- Goals
-- Reports
-
-SMS integration is intentionally not included in Version 1.
+See `docs/PFMIS-Multi-User-Security-and-Workspace-Guide.md` for the complete security and server-deployment design.

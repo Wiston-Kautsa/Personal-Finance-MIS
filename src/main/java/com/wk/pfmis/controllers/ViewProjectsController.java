@@ -1,28 +1,20 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.models.ProjectActivity;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
-import javafx.fxml.FXMLLoader;
-import javafx.scene.Parent;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.StackPane;
 
-import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -45,9 +37,7 @@ public class ViewProjectsController {
     @FXML private TableView<ProjectActivity> recentActivitiesTable;
     @FXML private TableColumn<ProjectActivity, String> activityDateColumn;
     @FXML private TableColumn<ProjectActivity, String> activityNameColumn;
-    @FXML private TableColumn<ProjectActivity, String> activityCategoryColumn;
-    @FXML private TableColumn<ProjectActivity, String> activityAccountColumn;
-    @FXML private TableColumn<ProjectActivity, String> activityCostColumn;
+    @FXML private TableColumn<ProjectActivity, String> activityStatusColumn;
     @FXML private TableColumn<ProjectActivity, String> activityNotesColumn;
     @FXML private TextField projectSearchField;
     @FXML private ComboBox<String> statusFilterBox;
@@ -59,11 +49,11 @@ public class ViewProjectsController {
     @FXML private TableColumn<Project, String> lastActivityColumn;
     @FXML private TableColumn<Project, String> startDateColumn;
     @FXML private TableColumn<Project, String> endDateColumn;
-    @FXML private TableColumn<Project, Void> actionsColumn;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private List<Project> projects = List.of();
     private List<ProjectActivity> activities = List.of();
+    private List<FinanceTransaction> transactions = List.of();
 
     @FXML
     public void initialize() {
@@ -88,14 +78,12 @@ public class ViewProjectsController {
         lastActivityColumn.setCellValueFactory(cell -> new SimpleStringProperty(lastActivityDate(cell.getValue())));
         startDateColumn.setCellValueFactory(new PropertyValueFactory<>("startDate"));
         endDateColumn.setCellValueFactory(new PropertyValueFactory<>("endDate"));
-        actionsColumn.setCellFactory(column -> new ProjectActionsCell());
 
         activityDateColumn.setCellValueFactory(new PropertyValueFactory<>("activityDate"));
         activityNameColumn.setCellValueFactory(new PropertyValueFactory<>("activityName"));
-        activityCategoryColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getCategoryName())));
-        activityAccountColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getAccountName())));
-        activityCostColumn.setCellValueFactory(cell -> new SimpleStringProperty(MoneyUtil.mwk(cell.getValue().getAmountUsed())));
+        activityStatusColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getStatus())));
         activityNotesColumn.setCellValueFactory(cell -> new SimpleStringProperty(reasonOrDescription(cell.getValue())));
+        configureContextMenus();
         refresh();
     }
 
@@ -104,6 +92,7 @@ public class ViewProjectsController {
         Project selectedProject = summaryProjectBox.getValue();
         projects = database.listProjects();
         activities = database.listProjectActivities();
+        transactions = database.listRecentTransactions(1000);
         summaryProjectBox.setItems(FXCollections.observableArrayList(projects));
         if (statusFilterBox.getValue() == null) {
             statusFilterBox.getSelectionModel().select("All Statuses");
@@ -121,11 +110,6 @@ public class ViewProjectsController {
         }
         showProjectSummary(summaryProjectBox.getValue());
         syncTableSelection(summaryProjectBox.getValue());
-    }
-
-    @FXML
-    private void viewAllActivities() {
-        loadProjectActivities();
     }
 
     private void applyFilters() {
@@ -160,7 +144,8 @@ public class ViewProjectsController {
         }
 
         List<ProjectActivity> projectActivities = projectActivities(project);
-        double totalSpent = projectActivities.stream().mapToDouble(ProjectActivity::getAmountUsed).sum();
+        List<FinanceTransaction> projectExpenses = projectExpenses(project);
+        double totalSpent = project.getAmountSpent();
         double averageCost = projectActivities.isEmpty() ? 0 : totalSpent / projectActivities.size();
         projectNameLabel.setText(project.getProjectName());
         statusLabel.setText(project.getStatus());
@@ -170,8 +155,8 @@ public class ViewProjectsController {
         totalSpentLabel.setText(MoneyUtil.mwk(totalSpent));
         averageActivityCostLabel.setText(MoneyUtil.mwk(averageCost));
         lastActivityLabel.setText(lastActivityText(projectActivities));
-        mostUsedCategoryLabel.setText(mostUsedValue(projectActivities, ProjectActivity::getCategoryName));
-        accountsUsedLabel.setText(accountsUsedText(projectActivities));
+        mostUsedCategoryLabel.setText(mostUsedExpenseCategory(projectExpenses));
+        accountsUsedLabel.setText(accountsUsedText(projectExpenses));
         descriptionLabel.setText(blankToDash(project.getDescription()));
         recentActivitiesTable.setItems(FXCollections.observableArrayList(recentActivities(projectActivities)));
     }
@@ -182,6 +167,16 @@ public class ViewProjectsController {
         }
         return activities.stream()
                 .filter(activity -> activity.getProjectId() == project.getId())
+                .toList();
+    }
+
+    private List<FinanceTransaction> projectExpenses(Project project) {
+        if (project == null) {
+            return List.of();
+        }
+        return transactions.stream()
+                .filter(transaction -> "EXPENSE".equals(transaction.getTransactionType()))
+                .filter(transaction -> project.getProjectName().equals(transaction.getProjectName()))
                 .toList();
     }
 
@@ -209,9 +204,9 @@ public class ViewProjectsController {
                 .orElse("-");
     }
 
-    private String mostUsedValue(List<ProjectActivity> projectActivities, Function<ProjectActivity, String> valueMapper) {
-        return projectActivities.stream()
-                .map(valueMapper)
+    private String mostUsedExpenseCategory(List<FinanceTransaction> projectExpenses) {
+        return projectExpenses.stream()
+                .map(FinanceTransaction::getCategoryName)
                 .filter(value -> value != null && !value.isBlank())
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
                 .entrySet()
@@ -221,9 +216,9 @@ public class ViewProjectsController {
                 .orElse("-");
     }
 
-    private String accountsUsedText(List<ProjectActivity> projectActivities) {
-        String text = projectActivities.stream()
-                .map(ProjectActivity::getAccountName)
+    private String accountsUsedText(List<FinanceTransaction> projectExpenses) {
+        String text = projectExpenses.stream()
+                .map(FinanceTransaction::getAccountName)
                 .filter(value -> value != null && !value.isBlank())
                 .distinct()
                 .collect(Collectors.joining(", "));
@@ -240,48 +235,6 @@ public class ViewProjectsController {
         return "-";
     }
 
-    private void closeOrReopenProject(Project project) {
-        if (project == null) {
-            UiAlerts.info("Select a project first.");
-            return;
-        }
-
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("PFMIS");
-        boolean completed = "COMPLETED".equals(project.getStatus());
-        alert.setHeaderText(completed ? "Reopen project?" : "Close project?");
-        alert.setContentText(completed ? "The project status will become ACTIVE." : "The project status will become COMPLETED.");
-        if (alert.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-            return;
-        }
-
-        database.updateProjectStatus(project.getId(), completed ? "ACTIVE" : "COMPLETED");
-        refresh();
-        DataRefreshBus.notifyDataChanged();
-    }
-
-    private void loadProjectActivities() {
-        try {
-            StackPane container = findContentContainer();
-            if (container == null) {
-                UiAlerts.info("Open Add Project Activity from the Projects menu.");
-                return;
-            }
-            Parent view = FXMLLoader.load(getClass().getResource("/com/wk/pfmis/views/ProjectActivities.fxml"));
-            container.getChildren().setAll(view);
-        } catch (IOException exception) {
-            UiAlerts.error("Failed to open project activities", exception);
-        }
-    }
-
-    private StackPane findContentContainer() {
-        Parent parent = projectsTable.getParent();
-        while (parent != null && !(parent instanceof StackPane)) {
-            parent = parent.getParent();
-        }
-        return parent instanceof StackPane stackPane ? stackPane : null;
-    }
-
     private void syncTableSelection(Project project) {
         if (project == null) {
             projectsTable.getSelectionModel().clearSelection();
@@ -296,39 +249,109 @@ public class ViewProjectsController {
                 );
     }
 
+    private void configureContextMenus() {
+        TableActions.installRowContextMenu(projectsTable, this::projectMenuItems);
+        TableActions.installRowContextMenu(recentActivitiesTable, this::activityMenuItems);
+    }
+
+    private List<javafx.scene.control.MenuItem> projectMenuItems(Project project) {
+        return List.of(
+                TableActions.menuItem("Show Project Summary", () -> showProjectFromMenu(project)),
+                TableActions.menuItem("View Project Details", () -> viewProjectDetails(project)),
+                TableActions.menuItem("Record Project Expense", () -> recordProjectExpense(project)),
+                TableActions.separator(),
+                TableActions.copyRowItem(projectsTable, project),
+                TableActions.exportTableItem(projectsTable, "Projects Summary"),
+                TableActions.printTableItem(projectsTable, "Projects Summary"),
+                TableActions.refreshItem(this::refresh)
+        );
+    }
+
+    private List<javafx.scene.control.MenuItem> activityMenuItems(ProjectActivity activity) {
+        return List.of(
+                TableActions.menuItem("View Activity Details", () -> viewActivityDetails(activity)),
+                TableActions.menuItem("Show Activity Project", () -> showActivityProject(activity)),
+                TableActions.menuItem("Record Activity Expense", () -> recordActivityExpense(activity)),
+                TableActions.separator(),
+                TableActions.copyRowItem(recentActivitiesTable, activity),
+                TableActions.exportTableItem(recentActivitiesTable, selectedProjectActivitiesTitle()),
+                TableActions.printTableItem(recentActivitiesTable, selectedProjectActivitiesTitle()),
+                TableActions.refreshItem(this::refresh)
+        );
+    }
+
+    private void showProjectFromMenu(Project project) {
+        if (project == null) {
+            return;
+        }
+        summaryProjectBox.getSelectionModel().select(project);
+        syncTableSelection(project);
+        showProjectSummary(project);
+    }
+
+    private void viewProjectDetails(Project project) {
+        if (project == null) {
+            return;
+        }
+        UiAlerts.info(
+                "Project: " + project.getProjectName()
+                        + "\nStatus: " + blankToDash(project.getStatus())
+                        + "\nActivities: " + projectActivities(project).size()
+                        + "\nPlanned Budget: " + MoneyUtil.mwk(project.getPlannedBudget())
+                        + "\nSpent: " + MoneyUtil.mwk(project.getAmountSpent())
+                        + "\nRemaining: " + MoneyUtil.mwk(project.getRemainingBudget())
+                        + "\nStart Date: " + blankToDash(project.getStartDate())
+                        + "\nEnd Date: " + blankToDash(project.getEndDate())
+                        + "\nDescription: " + blankToDash(project.getDescription())
+        );
+    }
+
+    private void viewActivityDetails(ProjectActivity activity) {
+        if (activity == null) {
+            return;
+        }
+        UiAlerts.info(
+                "Project: " + blankToDash(activity.getProjectName())
+                        + "\nActivity: " + activity.getActivityName()
+                        + "\nDate: " + blankToDash(activity.getActivityDate())
+                        + "\nStatus: " + blankToDash(activity.getStatus())
+                        + "\nAmount Used: " + MoneyUtil.mwk(activity.getAmountUsed())
+                        + "\nNotes: " + reasonOrDescription(activity)
+        );
+    }
+
+    private void showActivityProject(ProjectActivity activity) {
+        if (activity == null) {
+            return;
+        }
+        projects.stream()
+                .filter(project -> project.getId() == activity.getProjectId())
+                .findFirst()
+                .ifPresent(this::showProjectFromMenu);
+    }
+
+    private void recordProjectExpense(Project project) {
+        showProjectFromMenu(project);
+        NavigationBus.requestTransaction("EXPENSE", "PROJECT_EXPENSE", null);
+        NavigationBus.showTransactionEntry("Record Project Expense");
+    }
+
+    private void recordActivityExpense(ProjectActivity activity) {
+        showActivityProject(activity);
+        NavigationBus.requestTransaction("EXPENSE", "PROJECT_EXPENSE", null);
+        NavigationBus.showTransactionEntry("Record Project Expense");
+    }
+
+    private String selectedProjectActivitiesTitle() {
+        Project project = summaryProjectBox.getValue();
+        return project == null ? "Recent Project Activities" : project.getProjectName() + " Activities";
+    }
+
     private String blankToDash(String value) {
         return value == null || value.isBlank() ? "-" : value;
     }
 
     private boolean contains(String value, String search) {
         return value != null && value.toLowerCase().contains(search);
-    }
-
-    private final class ProjectActionsCell extends TableCell<Project, Void> {
-        private final Button addActivityButton = new Button("Add Activity");
-        private final Button viewActivitiesButton = new Button("View Activities");
-        private final Button summaryButton = new Button("Summary");
-        private final Button closeButton = new Button("Close");
-        private final HBox actions = new HBox(6, addActivityButton, viewActivitiesButton, summaryButton, closeButton);
-
-        private ProjectActionsCell() {
-            addActivityButton.setOnAction(event -> loadProjectActivities());
-            viewActivitiesButton.setOnAction(event -> loadProjectActivities());
-            summaryButton.setOnAction(event -> summaryProjectBox.getSelectionModel().select(getTableView().getItems().get(getIndex())));
-            closeButton.setOnAction(event -> closeOrReopenProject(getTableView().getItems().get(getIndex())));
-        }
-
-        @Override
-        protected void updateItem(Void item, boolean empty) {
-            super.updateItem(item, empty);
-            if (empty || getIndex() < 0 || getIndex() >= getTableView().getItems().size()) {
-                setGraphic(null);
-                return;
-            }
-            Project project = getTableView().getItems().get(getIndex());
-            addActivityButton.setDisable("COMPLETED".equals(project.getStatus()));
-            closeButton.setText("COMPLETED".equals(project.getStatus()) ? "Reopen" : "Close");
-            setGraphic(actions);
-        }
     }
 }

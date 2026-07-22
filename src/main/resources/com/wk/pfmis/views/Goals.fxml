@@ -1,42 +1,104 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.DatePicker?>
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.control.TableColumn?>
-<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.control.TextField?>
-<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
-<VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="com.wk.pfmis.controllers.GoalsController" styleClass="panel">
-    <Label text="Financial Goals" styleClass="section-heading"/>
-    <GridPane hgap="10" vgap="10">
-        <Label text="Goal Name" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
-        <TextField fx:id="goalNameField" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
-        <Label text="Target Amount" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
-        <TextField fx:id="targetAmountField" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
-        <Label text="Current Amount" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
-        <TextField fx:id="currentAmountField" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
-        <Label text="Monthly Contribution" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
-        <TextField fx:id="monthlyContributionField" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
-        <Label text="Target Date" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-        <DatePicker fx:id="targetDatePicker" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
-    </GridPane>
-    <HBox spacing="8">
-        <Button text="Add Goal" onAction="#addGoal" styleClass="primary-button"/>
-        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
-    </HBox>
-    <TableView fx:id="goalsTable" prefHeight="240">
-        <columns>
-            <TableColumn fx:id="nameColumn" text="Goal" prefWidth="180"/>
-            <TableColumn fx:id="targetColumn" text="Target" prefWidth="110"/>
-            <TableColumn fx:id="currentColumn" text="Current" prefWidth="110"/>
-            <TableColumn fx:id="remainingColumn" text="Remaining" prefWidth="110"/>
-            <TableColumn fx:id="monthsColumn" text="Months Needed" prefWidth="120"/>
-            <TableColumn fx:id="statusColumn" text="Status" prefWidth="100"/>
-        </columns>
-    </TableView>
-</VBox>
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.GoalsController" styleClass="goals-scroll">
+    <content>
+        <VBox spacing="12" styleClass="goals-register-page">
+            <FlowPane hgap="10" vgap="10" prefWrapLength="780" styleClass="goal-summary-strip">
+                <VBox spacing="3" styleClass="goal-summary-tile">
+                    <Label text="This Month Spent" wrapText="true" styleClass="metric-title"/>
+                    <Label fx:id="monthSpentLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                </VBox>
+                <VBox spacing="3" styleClass="goal-summary-tile">
+                    <Label text="3 Month Average" wrapText="true" styleClass="metric-title"/>
+                    <Label fx:id="averageSpentLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                </VBox>
+                <VBox spacing="3" styleClass="goal-summary-tile">
+                    <Label text="Top Spending Area" wrapText="true" styleClass="metric-title"/>
+                    <Label fx:id="topSpendingLabel" text="-" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+                <VBox spacing="3" styleClass="goal-summary-tile">
+                    <Label text="Goal Gap" wrapText="true" styleClass="metric-title"/>
+                    <Label fx:id="goalGapLabel" text="MWK 0.00" wrapText="true" styleClass="overview-value"/>
+                </VBox>
+            </FlowPane>
+
+            <TitledPane fx:id="goalFormPane" text="Register Goal" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="goal-register-section">
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="760">
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Goal Name *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="goalNameField" promptText="Emergency fund" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Target Amount *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="targetAmountField" promptText="500000" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Already Saved" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="currentAmountField" promptText="Active account balance" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            <Label fx:id="availableAccountBalanceLabel" text="From active accounts: MWK 0.00" wrapText="true" styleClass="metric-note"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Monthly Contribution" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="monthlyContributionField" promptText="50000" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Target Date" wrapText="true" styleClass="field-label"/>
+                            <DatePicker fx:id="targetDatePicker" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Status" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="statusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Register Goal" onAction="#saveGoal" minWidth="120" styleClass="primary-button"/>
+                        <Button text="Clear" onAction="#clearForm" minWidth="90" styleClass="secondary-button"/>
+                    </HBox>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Goal Analysis" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="goal-register-section">
+                    <FlowPane hgap="12" vgap="12" prefWrapLength="780">
+                        <VBox spacing="6" styleClass="goal-insight-card">
+                            <Label text="Achievement Plan" wrapText="true" styleClass="table-title"/>
+                            <Label fx:id="planSummaryLabel" text="Enter a target amount to see the plan." wrapText="true" styleClass="goal-insight-text"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-insight-card">
+                            <Label text="Spending Insight" wrapText="true" styleClass="table-title"/>
+                            <Label fx:id="spendingInsightLabel" text="Spending analysis will use saved expense transactions." wrapText="true" styleClass="goal-insight-text"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-insight-card">
+                            <Label text="Where To Adjust" wrapText="true" styleClass="table-title"/>
+                            <Label fx:id="categoryInsightLabel" text="Add expenses to identify the biggest spending area." wrapText="true" styleClass="goal-insight-text"/>
+                        </VBox>
+                    </FlowPane>
+                    <VBox spacing="6" styleClass="goal-advice-box">
+                        <Label text="Advice" wrapText="true" styleClass="table-title"/>
+                        <Label fx:id="adviceLabel" text="Register the goal first, then keep the monthly contribution realistic against your spending pattern." wrapText="true" styleClass="goal-advice-text"/>
+                    </VBox>
+                </VBox>
+            </TitledPane>
+
+            <padding>
+                <Insets top="0" right="0" bottom="0" left="0"/>
+            </padding>
+        </VBox>
+    </content>
+</ScrollPane>
