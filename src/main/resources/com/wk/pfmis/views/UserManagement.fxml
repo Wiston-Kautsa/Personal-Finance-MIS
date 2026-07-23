@@ -40,6 +40,7 @@
                     <TableColumn fx:id="emailColumn" text="Email" prefWidth="190"/>
                     <TableColumn fx:id="roleColumn" text="Role" prefWidth="150"/>
                     <TableColumn fx:id="statusColumn" text="Status" prefWidth="90"/>
+                    <TableColumn fx:id="passwordStatusColumn" text="Password" prefWidth="135"/>
                     <TableColumn fx:id="lastLoginColumn" text="Last Login" prefWidth="150"/>
                 </columns>
             </TableView>

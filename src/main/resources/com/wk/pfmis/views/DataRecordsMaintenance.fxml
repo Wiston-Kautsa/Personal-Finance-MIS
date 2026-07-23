@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.DataRecordsSectionController"
+      spacing="12" styleClass="content-view">
+    <Label fx:id="sectionTitleLabel" text="Data Maintenance" styleClass="view-title"/>
+    <Label text="Super Administrator Only. Destructive actions require impact analysis, recovery backup, confirmation, verification and immutable audit." wrapText="true" styleClass="form-note"/>
+    <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
+        <tabs>
+            <Tab fx:id="recordDisposalTab" text="Record Disposal"/>
+            <Tab fx:id="clearTestDataTab" text="Clear Test or Demo Data"/>
+            <Tab fx:id="purgeArchivedTab" text="Purge Archived Records"/>
+            <Tab fx:id="resetWorkspaceTab" text="Reset Workspace"/>
+            <Tab fx:id="deleteWorkspaceTab" text="Delete Workspace"/>
+            <Tab fx:id="maintenanceHistoryTab" text="Maintenance History"/>
+        </tabs>
+    </TabPane>
+    <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+</VBox>

@@ -14,9 +14,16 @@ public class SystemUser {
     private final String status;
     private final String createdAt;
     private final String lastLoginAt;
+    private final boolean mustChangePassword;
 
     public SystemUser(int id, String username, String fullName, String email,
                       String role, String status, String createdAt, String lastLoginAt) {
+        this(id, username, fullName, email, role, status, createdAt, lastLoginAt, false);
+    }
+
+    public SystemUser(int id, String username, String fullName, String email,
+                      String role, String status, String createdAt, String lastLoginAt,
+                      boolean mustChangePassword) {
         this.id = id;
         this.username = username == null ? "" : username;
         this.fullName = fullName == null ? "" : fullName;
@@ -25,6 +32,7 @@ public class SystemUser {
         this.status = status == null ? STATUS_ACTIVE : status;
         this.createdAt = createdAt == null ? "" : createdAt;
         this.lastLoginAt = lastLoginAt == null ? "" : lastLoginAt;
+        this.mustChangePassword = mustChangePassword;
     }
 
     public int getId() { return id; }
@@ -35,6 +43,8 @@ public class SystemUser {
     public String getStatus() { return status; }
     public String getCreatedAt() { return createdAt; }
     public String getLastLoginAt() { return lastLoginAt; }
+    public boolean isMustChangePassword() { return mustChangePassword; }
+    public String getPasswordStatus() { return mustChangePassword ? "Change Required" : "Current"; }
     public boolean isSuperAdmin() { return ROLE_SUPER_ADMIN.equals(role); }
     public boolean isActive() { return STATUS_ACTIVE.equals(status); }
 

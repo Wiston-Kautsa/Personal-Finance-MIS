@@ -8,6 +8,7 @@ final class NavigationBus {
     private static Consumer<String> reportTitleHandler;
     private static Consumer<String> transactionEntryHandler;
     private static Integer requestedAccountHistoryId;
+    private static String requestedReportGroup;
     private static String requestedReportType;
     private static String requestedTransactionType;
     private static String requestedTransactionPurpose;
@@ -53,6 +54,17 @@ final class NavigationBus {
 
     static void requestReportType(String reportType) {
         requestedReportType = reportType;
+    }
+
+    static void requestReport(String reportGroup, String reportType) {
+        requestedReportGroup = reportGroup;
+        requestedReportType = reportType;
+    }
+
+    static String consumeRequestedReportGroup() {
+        String reportGroup = requestedReportGroup;
+        requestedReportGroup = null;
+        return reportGroup;
     }
 
     static String consumeRequestedReportType() {
@@ -107,6 +119,7 @@ final class NavigationBus {
         reportTitleHandler = null;
         transactionEntryHandler = null;
         requestedAccountHistoryId = null;
+        requestedReportGroup = null;
         requestedReportType = null;
         requestedTransactionType = null;
         requestedTransactionPurpose = null;

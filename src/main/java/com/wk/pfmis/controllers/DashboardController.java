@@ -65,7 +65,27 @@ public class DashboardController {
     @FXML private Label sectionTitleLabel;
     @FXML private Label signedInUserLabel;
     @FXML private Label activeWorkspaceLabel;
-    @FXML private Button userManagementSidebarButton;
+    @FXML private VBox setupNavigation;
+    @FXML private Button setupAdministrationButton;
+    @FXML private Button setupSecurityUsersButton;
+    @FXML private Button setupFinancialConfigurationButton;
+    @FXML private Button setupSmartIntelligenceButton;
+    @FXML private Button setupDataSystemButton;
+    @FXML private VBox reportNavigation;
+    @FXML private Button reportOverviewButton;
+    @FXML private Button reportIncomeExpensesButton;
+    @FXML private Button reportAccountsPositionButton;
+    @FXML private Button reportProjectsGoalsButton;
+    @FXML private Button reportLoansObligationsButton;
+    @FXML private Button reportSmartAnalysisButton;
+    @FXML private Button reportSystemReportsButton;
+    @FXML private VBox dataRecordsNavigation;
+    @FXML private Button dataIntakeButton;
+    @FXML private Button recordsControlButton;
+    @FXML private Button dataQualityRecordsButton;
+    @FXML private Button auditHistoryButton;
+    @FXML private Button syncRecoveryButton;
+    @FXML private Button dataMaintenanceButton;
     @FXML private Button returnWorkspaceButton;
     @FXML private VBox dashboardSummaryPane;
     @FXML private StackPane contentPane;
@@ -83,6 +103,19 @@ public class DashboardController {
     @FXML private TableColumn<FinanceTransaction, Double> dashboardAmountColumn;
     @FXML private VBox alertsBox;
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private static final String REPORT_GROUP_OVERVIEW = "Overview";
+    private static final String REPORT_GROUP_INCOME_EXPENSES = "Income and Expenses";
+    private static final String REPORT_GROUP_ACCOUNTS_POSITION = "Accounts and Position";
+    private static final String REPORT_GROUP_PROJECTS_GOALS = "Projects and Goals";
+    private static final String REPORT_GROUP_LOANS_OBLIGATIONS = "Loans and Obligations";
+    private static final String REPORT_GROUP_SMART_ANALYSIS = "Smart Analysis";
+    private static final String REPORT_GROUP_SYSTEM_REPORTS = "System Reports";
+    private static final String DATA_SECTION_INTAKE = "Data Intake";
+    private static final String DATA_SECTION_RECORDS_CONTROL = "Records Control";
+    private static final String DATA_SECTION_QUALITY = "Data Quality and Reconciliation";
+    private static final String DATA_SECTION_AUDIT_HISTORY = "Audit and History";
+    private static final String DATA_SECTION_SYNC_RECOVERY = "Sync and Recovery";
+    private static final String DATA_SECTION_MAINTENANCE = "Data Maintenance";
     private static final DateTimeFormatter MONTH_LABEL_FORMAT = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH);
     private String currentViewFileName;
     private String currentViewTitle = "Dashboard";
@@ -91,6 +124,10 @@ public class DashboardController {
     private String previousViewTitle = "Dashboard";
     private boolean previousViewIsDashboard = true;
     private boolean navigatingBack;
+    private boolean passwordChangeNoticeShown;
+    private boolean openingSetupSection;
+    private boolean openingReportGroup;
+    private boolean openingDataRecordsSection;
 
     @FXML
     public void initialize() {
@@ -106,6 +143,12 @@ public class DashboardController {
 
     @FXML
     private void showHome() {
+        if (redirectToPasswordChangeIfRequired("Dashboard.fxml")) {
+            return;
+        }
+        clearSetupSectionSelection();
+        clearReportGroupSelection();
+        clearDataRecordsSelection();
         rememberCurrentView();
         sectionTitleLabel.setText("Dashboard");
         setDashboardSummaryVisible(true);
@@ -137,12 +180,22 @@ public class DashboardController {
     }
 
     @FXML
+    private void showLoginSecurityHistory() {
+        openSecurityAndUsersTab("securityHistoryTab");
+    }
+
+    @FXML
+    private void showSessionAutoLockSettings() {
+        openSecurityAndUsersTab("sessionAutoLockTab");
+    }
+
+    @FXML
     private void showUserManagement() {
         if (!UserSession.isSuperAdmin()) {
             UiAlerts.info("Only a super administrator can manage users.");
             return;
         }
-        loadView("UserManagement.fxml", "User Management");
+        openSecurityAndUsersTab("userManagementTab");
     }
 
     @FXML
@@ -192,7 +245,7 @@ public class DashboardController {
 
     @FXML
     private void showCategories() {
-        loadView("Categories.fxml", "Categories");
+        openFinancialConfigurationTab("categoriesTab");
     }
 
     @FXML
@@ -298,17 +351,107 @@ public class DashboardController {
 
     @FXML
     private void showSettings() {
-        showAdministration();
+        openAdministration();
+    }
+
+    @FXML
+    private void openAdministration() {
+        openSetupSection("SetupAdministration.fxml", "Administration", setupAdministrationButton, null);
+    }
+
+    private void openAdministrationTab(String tabKey) {
+        openSetupSection("SetupAdministration.fxml", "Administration", setupAdministrationButton, tabKey);
     }
 
     @FXML
     private void showAdministration() {
-        loadView("Administration.fxml", "Administration");
+        openAdministration();
+    }
+
+    @FXML
+    private void showSystemHealth() {
+        openAdministrationTab("systemHealthTab");
+    }
+
+    @FXML
+    private void showWorkspaceManagement() {
+        openAdministrationTab("workspaceManagementTab");
+    }
+
+    @FXML
+    private void openSecurityAndUsers() {
+        openSetupSection("SetupSecurityUsers.fxml", "Security and Users", setupSecurityUsersButton, null);
+    }
+
+    private void openSecurityAndUsersTab(String tabKey) {
+        openSetupSection("SetupSecurityUsers.fxml", "Security and Users", setupSecurityUsersButton, tabKey);
+    }
+
+    @FXML
+    private void openFinancialConfiguration() {
+        openSetupSection("SetupFinancialConfiguration.fxml", "Financial Configuration", setupFinancialConfigurationButton, null);
+    }
+
+    private void openFinancialConfigurationTab(String tabKey) {
+        openSetupSection("SetupFinancialConfiguration.fxml", "Financial Configuration", setupFinancialConfigurationButton, tabKey);
+    }
+
+    @FXML
+    private void openSmartIntelligence() {
+        openSetupSection("SetupSmartIntelligence.fxml", "Smart Intelligence", setupSmartIntelligenceButton, null);
+    }
+
+    private void openSmartIntelligenceTab(String tabKey) {
+        openSetupSection("SetupSmartIntelligence.fxml", "Smart Intelligence", setupSmartIntelligenceButton, tabKey);
+    }
+
+    @FXML
+    private void openDataAndSystem() {
+        openSetupSection("SetupDataSystem.fxml", "Data and System", setupDataSystemButton, null);
+    }
+
+    private void openDataAndSystemTab(String tabKey) {
+        openSetupSection("SetupDataSystem.fxml", "Data and System", setupDataSystemButton, tabKey);
     }
 
     @FXML
     private void showReports() {
-        showMonthlySummaryReport();
+        openOverviewReports();
+    }
+
+    @FXML
+    private void openOverviewReports() {
+        openReportGroup(REPORT_GROUP_OVERVIEW, "Monthly Summary", reportOverviewButton);
+    }
+
+    @FXML
+    private void openIncomeExpenseReports() {
+        openReportGroup(REPORT_GROUP_INCOME_EXPENSES, "Income Report", reportIncomeExpensesButton);
+    }
+
+    @FXML
+    private void openAccountsPositionReports() {
+        openReportGroup(REPORT_GROUP_ACCOUNTS_POSITION, "Account Balance Report", reportAccountsPositionButton);
+    }
+
+    @FXML
+    private void openProjectsGoalsReports() {
+        openReportGroup(REPORT_GROUP_PROJECTS_GOALS, "Project Report", reportProjectsGoalsButton);
+    }
+
+    @FXML
+    private void openLoansObligationsReports() {
+        openReportGroup(REPORT_GROUP_LOANS_OBLIGATIONS, "Loan Report", reportLoansObligationsButton);
+    }
+
+    @FXML
+    private void openSmartAnalysisReports() {
+        openReportGroup(REPORT_GROUP_SMART_ANALYSIS, "Trends and Forecast", reportSmartAnalysisButton);
+    }
+
+    @FXML
+    private void openSystemReports() {
+        openReportGroup(REPORT_GROUP_SYSTEM_REPORTS, "Data Quality Report", reportSystemReportsButton);
     }
 
     @FXML
@@ -317,8 +460,83 @@ public class DashboardController {
     }
 
     @FXML
+    private void showQuarterlySummaryReport() {
+        showReport("Quarterly Summary", "Quarterly Summary");
+    }
+
+    @FXML
+    private void showHalfYearSummaryReport() {
+        showReport("Half-Year Summary", "Half-Year Summary");
+    }
+
+    @FXML
+    private void showAnnualSummaryReport() {
+        showReport("Annual Summary", "Annual Summary");
+    }
+
+    @FXML
+    private void showYearToYearReport() {
+        showReport("Year-to-Year Comparison", "Year-to-Year Comparison");
+    }
+
+    @FXML
+    private void showIncomeSourceAnalysisReport() {
+        showReport("Income Source Analysis", "Income Source Analysis");
+    }
+
+    @FXML
+    private void showCashFlowReportScreen() {
+        showReport("Cash Flow Report", "Cash Flow Report");
+    }
+
+    @FXML
+    private void showCategorySpendingReport() {
+        showReport("Category Spending", "Category Spending");
+    }
+
+    @FXML
+    private void showBudgetVsActualReport() {
+        showReport("Budget vs Actual", "Budget vs Actual");
+    }
+
+    @FXML
+    private void showRecurringTransactionsReport() {
+        showReport("Recurring Transactions", "Recurring Transactions");
+    }
+
+    @FXML
+    private void showNetWorthReport() {
+        showReport("Net Worth Report", "Net Worth Report");
+    }
+
+    @FXML
+    private void showFinancialPositionReport() {
+        showReport("Financial Position", "Financial Position");
+    }
+
+    @FXML
+    private void showAccountReconciliationReport() {
+        showReport("Account Reconciliation", "Account Reconciliation");
+    }
+
+    @FXML
+    private void showTransferReportScreen() {
+        showReport("Transfer Report", "Transfer Report");
+    }
+
+    @FXML
     private void showProjectReport() {
         showReport("Project Report", "Project Report");
+    }
+
+    @FXML
+    private void showProjectPerformanceReport() {
+        showReport("Project Performance", "Project Performance");
+    }
+
+    @FXML
+    private void showSavingsGoalsReport() {
+        showReport("Savings and Goals Progress", "Savings And Goals Progress");
     }
 
     @FXML
@@ -332,33 +550,215 @@ public class DashboardController {
     }
 
     @FXML
+    private void showMoneyBorrowedReport() {
+        showReport("Money Borrowed Report", "Money Borrowed Report");
+    }
+
+    @FXML
+    private void showMoneyLentReport() {
+        showReport("Money Lent Report", "Money Lent Report");
+    }
+
+    @FXML
+    private void showDebtAgingReport() {
+        showReport("Debt Aging Report", "Debt Aging Report");
+    }
+
+    @FXML
+    private void showUpcomingObligationsReport() {
+        showReport("Upcoming Obligations", "Upcoming Obligations");
+    }
+
+    @FXML
+    private void showTrendsForecastReport() {
+        showReport("Trends and Forecast", "Trends And Forecast");
+    }
+
+    @FXML
+    private void showExpenseTrendReport() {
+        showReport("Expense Trend Report", "Expense Trend Report");
+    }
+
+    @FXML
+    private void showFinancialHealthReport() {
+        showReport("Financial Health", "Financial Health");
+    }
+
+    @FXML
+    private void showUnusualTransactionsReport() {
+        showReport("Unusual Transactions", "Unusual Transactions");
+    }
+
+    @FXML
+    private void showRecommendationsReport() {
+        showReport("Recommendations", "Recommendations");
+    }
+
+    @FXML
+    private void showDataQualityReport() {
+        showReport("Data Quality Report", "Data Quality Report");
+    }
+
+    @FXML
+    private void showAuditTrailReport() {
+        showReport("Audit Trail", "Audit Trail");
+    }
+
+    @FXML
+    private void showBackupHistoryReport() {
+        showReport("Backup and Restore History", "Backup And Restore History");
+    }
+
+    @FXML
+    private void openDataIntake() {
+        openDataRecordsSection("DataRecordsDataIntake.fxml", DATA_SECTION_INTAKE, dataIntakeButton, null);
+    }
+
+    private void openDataIntakeTab(String tabKey) {
+        openDataRecordsSection("DataRecordsDataIntake.fxml", DATA_SECTION_INTAKE, dataIntakeButton, tabKey);
+    }
+
+    @FXML
+    private void openRecordsControl() {
+        openDataRecordsSection("DataRecordsRecordsControl.fxml", DATA_SECTION_RECORDS_CONTROL, recordsControlButton, null);
+    }
+
+    private void openRecordsControlTab(String tabKey) {
+        openDataRecordsSection("DataRecordsRecordsControl.fxml", DATA_SECTION_RECORDS_CONTROL, recordsControlButton, tabKey);
+    }
+
+    @FXML
+    private void openDataQualityRecords() {
+        openDataRecordsSection("DataRecordsQuality.fxml", DATA_SECTION_QUALITY, dataQualityRecordsButton, null);
+    }
+
+    private void openDataQualityRecordsTab(String tabKey) {
+        openDataRecordsSection("DataRecordsQuality.fxml", DATA_SECTION_QUALITY, dataQualityRecordsButton, tabKey);
+    }
+
+    @FXML
+    private void openAuditHistory() {
+        openDataRecordsSection("DataRecordsAuditHistory.fxml", DATA_SECTION_AUDIT_HISTORY, auditHistoryButton, null);
+    }
+
+    private void openAuditHistoryTab(String tabKey) {
+        openDataRecordsSection("DataRecordsAuditHistory.fxml", DATA_SECTION_AUDIT_HISTORY, auditHistoryButton, tabKey);
+    }
+
+    @FXML
+    private void openSyncRecovery() {
+        openDataRecordsSection("DataRecordsSyncRecovery.fxml", DATA_SECTION_SYNC_RECOVERY, syncRecoveryButton, null);
+    }
+
+    private void openSyncRecoveryTab(String tabKey) {
+        openDataRecordsSection("DataRecordsSyncRecovery.fxml", DATA_SECTION_SYNC_RECOVERY, syncRecoveryButton, tabKey);
+    }
+
+    @FXML
+    private void openDataMaintenance() {
+        if (!UserSession.isSuperAdmin()) {
+            UiAlerts.info("Only a Super Administrator may open Data Maintenance.");
+            return;
+        }
+        openDataRecordsSection("DataRecordsMaintenance.fxml", DATA_SECTION_MAINTENANCE, dataMaintenanceButton, null);
+    }
+
+    private void openDataMaintenanceTab(String tabKey) {
+        if (!UserSession.isSuperAdmin()) {
+            UiAlerts.info("Only a Super Administrator may open Data Maintenance.");
+            return;
+        }
+        openDataRecordsSection("DataRecordsMaintenance.fxml", DATA_SECTION_MAINTENANCE, dataMaintenanceButton, tabKey);
+    }
+
+    @FXML
     private void showPaymentMethods() {
-        loadView("PaymentMethods.fxml", "Payment Methods");
+        openFinancialConfigurationTab("paymentMethodsTab");
     }
 
     @FXML
     private void showCurrencies() {
-        loadView("Currencies.fxml", "Currencies");
+        openFinancialConfigurationTab("currenciesTab");
     }
 
     @FXML
     private void showBackupRestore() {
-        showAdministration();
+        openDataAndSystemTab("backupRestoreTab");
+    }
+
+    @FXML
+    private void showAiConfiguration() {
+        openSmartIntelligenceTab("aiConfigurationTab");
+    }
+
+    @FXML
+    private void showSmartRules() {
+        openSmartIntelligenceTab("smartRulesTab");
+    }
+
+    @FXML
+    private void showFinancialProfile() {
+        openFinancialConfigurationTab("financialProfileTab");
+    }
+
+    @FXML
+    private void showAlertsNotifications() {
+        openSmartIntelligenceTab("alertsTab");
+    }
+
+    @FXML
+    private void showAutomationSchedules() {
+        openSmartIntelligenceTab("automationTab");
+    }
+
+    @FXML
+    private void showDataQualityReconciliation() {
+        openDataQualityRecordsTab("dataHealthOverviewTab");
+    }
+
+    @FXML
+    private void showImportExport() {
+        openDataIntakeTab("fileImportTab");
+    }
+
+    @FXML
+    private void showArchiveRestore() {
+        openDataAndSystemTab("archiveRestoreTab");
+    }
+
+    @FXML
+    private void showDatabaseMaintenance() {
+        openDataMaintenanceTab("recordDisposalTab");
+    }
+
+    @FXML
+    private void showReportPreferences() {
+        openFinancialConfigurationTab("reportPreferencesTab");
+    }
+
+    @FXML
+    private void showDangerZone() {
+        openDataMaintenanceTab("recordDisposalTab");
     }
 
     @FXML
     private void showAuditLogs() {
-        loadView("AuditLogs.fxml", "Audit Logs");
+        openAuditHistoryTab("activityAuditTab");
+    }
+
+    @FXML
+    private void showReportInputs() {
+        openDataIntakeTab("supplementaryInputsTab");
     }
 
     @FXML
     private void showSyncCenter() {
-        loadView("SyncCenter.fxml", "Sync Center");
+        openSyncRecoveryTab("syncStatusTab");
     }
 
     @FXML
     private void showMaintenance() {
-        loadView("Maintenance.fxml", "Maintenance");
+        openDataMaintenanceTab("maintenanceHistoryTab");
     }
 
     private void configureUserSecurityHeader() {
@@ -367,8 +767,13 @@ public class DashboardController {
         signedInUserLabel.setText("Signed in: " + signedIn.getDisplayName() + " · " + signedIn.getRoleDisplay());
         activeWorkspaceLabel.setText("Workspace: " + workspace.getDisplayName() + " (" + workspace.getUsername() + ")");
         boolean superAdmin = signedIn.isSuperAdmin();
-        userManagementSidebarButton.setVisible(superAdmin);
-        userManagementSidebarButton.setManaged(superAdmin);
+        if (dataMaintenanceButton != null) {
+            dataMaintenanceButton.setVisible(superAdmin);
+            dataMaintenanceButton.setManaged(superAdmin);
+            if (!dataMaintenanceButton.getStyleClass().contains("danger-nav-button")) {
+                dataMaintenanceButton.getStyleClass().add("danger-nav-button");
+            }
+        }
         boolean anotherWorkspace = superAdmin && !UserSession.isViewingOwnWorkspace();
         returnWorkspaceButton.setVisible(anotherWorkspace);
         returnWorkspaceButton.setManaged(anotherWorkspace);
@@ -578,8 +983,8 @@ public class DashboardController {
     }
 
     private void showReport(String reportType, String title) {
-        NavigationBus.requestReportType(reportType);
-        loadView("Reports.fxml", title);
+        String reportGroup = reportGroupForReport(reportType);
+        openReportGroup(reportGroup, reportType, reportButtonForGroup(reportGroup), title);
     }
 
     private String reportTitle(String reportType) {
@@ -589,17 +994,131 @@ public class DashboardController {
         return reportType == null || reportType.isBlank() ? "Reports" : reportType;
     }
 
+    private void openReportGroup(String reportGroup, String selectedReport, Button selectedButton) {
+        openReportGroup(reportGroup, selectedReport, selectedButton, reportGroup);
+    }
+
+    private void openReportGroup(String reportGroup, String selectedReport, Button selectedButton, String title) {
+        if (UserSession.getAuthenticatedUser().isMustChangePassword()) {
+            loadView("Reports.fxml", title);
+            return;
+        }
+        NavigationBus.requestReport(reportGroup, selectedReport);
+        openingReportGroup = true;
+        try {
+            loadView("Reports.fxml", title);
+            markReportGroupButton(selectedButton);
+        } finally {
+            openingReportGroup = false;
+        }
+    }
+
+    private String reportGroupForReport(String reportType) {
+        return switch (reportType == null ? "" : reportType) {
+            case "Income Report", "Income Source Analysis", "Expense Report",
+                 "Category Spending", "Budget vs Actual", "Recurring Transactions",
+                 "Expense Trend Report" -> REPORT_GROUP_INCOME_EXPENSES;
+            case "Account Balance Report", "Net Worth Report", "Financial Position",
+                 "Account Reconciliation", "Transfer Report" -> REPORT_GROUP_ACCOUNTS_POSITION;
+            case "Project Report", "Project Performance", "Savings and Goals Progress" -> REPORT_GROUP_PROJECTS_GOALS;
+            case "Loan Report", "Lending Report", "Money Borrowed Report", "Money Lent Report",
+                 "Debt Aging Report", "Upcoming Obligations" -> REPORT_GROUP_LOANS_OBLIGATIONS;
+            case "Trends and Forecast", "Financial Health", "Unusual Transactions",
+                 "Recommendations" -> REPORT_GROUP_SMART_ANALYSIS;
+            case "Data Quality Report", "Audit Trail", "Backup and Restore History" -> REPORT_GROUP_SYSTEM_REPORTS;
+            default -> REPORT_GROUP_OVERVIEW;
+        };
+    }
+
+    private Button reportButtonForGroup(String reportGroup) {
+        return switch (reportGroup == null ? "" : reportGroup) {
+            case REPORT_GROUP_INCOME_EXPENSES -> reportIncomeExpensesButton;
+            case REPORT_GROUP_ACCOUNTS_POSITION -> reportAccountsPositionButton;
+            case REPORT_GROUP_PROJECTS_GOALS -> reportProjectsGoalsButton;
+            case REPORT_GROUP_LOANS_OBLIGATIONS -> reportLoansObligationsButton;
+            case REPORT_GROUP_SMART_ANALYSIS -> reportSmartAnalysisButton;
+            case REPORT_GROUP_SYSTEM_REPORTS -> reportSystemReportsButton;
+            default -> reportOverviewButton;
+        };
+    }
+
     private void showLoanTransaction(String title, String transactionType, String purpose) {
         NavigationBus.requestTransaction(transactionType, purpose, null);
         loadView("Expenses.fxml", title);
     }
 
+    private void loadSetupPolicy(String area, String title) {
+        loadView("SetupPolicy.fxml", title, area);
+    }
+
+    private void openSetupSection(String fileName, String title, Button selectedButton, String tabKey) {
+        if (UserSession.getAuthenticatedUser().isMustChangePassword()) {
+            loadView(fileName, title);
+            return;
+        }
+        SetupSectionController.rememberTab(title, tabKey);
+        openingSetupSection = true;
+        try {
+            loadView(fileName, title);
+            markSetupSectionButton(selectedButton);
+        } finally {
+            openingSetupSection = false;
+        }
+    }
+
+    private void openDataRecordsSection(String fileName, String title, Button selectedButton, String tabKey) {
+        if (UserSession.getAuthenticatedUser().isMustChangePassword()) {
+            loadView(fileName, title);
+            return;
+        }
+        DataRecordsSectionController.rememberTab(title, tabKey);
+        openingDataRecordsSection = true;
+        try {
+            loadView(fileName, title);
+            markDataRecordsButton(selectedButton);
+        } finally {
+            openingDataRecordsSection = false;
+        }
+    }
+
     private void loadView(String fileName, String title) {
+        loadView(fileName, title, null);
+    }
+
+    private void loadView(String fileName, String title, String setupArea) {
+        if (redirectToPasswordChangeIfRequired(fileName)) {
+            return;
+        }
+        if (!openingSetupSection) {
+            Button setupButton = setupButtonFor(fileName);
+            if (setupButton == null) {
+                clearSetupSectionSelection();
+            } else {
+                markSetupSectionButton(setupButton);
+            }
+        }
+        if (!openingReportGroup) {
+            if (!"Reports.fxml".equals(fileName)) {
+                clearReportGroupSelection();
+            }
+        }
+        if (!openingDataRecordsSection) {
+            Button dataRecordsButton = dataRecordsButtonFor(fileName);
+            if (dataRecordsButton == null) {
+                clearDataRecordsSelection();
+            } else {
+                markDataRecordsButton(dataRecordsButton);
+            }
+        }
         try {
             rememberCurrentView();
             sectionTitleLabel.setText(title);
             setDashboardSummaryVisible(false);
-            Parent view = FXMLLoader.load(getClass().getResource("/com/wk/pfmis/views/" + fileName));
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/wk/pfmis/views/" + fileName));
+            Parent view = loader.load();
+            if (setupArea != null && loader.getController() instanceof SetupPolicyController controller) {
+                controller.selectArea(setupArea);
+            }
             Node displayView = unwrapScrollPane(view);
             makeDynamic(displayView);
             contentPane.getChildren().setAll(displayView);
@@ -644,6 +1163,12 @@ public class DashboardController {
     }
 
     private void loadPlaceholder(String title, String message) {
+        if (redirectToPasswordChangeIfRequired("Dashboard.fxml")) {
+            return;
+        }
+        clearSetupSectionSelection();
+        clearReportGroupSelection();
+        clearDataRecordsSelection();
         sectionTitleLabel.setText(title);
         setDashboardSummaryVisible(false);
         VBox placeholder = new VBox(12);
@@ -655,6 +1180,138 @@ public class DashboardController {
         body.getStyleClass().add("form-note");
         placeholder.getChildren().setAll(heading, body);
         contentPane.getChildren().setAll(placeholder);
+    }
+
+    private boolean redirectToPasswordChangeIfRequired(String requestedFileName) {
+        if (!UserSession.getAuthenticatedUser().isMustChangePassword()
+                || "MyAccount.fxml".equals(requestedFileName)) {
+            return false;
+        }
+        if (!passwordChangeNoticeShown && contentPane.getScene() != null) {
+            UiAlerts.info("Change your temporary password before continuing normal work.");
+            passwordChangeNoticeShown = true;
+        }
+        loadView("MyAccount.fxml", "My Account");
+        return true;
+    }
+
+    private Button setupButtonFor(String fileName) {
+        return switch (fileName) {
+            case "SetupAdministration.fxml" -> setupAdministrationButton;
+            case "SetupSecurityUsers.fxml" -> setupSecurityUsersButton;
+            case "SetupFinancialConfiguration.fxml" -> setupFinancialConfigurationButton;
+            case "SetupSmartIntelligence.fxml" -> setupSmartIntelligenceButton;
+            case "SetupDataSystem.fxml" -> setupDataSystemButton;
+            default -> null;
+        };
+    }
+
+    private Button dataRecordsButtonFor(String fileName) {
+        return switch (fileName) {
+            case "DataRecordsDataIntake.fxml" -> dataIntakeButton;
+            case "DataRecordsRecordsControl.fxml" -> recordsControlButton;
+            case "DataRecordsQuality.fxml" -> dataQualityRecordsButton;
+            case "DataRecordsAuditHistory.fxml" -> auditHistoryButton;
+            case "DataRecordsSyncRecovery.fxml" -> syncRecoveryButton;
+            case "DataRecordsMaintenance.fxml" -> dataMaintenanceButton;
+            default -> null;
+        };
+    }
+
+    private void markSetupSectionButton(Button selectedButton) {
+        for (Button button : setupSectionButtons()) {
+            if (button == null) {
+                continue;
+            }
+            button.getStyleClass().remove("active");
+        }
+        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
+            selectedButton.getStyleClass().add("active");
+        }
+    }
+
+    private void clearSetupSectionSelection() {
+        for (Button button : setupSectionButtons()) {
+            if (button != null) {
+                button.getStyleClass().remove("active");
+            }
+        }
+    }
+
+    private List<Button> setupSectionButtons() {
+        return List.of(
+                setupAdministrationButton,
+                setupSecurityUsersButton,
+                setupFinancialConfigurationButton,
+                setupSmartIntelligenceButton,
+                setupDataSystemButton
+        );
+    }
+
+    private void markDataRecordsButton(Button selectedButton) {
+        for (Button button : dataRecordsButtons()) {
+            if (button == null) {
+                continue;
+            }
+            button.getStyleClass().remove("active");
+        }
+        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
+            selectedButton.getStyleClass().add("active");
+        }
+    }
+
+    private void clearDataRecordsSelection() {
+        for (Button button : dataRecordsButtons()) {
+            if (button != null) {
+                button.getStyleClass().remove("active");
+            }
+        }
+    }
+
+    private List<Button> dataRecordsButtons() {
+        List<Button> buttons = new ArrayList<>(List.of(
+                dataIntakeButton,
+                recordsControlButton,
+                dataQualityRecordsButton,
+                auditHistoryButton,
+                syncRecoveryButton
+        ));
+        if (dataMaintenanceButton != null) {
+            buttons.add(dataMaintenanceButton);
+        }
+        return buttons;
+    }
+
+    private void markReportGroupButton(Button selectedButton) {
+        for (Button button : reportGroupButtons()) {
+            if (button == null) {
+                continue;
+            }
+            button.getStyleClass().remove("active");
+        }
+        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
+            selectedButton.getStyleClass().add("active");
+        }
+    }
+
+    private void clearReportGroupSelection() {
+        for (Button button : reportGroupButtons()) {
+            if (button != null) {
+                button.getStyleClass().remove("active");
+            }
+        }
+    }
+
+    private List<Button> reportGroupButtons() {
+        return List.of(
+                reportOverviewButton,
+                reportIncomeExpensesButton,
+                reportAccountsPositionButton,
+                reportProjectsGoalsButton,
+                reportLoansObligationsButton,
+                reportSmartAnalysisButton,
+                reportSystemReportsButton
+        );
     }
 
     private void setDashboardSummaryVisible(boolean visible) {

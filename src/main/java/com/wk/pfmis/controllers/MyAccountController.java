@@ -12,6 +12,7 @@ public class MyAccountController {
     @FXML private Label usernameLabel;
     @FXML private Label emailLabel;
     @FXML private Label roleLabel;
+    @FXML private Label passwordStatusLabel;
     @FXML private Label workspaceLabel;
     @FXML private PasswordField currentPasswordField;
     @FXML private PasswordField newPasswordField;
@@ -27,6 +28,9 @@ public class MyAccountController {
         usernameLabel.setText(user.getUsername());
         emailLabel.setText(user.getEmail().isBlank() ? "Not provided" : user.getEmail());
         roleLabel.setText(user.getRoleDisplay());
+        passwordStatusLabel.setText(user.isMustChangePassword()
+                ? "Password change required. Set a new password before continuing normal work."
+                : "Password status: current.");
         workspaceLabel.setText(UserSession.isViewingOwnWorkspace()
                 ? "You are using your own private workspace."
                 : "You are administering the workspace of " + UserSession.getWorkspaceUser().getDisplayName() + ".");
@@ -46,9 +50,12 @@ public class MyAccountController {
                     currentPasswordField.getText(),
                     newPasswordField.getText()
             );
+            SystemUser refreshedUser = authDatabase.findUserById(UserSession.getAuthenticatedUser().getId());
+            UserSession.refreshAuthenticatedUser(refreshedUser);
             currentPasswordField.clear();
             newPasswordField.clear();
             confirmPasswordField.clear();
+            passwordStatusLabel.setText("Password status: current.");
             messageLabel.setText("Password changed successfully.");
         } catch (RuntimeException exception) {
             messageLabel.setText(rootMessage(exception));

@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Tab?>
 <?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TextArea?>
 <?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox xmlns="http://javafx.com/javafx/21"
@@ -35,6 +39,86 @@
                 <Label fx:id="adminRecordsStatusLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
             </VBox>
         </FlowPane>
+
+        <FlowPane hgap="12" vgap="12" prefWrapLength="920" styleClass="admin-overview-strip">
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Application Version" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminVersionLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Schema Version" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminSchemaLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Active User" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminActiveUserLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Active Workspace" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminWorkspaceLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Database Location" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminDatabaseLocationLabel" text="Checking" wrapText="true" styleClass="settings-status-text"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Database Size" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminDatabaseSizeLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Integrity" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminIntegrityLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Data Quality" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminDataQualityLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Security Warnings" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminSecurityWarningsLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Local AI" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminLocalAiLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="AI Provider" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminAiProviderLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card">
+                <Label text="Automatic Backup" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminAutomaticBackupLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Last Login" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminLastLoginLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+            <VBox spacing="6" styleClass="admin-overview-card-wide">
+                <Label text="Last Failed Login" wrapText="true" styleClass="field-label"/>
+                <Label fx:id="adminFailedLoginLabel" text="Checking" wrapText="true" styleClass="settings-status-title"/>
+            </VBox>
+        </FlowPane>
+
+        <VBox spacing="10" styleClass="panel">
+            <Label fx:id="adminConclusionLabel" text="System health conclusion" wrapText="true" styleClass="settings-status-title"/>
+            <HBox spacing="8" alignment="CENTER_RIGHT">
+                <Button text="Run System Health Check" onAction="#runSystemHealthCheck" minWidth="180" styleClass="primary-button"/>
+                <Button text="Check Database Integrity" onAction="#checkDatabaseIntegrity" minWidth="180" styleClass="secondary-button"/>
+                <Button text="Backup Now" onAction="#backupNow" minWidth="110" styleClass="secondary-button"/>
+                <Button text="Open Backup History" onAction="#openBackupHistory" minWidth="160" styleClass="secondary-button"/>
+                <Button text="Review Data Quality" onAction="#reviewDataQuality" minWidth="155" styleClass="secondary-button"/>
+                <Region HBox.hgrow="ALWAYS"/>
+            </HBox>
+            <HBox spacing="8" alignment="CENTER_RIGHT">
+                <Button text="View Audit Trail" onAction="#viewAuditTrail" minWidth="130" styleClass="secondary-button"/>
+                <Button text="Open AI Status" onAction="#openAiStatus" minWidth="130" styleClass="secondary-button"/>
+                <Button text="Database Maintenance" onAction="#databaseMaintenance" minWidth="170" styleClass="secondary-button"/>
+                <Button text="Manage Workspace" onAction="#manageWorkspace" minWidth="155" styleClass="secondary-button"/>
+                <Button text="Refresh" onAction="#refreshDashboard" minWidth="90" styleClass="secondary-button"/>
+                <Region HBox.hgrow="ALWAYS"/>
+            </HBox>
+            <TextArea fx:id="adminActionResultArea" prefRowCount="7" wrapText="false" editable="false"/>
+        </VBox>
 
         <TabPane tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="admin-tab-pane">
             <tabs>

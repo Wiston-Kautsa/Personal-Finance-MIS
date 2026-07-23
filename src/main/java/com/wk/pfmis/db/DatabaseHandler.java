@@ -14,11 +14,17 @@ import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Goal;
 import com.wk.pfmis.models.GoalStep;
 import com.wk.pfmis.models.HouseholdMonthMember;
+import com.wk.pfmis.models.AccountReconciliationRecord;
+import com.wk.pfmis.models.LoanScheduleRecord;
 import com.wk.pfmis.models.PaymentMethodRecord;
 import com.wk.pfmis.models.Person;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.models.ProjectActivity;
+import com.wk.pfmis.models.RecurringTransactionPlan;
+import com.wk.pfmis.models.ReportPositionItem;
 import com.wk.pfmis.models.ReportRow;
+import com.wk.pfmis.models.ScheduledObligation;
+import com.wk.pfmis.models.SetupPolicyRecord;
 import com.wk.pfmis.models.SystemLogRecord;
 import com.wk.pfmis.models.SystemUser;
 import com.wk.pfmis.security.UserSession;
@@ -379,6 +385,8 @@ public class DatabaseHandler {
             initializeBackupHistory(connection);
             initializeSystemEventLog(connection);
             initializeAiInteractionLog(connection);
+            initializeReportInputTables(connection);
+            initializeSetupPolicyTables(connection);
             migrateHouseholdBudgetMembersTable(connection);
             createIndexes(connection);
             initializeAiSettings(connection);
@@ -747,6 +755,232 @@ public class DatabaseHandler {
         }
     }
 
+    private void initializeReportInputTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS report_position_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        item_name TEXT NOT NULL,
+                        position_type TEXT NOT NULL DEFAULT 'ASSET',
+                        item_type TEXT NOT NULL DEFAULT 'Other',
+                        current_value REAL NOT NULL DEFAULT 0,
+                        valuation_date TEXT,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS scheduled_obligations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        obligation_name TEXT NOT NULL,
+                        obligation_type TEXT NOT NULL DEFAULT 'Other',
+                        amount REAL NOT NULL DEFAULT 0,
+                        due_date TEXT,
+                        frequency TEXT NOT NULL DEFAULT 'One-time',
+                        account_id INTEGER,
+                        category_id INTEGER,
+                        project_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS recurring_transaction_plans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        plan_name TEXT NOT NULL,
+                        transaction_type TEXT NOT NULL DEFAULT 'EXPENSE',
+                        amount REAL NOT NULL DEFAULT 0,
+                        frequency TEXT NOT NULL DEFAULT 'Monthly',
+                        next_due_date TEXT,
+                        account_id INTEGER,
+                        category_id INTEGER,
+                        project_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS account_reconciliations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        reconciliation_date TEXT NOT NULL,
+                        system_balance REAL NOT NULL DEFAULT 0,
+                        actual_balance REAL NOT NULL DEFAULT 0,
+                        difference REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'MATCHED',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS loan_schedules (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        person_id INTEGER,
+                        loan_direction TEXT NOT NULL DEFAULT 'BORROWED',
+                        principal_amount REAL NOT NULL DEFAULT 0,
+                        outstanding_amount REAL NOT NULL DEFAULT 0,
+                        interest_rate REAL NOT NULL DEFAULT 0,
+                        payment_amount REAL NOT NULL DEFAULT 0,
+                        due_date TEXT,
+                        frequency TEXT NOT NULL DEFAULT 'Monthly',
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (person_id) REFERENCES people(id)
+                    )
+                    """);
+            statement.execute("""
+                    INSERT OR IGNORE INTO schema_version (version, description)
+                    VALUES (4, 'Report input tables for reconciliation, obligations, recurring plans, position items and loan schedules')
+                    """);
+        }
+    }
+
+    private void initializeSetupPolicyTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS setup_policy_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        policy_area TEXT NOT NULL,
+                        item_name TEXT NOT NULL,
+                        config_type TEXT NOT NULL DEFAULT '',
+                        condition_text TEXT,
+                        threshold_value TEXT,
+                        severity TEXT NOT NULL DEFAULT 'INFO',
+                        recommendation TEXT,
+                        target_screen TEXT,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        notes TEXT,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(policy_area, item_name)
+                    )
+                    """);
+            statement.execute("""
+                    INSERT OR IGNORE INTO schema_version (version, description)
+                    VALUES (6, 'Setup policy registry for smart rules, profile, alerts, automation and governance')
+                    """);
+        }
+        seedSetupPolicyDefaults(connection, null, false);
+    }
+
+    private void seedSetupPolicyDefaults(Connection connection, String requestedArea, boolean overwriteExisting) throws SQLException {
+        for (String[] row : setupPolicyDefaults()) {
+            if (requestedArea != null && !requestedArea.isBlank() && !requestedArea.equals(row[0])) {
+                continue;
+            }
+            saveSetupPolicyDefault(connection, row, overwriteExisting);
+        }
+    }
+
+    private void saveSetupPolicyDefault(Connection connection, String[] row, boolean overwriteExisting) throws SQLException {
+        if (setupPolicyExists(connection, row[0], row[1])) {
+            if (!overwriteExisting) {
+                return;
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE setup_policy_records
+                    SET config_type = ?, condition_text = ?, threshold_value = ?, severity = ?,
+                        recommendation = ?, target_screen = ?, enabled = ?, notes = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE policy_area = ? AND item_name = ?
+                    """)) {
+                bindSetupPolicyDetails(statement, row[2], row[3], row[4], row[5], row[6], row[7], "Enabled".equals(row[8]), row[9]);
+                statement.setString(9, row[0]);
+                statement.setString(10, row[1]);
+                statement.executeUpdate();
+            }
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO setup_policy_records (
+                    policy_area, item_name, config_type, condition_text, threshold_value,
+                    severity, recommendation, target_screen, enabled, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """)) {
+            statement.setString(1, row[0]);
+            statement.setString(2, row[1]);
+            bindSetupPolicyDetails(statement, row[2], row[3], row[4], row[5], row[6], row[7], "Enabled".equals(row[8]), row[9], 3);
+            statement.executeUpdate();
+        }
+    }
+
+    private List<String[]> setupPolicyDefaults() {
+        return List.of(
+                new String[]{"Smart Rules and Thresholds", "Minimum account balance", "Rule", "Available balance falls below reserve", "MWK 100,000", "WARNING", "Pause non-essential spending or move funds before new commitments.", "Accounts", "Enabled", "Used by low-balance warnings and cash-flow recommendations."},
+                new String[]{"Smart Rules and Thresholds", "Minimum monthly savings rate", "Rule", "Savings rate below target", "10%", "WARNING", "Increase savings transfers or reduce discretionary categories.", "Budgets", "Enabled", "Feeds financial health and goal-risk conclusions."},
+                new String[]{"Smart Rules and Thresholds", "Maximum expense-to-income ratio", "Rule", "Expenses divided by income exceeds target", "80%", "CRITICAL", "Review essential and discretionary spending before adding new obligations.", "Reports", "Enabled", "Prevents generic affordability advice."},
+                new String[]{"Smart Rules and Thresholds", "Maximum debt-to-income ratio", "Rule", "Debt payments divided by income exceeds target", "35%", "CRITICAL", "Avoid new borrowing and prioritize repayment scheduling.", "Loans", "Enabled", "Used by loan pressure and financial-health reports."},
+                new String[]{"Smart Rules and Thresholds", "Budget warning level", "Rule", "Budget consumed reaches warning threshold", "80%", "WARNING", "Review remaining budget before approving more spending.", "Budgets", "Enabled", "Budget versus actual report reads this threshold."},
+                new String[]{"Smart Rules and Thresholds", "Unusual transaction threshold", "Rule", "Single transaction exceeds threshold", "MWK 500,000", "WARNING", "Verify reference, account, category and duplicate risk.", "Transactions", "Enabled", "Used by unusual transaction alerts."},
+                new String[]{"Smart Rules and Thresholds", "Income concentration warning", "Rule", "One income source exceeds total income share", "70%", "WARNING", "Build backup income or emergency reserve for concentrated income risk.", "Income", "Enabled", "Feeds income-source analysis."},
+
+                new String[]{"Financial Profile", "Base currency", "Profile", "Default currency for consolidated analysis", "MWK", "INFO", "Convert non-base balances using stored exchange rates before totals.", "Currencies", "Enabled", "Prevents mixed-currency totals from being treated as exact."},
+                new String[]{"Financial Profile", "Income frequency", "Profile", "Expected income cadence", "Monthly", "INFO", "Use this cadence when forecasting shortfalls and upcoming obligations.", "Income", "Enabled", "Required for personalized cash-flow forecasts."},
+                new String[]{"Financial Profile", "Expected income dates", "Profile", "Expected salary or income receipt window", "Month end", "INFO", "Compare obligations against the next expected income date.", "Forecast", "Enabled", "Used by projected shortfall checks."},
+                new String[]{"Financial Profile", "Minimum cash reserve", "Profile", "Cash that should remain available", "MWK 100,000", "WARNING", "Treat reserve as committed, not freely spendable.", "Financial Position", "Enabled", "Separates available cash from committed money."},
+                new String[]{"Financial Profile", "Emergency fund target", "Profile", "Months of expenses to hold", "3 months", "WARNING", "Increase recurring savings until target coverage is met.", "Goals", "Enabled", "Used by financial-health scoring."},
+                new String[]{"Financial Profile", "Financial year start", "Profile", "Month that begins the financial year", "January", "INFO", "Use this for quarterly, half-year and annual reporting.", "Reports", "Enabled", "Supports report preferences and period grouping."},
+
+                new String[]{"Alerts and Notifications", "Low account balance", "Alert", "Balance below minimum reserve", "MWK 100,000", "WARNING", "Notify the dashboard and show the affected account.", "Accounts", "Enabled", "Can be routed to popup or email in future."},
+                new String[]{"Alerts and Notifications", "Negative projected balance", "Alert", "Forecast balance below zero", "Next 30 days", "CRITICAL", "Warn before obligations exceed available funds.", "Forecast", "Enabled", "Uses obligations, recurring plans and account balances."},
+                new String[]{"Alerts and Notifications", "Budget almost exhausted", "Alert", "Budget consumed above warning level", "80%", "WARNING", "Show affected category and remaining amount.", "Budgets", "Enabled", "Dashboard and report warning source."},
+                new String[]{"Alerts and Notifications", "Loan payment approaching", "Alert", "Loan due date is near", "7 days", "WARNING", "Remind user before repayment becomes overdue.", "Loans", "Enabled", "Uses loan schedules from Report Data Inputs."},
+                new String[]{"Alerts and Notifications", "Backup overdue", "Alert", "No verified backup recorded recently", "7 days", "WARNING", "Create a backup before major edits or imports.", "Backup and Restore", "Enabled", "Backup guardian rule."},
+                new String[]{"Alerts and Notifications", "AI service failure", "Alert", "Local AI unavailable", "Immediate", "INFO", "Continue deterministic checks and allow financial entry.", "AI Configuration", "Enabled", "AI must not block core accounting."},
+
+                new String[]{"Automation Schedules", "Daily financial analysis", "Schedule", "Run deterministic checks daily", "Daily", "INFO", "Refresh dashboard warnings and data quality status.", "Dashboard", "Enabled", "Future scheduler entry."},
+                new String[]{"Automation Schedules", "Weekly financial briefing", "Schedule", "Summarize cash flow, budget and obligations", "Weekly", "INFO", "Prepare a weekly decision-support summary.", "Reports", "Enabled", "Future proactive monitoring entry."},
+                new String[]{"Automation Schedules", "Month-end summary", "Schedule", "Close monthly summary and compare prior month", "Monthly", "INFO", "Generate monthly interpretation and next actions.", "Reports", "Enabled", "Future month-end workflow."},
+                new String[]{"Automation Schedules", "Automatic backup", "Schedule", "Create safety backup on schedule", "Daily", "WARNING", "Keep daily verified backup for workspace recovery.", "Backup and Restore", "Enabled", "Already supported by startup backup service."},
+                new String[]{"Automation Schedules", "Data-quality scan", "Schedule", "Scan missing categories, duplicates and future dates", "Daily", "WARNING", "Raise data quality warnings before reports are trusted.", "Data Quality", "Enabled", "Future scheduled scan entry."},
+
+                new String[]{"Report Preferences", "Default reporting period", "Preference", "Initial report date range", "Current month", "INFO", "Open reports with the expected period selected.", "Reports", "Enabled", "User-facing report default."},
+                new String[]{"Report Preferences", "Include smart conclusion", "Preference", "Append interpretation to analytical reports", "Yes", "INFO", "Show conclusion, evidence, risks and recommended actions.", "Reports", "Enabled", "Required by decision-support reports."},
+                new String[]{"Report Preferences", "Include evidence section", "Preference", "Show linked records supporting conclusions", "Yes", "INFO", "Expose why the conclusion was reached.", "Reports", "Enabled", "Supports explainability."},
+                new String[]{"Report Preferences", "PDF page size", "Preference", "Default export page size", "A4", "INFO", "Use consistent report exports.", "Reports", "Enabled", "Export preference."},
+
+                new String[]{"Session and Auto-Lock Settings", "Inactivity timeout", "Security", "Lock after inactivity", "15 minutes", "WARNING", "Require sign-in after idle periods.", "My Account", "Enabled", "Configuration placeholder for future session enforcement."},
+                new String[]{"Session and Auto-Lock Settings", "Automatic locking", "Security", "Lock on sensitive screens", "Enabled", "WARNING", "Protect financial and user-management data.", "My Account", "Enabled", "Security preference."},
+                new String[]{"Session and Auto-Lock Settings", "Recovery information", "Security", "Email must be available for reset", "Required", "WARNING", "Keep recovery email current.", "My Account", "Enabled", "Supports email password reset."},
+
+                new String[]{"Workspace Management", "Workspace owner", "Governance", "Signed-in owner controls personal database", "Workspace Owner", "INFO", "Keep owner and super administrator responsibilities separate.", "Administration", "Enabled", "Normal users own their records but not global users."},
+                new String[]{"Workspace Management", "Safety backup before maintenance", "Governance", "Create backup before changing data", "Required", "WARNING", "Run backup before maintenance, import, restore or deletion.", "Backup and Restore", "Enabled", "Recovery control."},
+                new String[]{"Workspace Management", "Super admin workspace access", "Governance", "Record cross-workspace access", "Audit required", "CRITICAL", "Log every administrator workspace switch.", "User Management", "Enabled", "Already supported by authentication log."},
+
+                new String[]{"Data Quality and Reconciliation", "Transactions without categories", "Data Check", "Income or expense has no category", "0 allowed", "WARNING", "Assign categories before trusting spending analysis.", "Transactions", "Enabled", "Required for reliable reports."},
+                new String[]{"Data Quality and Reconciliation", "Duplicate transactions", "Data Check", "Same account, date, type, amount and description repeated", "0 allowed", "WARNING", "Review duplicates before totals are used.", "Transactions", "Enabled", "Protects report accuracy."},
+                new String[]{"Data Quality and Reconciliation", "Future-dated transactions", "Data Check", "Transaction date after today", "0 allowed", "WARNING", "Confirm scheduled items are entered as obligations or recurring plans.", "Transactions", "Enabled", "Avoids misleading current totals."},
+                new String[]{"Data Quality and Reconciliation", "Unreconciled accounts", "Data Check", "Active account has no reconciliation", "Review monthly", "WARNING", "Record actual bank, cash or mobile-money balance.", "Report Data Inputs", "Enabled", "Supports account reconciliation report."},
+
+                new String[]{"Import and Export", "Transaction import template", "Import", "CSV columns must be mapped", "Required", "INFO", "Preview and validate imported rows before commit.", "Import and Export", "Enabled", "Prevents invalid data from entering the workspace."},
+                new String[]{"Import and Export", "Duplicate detection", "Import", "Imported rows match existing transactions", "Required", "WARNING", "Quarantine duplicate candidates before commit.", "Import and Export", "Enabled", "Import safety rule."},
+                new String[]{"Import and Export", "Workspace export", "Export", "Export complete or selected workspace data", "CSV, XLSX, JSON", "INFO", "Support personal-data export and report evidence packages.", "Import and Export", "Enabled", "Future export workflow."},
+
+                new String[]{"Archive and Restore", "Deactivate used master data", "Deletion Policy", "Category, currency or payment method is referenced", "Archive only", "WARNING", "Deactivate or merge instead of hard deleting used records.", "Archive and Restore", "Enabled", "Protects historical reports."},
+                new String[]{"Archive and Restore", "Deletion reason required", "Deletion Policy", "Permanent deletion requested", "Required", "CRITICAL", "Record reason, backup first and audit the outcome.", "Archive and Restore", "Enabled", "Controlled deletion workflow."},
+                new String[]{"Archive and Restore", "Restore archived records", "Recovery", "Archived record is needed again", "Allowed", "INFO", "Restore when financial history requires the original record.", "Archive and Restore", "Enabled", "Recovery workflow."},
+
+                new String[]{"Danger Zone", "Delete financial data", "Guarded Action", "Owner requests removal of all financial records", "Password plus phrase", "CRITICAL", "Create backup, show impact and audit the action before deletion.", "Danger Zone", "Disabled", "No ambiguous Delete Database button."},
+                new String[]{"Danger Zone", "Reset workspace", "Guarded Action", "Workspace reset requested", "Password plus phrase", "CRITICAL", "Explain what settings, login and records remain.", "Danger Zone", "Disabled", "High-impact action must stay visually separated."},
+                new String[]{"Danger Zone", "Delete user account", "Guarded Action", "Account deletion requested", "Protect final super admin", "CRITICAL", "Block deletion of the final active Super Administrator.", "Danger Zone", "Disabled", "Super administrator protection."}
+        );
+    }
+
     private void createIndexes(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date)");
@@ -766,6 +1000,12 @@ public class DatabaseHandler {
             statement.execute("CREATE INDEX IF NOT EXISTS idx_system_event_log_created ON system_event_log(created_at)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_currencies_status ON currencies(status)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_payment_methods_status ON payment_methods(status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_report_position_status ON report_position_items(position_type, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_obligations_due ON scheduled_obligations(due_date, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_recurring_plans_due ON recurring_transaction_plans(next_due_date, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_reconciliations_account_date ON account_reconciliations(account_id, reconciliation_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loan_schedules_due ON loan_schedules(due_date, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_setup_policy_area ON setup_policy_records(policy_area, enabled)");
         }
     }
 
@@ -1214,7 +1454,25 @@ public class DatabaseHandler {
         updateAccountStatus(accountId, "INACTIVE");
     }
 
+    private void requireSuperAdminForPhysicalDeletion(String action) {
+        if (UserSession.isSuperAdmin()) {
+            return;
+        }
+        try {
+            recordSystemLog(
+                    "Data And Records",
+                    "Blocked physical deletion",
+                    "WARNING",
+                    action + " blocked. Physical deletion, purge, clear and reset operations require a Super Administrator."
+            );
+        } catch (RuntimeException ignored) {
+            // Deletion remains blocked even if the audit table is temporarily unavailable.
+        }
+        throw new SecurityException("Only a Super Administrator may permanently delete, purge, clear or reset financial data. Use freeze, cancellation, reversal, archive or a Data Maintenance request instead.");
+    }
+
     public void deleteAccount(int accountId) {
+        requireSuperAdminForPhysicalDeletion("delete account " + accountId);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement("DELETE FROM accounts WHERE id = ?")) {
             statement.setInt(1, accountId);
@@ -1475,6 +1733,7 @@ public class DatabaseHandler {
     }
 
     public void deleteBudget(int budgetId) {
+        requireSuperAdminForPhysicalDeletion("delete budget " + budgetId);
         String sql = "DELETE FROM budgets WHERE id = ?";
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setInt(1, budgetId);
@@ -1608,6 +1867,7 @@ public class DatabaseHandler {
     }
 
     public void deleteHouseholdMonthMember(int memberId) {
+        requireSuperAdminForPhysicalDeletion("delete household budget member " + memberId);
         String sql = """
                 DELETE FROM household_budget_members
                 WHERE id = ?
@@ -2223,6 +2483,7 @@ public class DatabaseHandler {
     }
 
     public void deleteGoal(int goalId) {
+        requireSuperAdminForPhysicalDeletion("delete goal " + goalId);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement("DELETE FROM goals WHERE id = ?")) {
             statement.setInt(1, goalId);
@@ -2489,6 +2750,254 @@ public class DatabaseHandler {
         return history;
     }
 
+    public List<SetupPolicyRecord> listSetupPolicyRecords(String policyArea) {
+        List<SetupPolicyRecord> records = new ArrayList<>();
+        String area = policyArea == null ? "" : policyArea.trim();
+        String sql = area.isBlank()
+                ? """
+                SELECT id, policy_area, item_name, config_type, condition_text, threshold_value,
+                       severity, recommendation, target_screen, enabled, notes, updated_at
+                FROM setup_policy_records
+                ORDER BY policy_area COLLATE NOCASE, item_name COLLATE NOCASE
+                """
+                : """
+                SELECT id, policy_area, item_name, config_type, condition_text, threshold_value,
+                       severity, recommendation, target_screen, enabled, notes, updated_at
+                FROM setup_policy_records
+                WHERE policy_area = ?
+                ORDER BY item_name COLLATE NOCASE
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (!area.isBlank()) {
+                statement.setString(1, area);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    records.add(new SetupPolicyRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getString("policy_area"),
+                            resultSet.getString("item_name"),
+                            resultSet.getString("config_type"),
+                            resultSet.getString("condition_text"),
+                            resultSet.getString("threshold_value"),
+                            resultSet.getString("severity"),
+                            resultSet.getString("recommendation"),
+                            resultSet.getString("target_screen"),
+                            resultSet.getInt("enabled") == 1,
+                            resultSet.getString("notes"),
+                            resultSet.getString("updated_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list setup policy records", exception);
+        }
+        return records;
+    }
+
+    public void saveSetupPolicyRecord(
+            Integer id,
+            String policyArea,
+            String itemName,
+            String configType,
+            String conditionText,
+            String thresholdValue,
+            String severity,
+            String recommendation,
+            String targetScreen,
+            boolean enabled,
+            String notes
+    ) {
+        String cleanArea = requireText(policyArea, "Setup area");
+        String cleanName = requireText(itemName, "Item name");
+        try (Connection connection = connect()) {
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE setup_policy_records
+                        SET policy_area = ?, item_name = ?, config_type = ?, condition_text = ?,
+                            threshold_value = ?, severity = ?, recommendation = ?, target_screen = ?,
+                            enabled = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, cleanArea);
+                    statement.setString(2, cleanName);
+                    bindSetupPolicyDetails(statement, configType, conditionText, thresholdValue, severity, recommendation, targetScreen, enabled, notes, 3);
+                    statement.setInt(11, id);
+                    statement.executeUpdate();
+                }
+            } else if (setupPolicyExists(connection, cleanArea, cleanName)) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE setup_policy_records
+                        SET config_type = ?, condition_text = ?, threshold_value = ?, severity = ?,
+                            recommendation = ?, target_screen = ?, enabled = ?, notes = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE policy_area = ? AND item_name = ?
+                        """)) {
+                    bindSetupPolicyDetails(statement, configType, conditionText, thresholdValue, severity, recommendation, targetScreen, enabled, notes);
+                    statement.setString(9, cleanArea);
+                    statement.setString(10, cleanName);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO setup_policy_records (
+                            policy_area, item_name, config_type, condition_text, threshold_value,
+                            severity, recommendation, target_screen, enabled, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    statement.setString(1, cleanArea);
+                    statement.setString(2, cleanName);
+                    bindSetupPolicyDetails(statement, configType, conditionText, thresholdValue, severity, recommendation, targetScreen, enabled, notes, 3);
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Setup", "Save Setup Policy", "INFO", cleanArea + ": " + cleanName);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save setup policy record", exception);
+        }
+    }
+
+    public void setSetupPolicyEnabled(int id, boolean enabled) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE setup_policy_records
+                     SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setInt(1, enabled ? 1 : 0);
+            statement.setInt(2, id);
+            statement.executeUpdate();
+            recordSystemLog("Setup", enabled ? "Enable Setup Policy" : "Disable Setup Policy", "INFO", "Policy " + id + " updated.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update setup policy status", exception);
+        }
+    }
+
+    public void restoreDefaultSetupPolicies(String policyArea) {
+        String cleanArea = requireText(policyArea, "Setup area");
+        try (Connection connection = connect()) {
+            seedSetupPolicyDefaults(connection, cleanArea, true);
+            recordSystemLog("Setup", "Restore Default Setup Policies", "INFO", cleanArea + " defaults restored.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to restore default setup policies", exception);
+        }
+    }
+
+    public String databaseIntegrityStatus() {
+        try (Connection connection = connect()) {
+            return sqliteQuickCheck(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check database integrity", exception);
+        }
+    }
+
+    public String schemaVersionSummary() {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COALESCE(MAX(version), 0) AS latest_version,
+                            COUNT(*) AS version_count
+                     FROM schema_version
+                     """);
+             ResultSet resultSet = statement.executeQuery()) {
+            if (resultSet.next()) {
+                return "v" + resultSet.getInt("latest_version") + " (" + resultSet.getInt("version_count") + " migration record(s))";
+            }
+            return "Not recorded";
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to read schema version", exception);
+        }
+    }
+
+    public int unresolvedDataQualityIssueCount() {
+        try (Connection connection = connect()) {
+            return dataQualityIssueCount(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to count data quality issues", exception);
+        }
+    }
+
+    public String dataQualitySummary() {
+        StringBuilder summary = new StringBuilder();
+        try (Connection connection = connect()) {
+            summary.append("Data Quality and Reconciliation Check\n");
+            appendDataQualityLine(summary, "Transactions without categories", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE category_id IS NULL
+                      AND transaction_type IN ('INCOME','EXPENSE')
+                      AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    """));
+            appendDataQualityLine(summary, "Transactions linked to missing accounts", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions t
+                    LEFT JOIN accounts a ON a.id = t.account_id
+                    WHERE a.id IS NULL
+                    """));
+            appendDataQualityLine(summary, "Duplicate transaction groups", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT account_id, transaction_date, transaction_type, amount, COALESCE(description, '') AS description
+                        FROM transactions
+                        WHERE COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                        GROUP BY account_id, transaction_date, transaction_type, amount, COALESCE(description, '')
+                        HAVING COUNT(*) > 1
+                    )
+                    """));
+            appendDataQualityLine(summary, "Future-dated transactions", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE date(transaction_date) > date('now')
+                    """));
+            appendDataQualityLine(summary, "Zero-value transactions", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE amount = 0
+                    """));
+            appendDataQualityLine(summary, "Transactions without payment method", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE payment_method IS NULL OR trim(payment_method) = ''
+                    """));
+            appendDataQualityLine(summary, "Active accounts without reconciliation", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM accounts a
+                    WHERE COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM account_reconciliations r WHERE r.account_id = a.id
+                      )
+                    """));
+            appendDataQualityLine(summary, "Loan contacts without loan schedule", countQuery(connection, """
+                    SELECT COUNT(*)
+                    FROM people p
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM transactions t
+                        WHERE t.person_id = p.id
+                          AND t.transaction_purpose IN ('MONEY_LENT','MONEY_BORROWED','LENT_REPAID','BORROWED_REPAID')
+                    )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM loan_schedules s WHERE s.person_id = p.id
+                      )
+                    """));
+            int activeCurrencies = countQuery(connection, """
+                    SELECT COUNT(DISTINCT currency)
+                    FROM accounts
+                    WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    """);
+            if (activeCurrencies > 1) {
+                summary.append("Mixed active account currencies: ").append(activeCurrencies)
+                        .append(" (review exchange-rate setup before consolidated totals)\n");
+            } else {
+                summary.append("Mixed active account currencies: 0\n");
+            }
+            summary.append("Database integrity: ").append(sqliteQuickCheck(connection));
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to run data quality check", exception);
+        }
+        return summary.toString();
+    }
+
     public String maintenanceSummary() {
         StringBuilder summary = new StringBuilder();
         try (Connection connection = connect()) {
@@ -2520,6 +3029,116 @@ public class DatabaseHandler {
         }
     }
 
+    private void bindSetupPolicyDetails(
+            PreparedStatement statement,
+            String configType,
+            String conditionText,
+            String thresholdValue,
+            String severity,
+            String recommendation,
+            String targetScreen,
+            boolean enabled,
+            String notes
+    ) throws SQLException {
+        bindSetupPolicyDetails(statement, configType, conditionText, thresholdValue, severity, recommendation, targetScreen, enabled, notes, 1);
+    }
+
+    private void bindSetupPolicyDetails(
+            PreparedStatement statement,
+            String configType,
+            String conditionText,
+            String thresholdValue,
+            String severity,
+            String recommendation,
+            String targetScreen,
+            boolean enabled,
+            String notes,
+            int startIndex
+    ) throws SQLException {
+        statement.setString(startIndex, safeText(configType, ""));
+        statement.setString(startIndex + 1, safeText(conditionText, ""));
+        statement.setString(startIndex + 2, safeText(thresholdValue, ""));
+        statement.setString(startIndex + 3, safeText(severity, "INFO").toUpperCase(Locale.ENGLISH));
+        statement.setString(startIndex + 4, safeText(recommendation, ""));
+        statement.setString(startIndex + 5, safeText(targetScreen, ""));
+        statement.setInt(startIndex + 6, enabled ? 1 : 0);
+        statement.setString(startIndex + 7, safeText(notes, ""));
+    }
+
+    private boolean setupPolicyExists(Connection connection, String policyArea, String itemName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT 1
+                FROM setup_policy_records
+                WHERE policy_area = ? AND item_name = ?
+                LIMIT 1
+                """)) {
+            statement.setString(1, policyArea);
+            statement.setString(2, itemName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private int dataQualityIssueCount(Connection connection) throws SQLException {
+        int count = 0;
+        count += countQuery(connection, """
+                SELECT COUNT(*)
+                FROM transactions
+                WHERE category_id IS NULL
+                  AND transaction_type IN ('INCOME','EXPENSE')
+                  AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                """);
+        count += countQuery(connection, """
+                SELECT COUNT(*)
+                FROM transactions t
+                LEFT JOIN accounts a ON a.id = t.account_id
+                WHERE a.id IS NULL
+                """);
+        count += countQuery(connection, """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT account_id, transaction_date, transaction_type, amount, COALESCE(description, '') AS description
+                    FROM transactions
+                    WHERE COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    GROUP BY account_id, transaction_date, transaction_type, amount, COALESCE(description, '')
+                    HAVING COUNT(*) > 1
+                )
+                """);
+        count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE date(transaction_date) > date('now')");
+        count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE amount = 0");
+        count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE payment_method IS NULL OR trim(payment_method) = ''");
+        count += countQuery(connection, """
+                SELECT COUNT(*)
+                FROM accounts a
+                WHERE COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
+                  AND NOT EXISTS (SELECT 1 FROM account_reconciliations r WHERE r.account_id = a.id)
+                """);
+        count += countQuery(connection, """
+                SELECT COUNT(*)
+                FROM people p
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM transactions t
+                    WHERE t.person_id = p.id
+                      AND t.transaction_purpose IN ('MONEY_LENT','MONEY_BORROWED','LENT_REPAID','BORROWED_REPAID')
+                )
+                  AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.person_id = p.id)
+                """);
+        return count;
+    }
+
+    private void appendDataQualityLine(StringBuilder summary, String label, int count) {
+        summary.append(label).append(": ").append(count).append('\n');
+    }
+
+    private int countQuery(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
+        }
+    }
+
     private int countRows(Connection connection, String tableName) throws SQLException {
         if (!tableExists(connection, tableName)) {
             return 0;
@@ -2532,6 +3151,575 @@ public class DatabaseHandler {
 
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    public List<ReportPositionItem> listReportPositionItems() {
+        List<ReportPositionItem> items = new ArrayList<>();
+        String sql = """
+                SELECT id, item_name, position_type, item_type, current_value, valuation_date, status, notes
+                FROM report_position_items
+                ORDER BY position_type, item_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                items.add(new ReportPositionItem(
+                        resultSet.getInt("id"),
+                        resultSet.getString("item_name"),
+                        resultSet.getString("position_type"),
+                        resultSet.getString("item_type"),
+                        resultSet.getDouble("current_value"),
+                        resultSet.getString("valuation_date"),
+                        resultSet.getString("status"),
+                        resultSet.getString("notes")
+                ));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list financial position items", exception);
+        }
+        return items;
+    }
+
+    public void saveReportPositionItem(Integer id, String itemName, String positionType, String itemType, double currentValue, String valuationDate, String status, String notes) {
+        String cleanName = requireText(itemName, "Item name");
+        String cleanPositionType = "LIABILITY".equalsIgnoreCase(safeText(positionType, "ASSET")) ? "LIABILITY" : "ASSET";
+        String cleanStatus = normalizedActiveStatus(status);
+        try (Connection connection = connect()) {
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE report_position_items
+                        SET item_name = ?, position_type = ?, item_type = ?, current_value = ?,
+                            valuation_date = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, cleanName);
+                    statement.setString(2, cleanPositionType);
+                    statement.setString(3, safeText(itemType, "Other"));
+                    statement.setDouble(4, currentValue);
+                    statement.setString(5, safeText(valuationDate, ""));
+                    statement.setString(6, cleanStatus);
+                    statement.setString(7, safeText(notes, ""));
+                    statement.setInt(8, id);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO report_position_items (
+                            item_name, position_type, item_type, current_value, valuation_date, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    statement.setString(1, cleanName);
+                    statement.setString(2, cleanPositionType);
+                    statement.setString(3, safeText(itemType, "Other"));
+                    statement.setDouble(4, currentValue);
+                    statement.setString(5, safeText(valuationDate, ""));
+                    statement.setString(6, cleanStatus);
+                    statement.setString(7, safeText(notes, ""));
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Report Inputs", "Save Position Item", "INFO", cleanName + " saved.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save financial position item", exception);
+        }
+    }
+
+    public void deleteReportPositionItem(int id) {
+        deleteById("report_position_items", id, "financial position item");
+    }
+
+    public List<ScheduledObligation> listScheduledObligations() {
+        List<ScheduledObligation> obligations = new ArrayList<>();
+        String sql = """
+                SELECT o.id, o.obligation_name, o.obligation_type, o.amount, o.due_date, o.frequency,
+                       a.account_name, c.category_name, p.project_name, o.status, o.notes
+                FROM scheduled_obligations o
+                LEFT JOIN accounts a ON a.id = o.account_id
+                LEFT JOIN categories c ON c.id = o.category_id
+                LEFT JOIN projects p ON p.id = o.project_id
+                ORDER BY COALESCE(o.due_date, ''), o.obligation_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                obligations.add(new ScheduledObligation(
+                        resultSet.getInt("id"),
+                        resultSet.getString("obligation_name"),
+                        resultSet.getString("obligation_type"),
+                        resultSet.getDouble("amount"),
+                        resultSet.getString("due_date"),
+                        resultSet.getString("frequency"),
+                        resultSet.getString("account_name"),
+                        resultSet.getString("category_name"),
+                        resultSet.getString("project_name"),
+                        resultSet.getString("status"),
+                        resultSet.getString("notes")
+                ));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list scheduled obligations", exception);
+        }
+        return obligations;
+    }
+
+    public void saveScheduledObligation(
+            Integer id,
+            String obligationName,
+            String obligationType,
+            double amount,
+            String dueDate,
+            String frequency,
+            Integer accountId,
+            Integer categoryId,
+            Integer projectId,
+            String status,
+            String notes
+    ) {
+        String cleanName = requireText(obligationName, "Obligation name");
+        String cleanStatus = normalizedReportStatus(status);
+        try (Connection connection = connect()) {
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE scheduled_obligations
+                        SET obligation_name = ?, obligation_type = ?, amount = ?, due_date = ?, frequency = ?,
+                            account_id = ?, category_id = ?, project_id = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    bindScheduledObligation(statement, cleanName, obligationType, amount, dueDate, frequency, accountId, categoryId, projectId, cleanStatus, notes);
+                    statement.setInt(11, id);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO scheduled_obligations (
+                            obligation_name, obligation_type, amount, due_date, frequency,
+                            account_id, category_id, project_id, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    bindScheduledObligation(statement, cleanName, obligationType, amount, dueDate, frequency, accountId, categoryId, projectId, cleanStatus, notes);
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Report Inputs", "Save Obligation", "INFO", cleanName + " saved.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save scheduled obligation", exception);
+        }
+    }
+
+    private void bindScheduledObligation(
+            PreparedStatement statement,
+            String cleanName,
+            String obligationType,
+            double amount,
+            String dueDate,
+            String frequency,
+            Integer accountId,
+            Integer categoryId,
+            Integer projectId,
+            String status,
+            String notes
+    ) throws SQLException {
+        statement.setString(1, cleanName);
+        statement.setString(2, safeText(obligationType, "Other"));
+        statement.setDouble(3, amount);
+        statement.setString(4, safeText(dueDate, ""));
+        statement.setString(5, safeText(frequency, "One-time"));
+        setOptionalInt(statement, 6, accountId);
+        setOptionalInt(statement, 7, categoryId);
+        setOptionalInt(statement, 8, projectId);
+        statement.setString(9, status);
+        statement.setString(10, safeText(notes, ""));
+    }
+
+    public void deleteScheduledObligation(int id) {
+        deleteById("scheduled_obligations", id, "scheduled obligation");
+    }
+
+    public List<RecurringTransactionPlan> listRecurringTransactionPlans() {
+        List<RecurringTransactionPlan> plans = new ArrayList<>();
+        String sql = """
+                SELECT r.id, r.plan_name, r.transaction_type, r.amount, r.frequency, r.next_due_date,
+                       a.account_name, c.category_name, p.project_name, r.status, r.notes
+                FROM recurring_transaction_plans r
+                LEFT JOIN accounts a ON a.id = r.account_id
+                LEFT JOIN categories c ON c.id = r.category_id
+                LEFT JOIN projects p ON p.id = r.project_id
+                ORDER BY COALESCE(r.next_due_date, ''), r.plan_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                plans.add(new RecurringTransactionPlan(
+                        resultSet.getInt("id"),
+                        resultSet.getString("plan_name"),
+                        resultSet.getString("transaction_type"),
+                        resultSet.getDouble("amount"),
+                        resultSet.getString("frequency"),
+                        resultSet.getString("next_due_date"),
+                        resultSet.getString("account_name"),
+                        resultSet.getString("category_name"),
+                        resultSet.getString("project_name"),
+                        resultSet.getString("status"),
+                        resultSet.getString("notes")
+                ));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list recurring transaction plans", exception);
+        }
+        return plans;
+    }
+
+    public void saveRecurringTransactionPlan(
+            Integer id,
+            String planName,
+            String transactionType,
+            double amount,
+            String frequency,
+            String nextDueDate,
+            Integer accountId,
+            Integer categoryId,
+            Integer projectId,
+            String status,
+            String notes
+    ) {
+        String cleanName = requireText(planName, "Plan name");
+        String cleanType = "INCOME".equalsIgnoreCase(safeText(transactionType, "EXPENSE")) ? "INCOME" : "EXPENSE";
+        String cleanStatus = normalizedReportStatus(status);
+        try (Connection connection = connect()) {
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE recurring_transaction_plans
+                        SET plan_name = ?, transaction_type = ?, amount = ?, frequency = ?, next_due_date = ?,
+                            account_id = ?, category_id = ?, project_id = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    bindRecurringPlan(statement, cleanName, cleanType, amount, frequency, nextDueDate, accountId, categoryId, projectId, cleanStatus, notes);
+                    statement.setInt(11, id);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO recurring_transaction_plans (
+                            plan_name, transaction_type, amount, frequency, next_due_date,
+                            account_id, category_id, project_id, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    bindRecurringPlan(statement, cleanName, cleanType, amount, frequency, nextDueDate, accountId, categoryId, projectId, cleanStatus, notes);
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Report Inputs", "Save Recurring Plan", "INFO", cleanName + " saved.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save recurring transaction plan", exception);
+        }
+    }
+
+    private void bindRecurringPlan(
+            PreparedStatement statement,
+            String planName,
+            String transactionType,
+            double amount,
+            String frequency,
+            String nextDueDate,
+            Integer accountId,
+            Integer categoryId,
+            Integer projectId,
+            String status,
+            String notes
+    ) throws SQLException {
+        statement.setString(1, planName);
+        statement.setString(2, transactionType);
+        statement.setDouble(3, amount);
+        statement.setString(4, safeText(frequency, "Monthly"));
+        statement.setString(5, safeText(nextDueDate, ""));
+        setOptionalInt(statement, 6, accountId);
+        setOptionalInt(statement, 7, categoryId);
+        setOptionalInt(statement, 8, projectId);
+        statement.setString(9, status);
+        statement.setString(10, safeText(notes, ""));
+    }
+
+    public void deleteRecurringTransactionPlan(int id) {
+        deleteById("recurring_transaction_plans", id, "recurring transaction plan");
+    }
+
+    public List<AccountReconciliationRecord> listAccountReconciliations() {
+        List<AccountReconciliationRecord> records = new ArrayList<>();
+        String sql = """
+                SELECT r.id, r.account_id, a.account_name, r.reconciliation_date, r.system_balance,
+                       r.actual_balance, r.difference, r.status, r.notes, r.created_at
+                FROM account_reconciliations r
+                JOIN accounts a ON a.id = r.account_id
+                ORDER BY r.reconciliation_date DESC, r.id DESC
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                records.add(accountReconciliationRecord(resultSet));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list account reconciliations", exception);
+        }
+        return records;
+    }
+
+    public List<AccountReconciliationRecord> listLatestAccountReconciliations() {
+        List<AccountReconciliationRecord> records = new ArrayList<>();
+        String sql = """
+                SELECT r.id, r.account_id, a.account_name, r.reconciliation_date, r.system_balance,
+                       r.actual_balance, r.difference, r.status, r.notes, r.created_at
+                FROM account_reconciliations r
+                JOIN accounts a ON a.id = r.account_id
+                JOIN (
+                    SELECT account_id, MAX(reconciliation_date) AS latest_date
+                    FROM account_reconciliations
+                    GROUP BY account_id
+                ) latest ON latest.account_id = r.account_id AND latest.latest_date = r.reconciliation_date
+                ORDER BY a.account_name, r.id DESC
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                records.add(accountReconciliationRecord(resultSet));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list latest account reconciliations", exception);
+        }
+        return records;
+    }
+
+    private AccountReconciliationRecord accountReconciliationRecord(ResultSet resultSet) throws SQLException {
+        return new AccountReconciliationRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("reconciliation_date"),
+                resultSet.getDouble("system_balance"),
+                resultSet.getDouble("actual_balance"),
+                resultSet.getDouble("difference"),
+                resultSet.getString("status"),
+                resultSet.getString("notes"),
+                resultSet.getString("created_at")
+        );
+    }
+
+    public void saveAccountReconciliation(Integer id, int accountId, String reconciliationDate, double actualBalance, String notes) {
+        String cleanDate = requireText(reconciliationDate, "Reconciliation date");
+        try (Connection connection = connect()) {
+            double systemBalance = accountBalanceOnDate(connection, accountId, cleanDate);
+            double difference = actualBalance - systemBalance;
+            String status = Math.abs(difference) < LOAN_CLEARANCE_EPSILON ? "MATCHED" : "DIFFERENCE";
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE account_reconciliations
+                        SET account_id = ?, reconciliation_date = ?, system_balance = ?, actual_balance = ?,
+                            difference = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setInt(1, accountId);
+                    statement.setString(2, cleanDate);
+                    statement.setDouble(3, systemBalance);
+                    statement.setDouble(4, actualBalance);
+                    statement.setDouble(5, difference);
+                    statement.setString(6, status);
+                    statement.setString(7, safeText(notes, ""));
+                    statement.setInt(8, id);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO account_reconciliations (
+                            account_id, reconciliation_date, system_balance, actual_balance,
+                            difference, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    statement.setInt(1, accountId);
+                    statement.setString(2, cleanDate);
+                    statement.setDouble(3, systemBalance);
+                    statement.setDouble(4, actualBalance);
+                    statement.setDouble(5, difference);
+                    statement.setString(6, status);
+                    statement.setString(7, safeText(notes, ""));
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Report Inputs", "Save Reconciliation", "INFO", "Account " + accountId + " reconciled for " + cleanDate + ".");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save account reconciliation", exception);
+        }
+    }
+
+    private double accountBalanceOnDate(Connection connection, int accountId, String date) throws SQLException {
+        String sql = """
+                SELECT a.opening_balance + COALESCE(SUM(
+                    CASE
+                       WHEN t.transaction_type = 'INCOME' THEN t.amount
+                       WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                       WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                       WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                       ELSE 0
+                    END
+                ), 0) AS balance
+                FROM accounts a
+                LEFT JOIN transactions t ON t.account_id = a.id
+                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    AND t.transaction_date <= ?
+                WHERE a.id = ?
+                GROUP BY a.id
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, date);
+            statement.setInt(2, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getDouble("balance") : 0;
+            }
+        }
+    }
+
+    public void deleteAccountReconciliation(int id) {
+        deleteById("account_reconciliations", id, "account reconciliation");
+    }
+
+    public List<LoanScheduleRecord> listLoanSchedules() {
+        List<LoanScheduleRecord> records = new ArrayList<>();
+        String sql = """
+                SELECT l.id, pe.full_name, l.loan_direction, l.principal_amount, l.outstanding_amount,
+                       l.interest_rate, l.payment_amount, l.due_date, l.frequency, l.status, l.notes
+                FROM loan_schedules l
+                LEFT JOIN people pe ON pe.id = l.person_id
+                ORDER BY COALESCE(l.due_date, ''), COALESCE(pe.full_name, ''), l.loan_direction
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                records.add(new LoanScheduleRecord(
+                        resultSet.getInt("id"),
+                        resultSet.getString("full_name"),
+                        resultSet.getString("loan_direction"),
+                        resultSet.getDouble("principal_amount"),
+                        resultSet.getDouble("outstanding_amount"),
+                        resultSet.getDouble("interest_rate"),
+                        resultSet.getDouble("payment_amount"),
+                        resultSet.getString("due_date"),
+                        resultSet.getString("frequency"),
+                        resultSet.getString("status"),
+                        resultSet.getString("notes")
+                ));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list loan schedules", exception);
+        }
+        return records;
+    }
+
+    public void saveLoanSchedule(
+            Integer id,
+            Integer personId,
+            String loanDirection,
+            double principalAmount,
+            double outstandingAmount,
+            double interestRate,
+            double paymentAmount,
+            String dueDate,
+            String frequency,
+            String status,
+            String notes
+    ) {
+        String cleanDirection = "LENT".equalsIgnoreCase(safeText(loanDirection, "BORROWED")) ? "LENT" : "BORROWED";
+        String cleanStatus = normalizedReportStatus(status);
+        try (Connection connection = connect()) {
+            if (id != null && id > 0) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE loan_schedules
+                        SET person_id = ?, loan_direction = ?, principal_amount = ?, outstanding_amount = ?,
+                            interest_rate = ?, payment_amount = ?, due_date = ?, frequency = ?,
+                            status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    bindLoanSchedule(statement, personId, cleanDirection, principalAmount, outstandingAmount, interestRate, paymentAmount, dueDate, frequency, cleanStatus, notes);
+                    statement.setInt(11, id);
+                    statement.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO loan_schedules (
+                            person_id, loan_direction, principal_amount, outstanding_amount,
+                            interest_rate, payment_amount, due_date, frequency, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """)) {
+                    bindLoanSchedule(statement, personId, cleanDirection, principalAmount, outstandingAmount, interestRate, paymentAmount, dueDate, frequency, cleanStatus, notes);
+                    statement.executeUpdate();
+                }
+            }
+            recordSystemLog("Report Inputs", "Save Loan Schedule", "INFO", cleanDirection + " schedule saved.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save loan schedule", exception);
+        }
+    }
+
+    private void bindLoanSchedule(
+            PreparedStatement statement,
+            Integer personId,
+            String loanDirection,
+            double principalAmount,
+            double outstandingAmount,
+            double interestRate,
+            double paymentAmount,
+            String dueDate,
+            String frequency,
+            String status,
+            String notes
+    ) throws SQLException {
+        setOptionalInt(statement, 1, personId);
+        statement.setString(2, loanDirection);
+        statement.setDouble(3, principalAmount);
+        statement.setDouble(4, outstandingAmount);
+        statement.setDouble(5, interestRate);
+        statement.setDouble(6, paymentAmount);
+        statement.setString(7, safeText(dueDate, ""));
+        statement.setString(8, safeText(frequency, "Monthly"));
+        statement.setString(9, status);
+        statement.setString(10, safeText(notes, ""));
+    }
+
+    public void deleteLoanSchedule(int id) {
+        deleteById("loan_schedules", id, "loan schedule");
+    }
+
+    private String normalizedReportStatus(String status) {
+        String value = safeText(status, "ACTIVE").toUpperCase(Locale.ENGLISH);
+        return switch (value) {
+            case "PAID", "COMPLETED", "CLOSED" -> "COMPLETED";
+            case "CANCELLED" -> "CANCELLED";
+            case "INACTIVE" -> "INACTIVE";
+            default -> "ACTIVE";
+        };
+    }
+
+    private void setOptionalInt(PreparedStatement statement, int index, Integer value) throws SQLException {
+        if (value == null || value <= 0) {
+            statement.setObject(index, null);
+        } else {
+            statement.setInt(index, value);
+        }
+    }
+
+    private void deleteById(String tableName, int id, String label) {
+        requireSuperAdminForPhysicalDeletion("delete " + label + " " + id);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM " + tableName + " WHERE id = ?")) {
+            statement.setInt(1, id);
+            statement.executeUpdate();
+            recordSystemLog("Report Inputs", "Delete " + label, "INFO", label + " " + id + " deleted.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to delete " + label, exception);
+        }
     }
 
     public BackupRecord createBackup(Path backupDirectory, String requestedName) {
@@ -3228,6 +4416,7 @@ public class DatabaseHandler {
     }
 
     public void deleteTransaction(int transactionId) {
+        requireSuperAdminForPhysicalDeletion("delete transaction " + transactionId);
         try (Connection connection = connect()) {
             connection.setAutoCommit(false);
             try {

@@ -102,6 +102,7 @@ public final class AuthDatabase {
                         status TEXT NOT NULL DEFAULT 'ACTIVE',
                         failed_login_count INTEGER NOT NULL DEFAULT 0,
                         locked_until TEXT,
+                        must_change_password INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TEXT,
                         last_login_at TEXT,
@@ -111,6 +112,7 @@ public final class AuthDatabase {
                     """);
             statement.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)");
+            migrateUsersTable(connection);
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS authentication_log (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +156,29 @@ public final class AuthDatabase {
             return backup;
         } catch (SQLException | IOException exception) {
             throw new IllegalStateException("Failed to back up the PFMIS user registry.", exception);
+        }
+    }
+
+    private void migrateUsersTable(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private void addColumnIfMissing(
+            Connection connection,
+            String tableName,
+            String columnName,
+            String columnDefinition
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(" + tableName + ")");
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                if (columnName.equalsIgnoreCase(resultSet.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
         }
     }
 
@@ -216,8 +241,8 @@ public final class AuthDatabase {
                 String sql = """
                         INSERT INTO users (
                             username, full_name, email, password_hash, password_salt,
-                            password_iterations, role, status
-                        ) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, 'ACTIVE')
+                            password_iterations, role, status, must_change_password
+                        ) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, 'ACTIVE', ?)
                         """;
                 try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
                     statement.setString(1, cleanUsername);
@@ -227,6 +252,7 @@ public final class AuthDatabase {
                     statement.setString(5, passwordRecord.salt());
                     statement.setInt(6, passwordRecord.iterations());
                     statement.setString(7, role);
+                    statement.setInt(8, !createdFirstUser && actingUserId != null ? 1 : 0);
                     statement.executeUpdate();
                     try (ResultSet keys = statement.getGeneratedKeys()) {
                         if (!keys.next()) {
@@ -376,7 +402,7 @@ public final class AuthDatabase {
 
     public List<SystemUser> listUsers(int actingUserId) {
         String sql = """
-                SELECT id, username, full_name, email, role, status, created_at, last_login_at
+                SELECT id, username, full_name, email, role, status, created_at, last_login_at, must_change_password
                 FROM users
                 ORDER BY CASE role WHEN 'SUPER_ADMIN' THEN 0 ELSE 1 END, full_name COLLATE NOCASE
                 """;
@@ -416,23 +442,47 @@ public final class AuthDatabase {
                 statement.setInt(1, Math.max(1, Math.min(limit, 1000)));
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
-                        int rawUserId = resultSet.getInt("user_id");
-                        Integer eventUserId = resultSet.wasNull() ? null : rawUserId;
-                        events.add(new AuthenticationEventRecord(
-                                resultSet.getLong("id"),
-                                eventUserId,
-                                resultSet.getString("username"),
-                                resultSet.getString("event_type"),
-                                resultSet.getInt("success") == 1,
-                                resultSet.getString("details"),
-                                resultSet.getString("created_at")
-                        ));
+                        events.add(mapAuthenticationEvent(resultSet));
                     }
                 }
             }
             return events;
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load authentication events.", exception);
+        }
+    }
+
+    public List<AuthenticationEventRecord> listOwnAuthenticationEvents(int userId, int limit) {
+        String sql = """
+                SELECT log.id, log.user_id,
+                       COALESCE(user.username, log.username_attempt, '-') AS username,
+                       log.event_type, log.success, log.details, log.created_at
+                FROM authentication_log log
+                LEFT JOIN users user ON user.id = log.user_id
+                JOIN users signed_user ON signed_user.id = ?
+                WHERE log.user_id = signed_user.id
+                   OR lower(COALESCE(log.username_attempt, '')) = lower(signed_user.username)
+                   OR (
+                        signed_user.email IS NOT NULL
+                        AND signed_user.email <> ''
+                        AND lower(COALESCE(log.username_attempt, '')) = lower(signed_user.email)
+                   )
+                ORDER BY log.id DESC
+                LIMIT ?
+                """;
+        List<AuthenticationEventRecord> events = new ArrayList<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, userId);
+            statement.setInt(2, Math.max(1, Math.min(limit, 1000)));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    events.add(mapAuthenticationEvent(resultSet));
+                }
+            }
+            return events;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load your authentication events.", exception);
         }
     }
 
@@ -446,7 +496,7 @@ public final class AuthDatabase {
 
     private SystemUser findUserById(Connection connection, int userId) throws SQLException {
         String sql = """
-                SELECT id, username, full_name, email, role, status, created_at, last_login_at
+                SELECT id, username, full_name, email, role, status, created_at, last_login_at, must_change_password
                 FROM users WHERE id = ?
                 """;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -511,7 +561,8 @@ public final class AuthDatabase {
             try (PreparedStatement update = connection.prepareStatement("""
                     UPDATE users
                     SET password_hash = ?, password_salt = ?, password_iterations = ?,
-                        failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+                        failed_login_count = 0, locked_until = NULL,
+                        must_change_password = 0, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """)) {
                 update.setString(1, newRecord.hash());
@@ -535,16 +586,17 @@ public final class AuthDatabase {
             try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE users
                 SET password_hash = ?, password_salt = ?, password_iterations = ?,
-                    failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+                    failed_login_count = 0, locked_until = NULL,
+                    must_change_password = 1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """)) {
-            statement.setString(1, record.hash());
-            statement.setString(2, record.salt());
-            statement.setInt(3, record.iterations());
-            statement.setInt(4, userId);
-            if (statement.executeUpdate() == 0) {
-                throw new IllegalArgumentException("Select a valid user.");
-            }
+                statement.setString(1, record.hash());
+                statement.setString(2, record.salt());
+                statement.setInt(3, record.iterations());
+                statement.setInt(4, userId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a valid user.");
+                }
                 recordAuthEvent(connection, userId, null, "PASSWORD_RESET", true, "Password reset by user " + actingUserId + ".");
             }
         } catch (SQLException exception) {
@@ -593,7 +645,8 @@ public final class AuthDatabase {
             try (PreparedStatement statement = connection.prepareStatement("""
                     UPDATE users
                     SET password_hash = ?, password_salt = ?, password_iterations = ?,
-                        failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+                        failed_login_count = 0, locked_until = NULL,
+                        must_change_password = 1, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ? AND status = 'ACTIVE'
                     """)) {
                 statement.setString(1, record.hash());
@@ -655,8 +708,8 @@ public final class AuthDatabase {
                     try (PreparedStatement insert = connection.prepareStatement("""
                             INSERT INTO users (
                                 username, full_name, email, password_hash, password_salt,
-                                password_iterations, role, status, failed_login_count, locked_until
-                            ) VALUES (?, ?, ?, ?, ?, ?, 'SUPER_ADMIN', 'ACTIVE', 0, NULL)
+                                password_iterations, role, status, failed_login_count, locked_until, must_change_password
+                            ) VALUES (?, ?, ?, ?, ?, ?, 'SUPER_ADMIN', 'ACTIVE', 0, NULL, 0)
                             """, Statement.RETURN_GENERATED_KEYS)) {
                         insert.setString(1, DEFAULT_SUPER_ADMIN_USERNAME);
                         insert.setString(2, DEFAULT_SUPER_ADMIN_FULL_NAME);
@@ -803,13 +856,28 @@ public final class AuthDatabase {
                 resultSet.getString("role"),
                 resultSet.getString("status"),
                 resultSet.getString("created_at"),
-                resultSet.getString("last_login_at")
+                resultSet.getString("last_login_at"),
+                resultSet.getInt("must_change_password") == 1
+        );
+    }
+
+    private AuthenticationEventRecord mapAuthenticationEvent(ResultSet resultSet) throws SQLException {
+        int rawUserId = resultSet.getInt("user_id");
+        Integer eventUserId = resultSet.wasNull() ? null : rawUserId;
+        return new AuthenticationEventRecord(
+                resultSet.getLong("id"),
+                eventUserId,
+                resultSet.getString("username"),
+                resultSet.getString("event_type"),
+                resultSet.getInt("success") == 1,
+                resultSet.getString("details"),
+                resultSet.getString("created_at")
         );
     }
 
     private SystemUser findActiveUserByEmailOrUsername(Connection connection, String emailOrUsername) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT id, username, full_name, email, role, status, created_at, last_login_at
+                SELECT id, username, full_name, email, role, status, created_at, last_login_at, must_change_password
                 FROM users
                 WHERE status = 'ACTIVE'
                   AND (lower(username) = ? OR lower(COALESCE(email, '')) = ?)

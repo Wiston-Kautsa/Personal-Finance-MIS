@@ -25,6 +25,8 @@
             <Label fx:id="emailLabel" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
             <Label text="Role" styleClass="form-label" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
             <Label fx:id="roleLabel" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+            <Label text="Password" styleClass="form-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+            <Label fx:id="passwordStatusLabel" wrapText="true" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
         </GridPane>
     </TitledPane>
 

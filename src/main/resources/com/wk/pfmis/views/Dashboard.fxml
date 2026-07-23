@@ -88,30 +88,35 @@
                     </TitledPane>
 
                     <TitledPane text="Reports" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                        <VBox spacing="5">
-                            <Button text="Monthly Summary" maxWidth="Infinity" onAction="#showMonthlySummaryReport" styleClass="nav-sub-button"/>
-                            <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
-                            <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
-                            <Button text="Project Report" maxWidth="Infinity" onAction="#showProjectReport" styleClass="nav-sub-button"/>
-                            <Button text="Account Report" maxWidth="Infinity" onAction="#showAccountReport" styleClass="nav-sub-button"/>
-                            <Button text="Loan Report" maxWidth="Infinity" onAction="#showLendingReport" styleClass="nav-sub-button"/>
+                        <VBox fx:id="reportNavigation" spacing="8">
+                            <Button fx:id="reportOverviewButton" text="Overview" maxWidth="Infinity" onAction="#openOverviewReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportIncomeExpensesButton" text="Income and Expenses" maxWidth="Infinity" onAction="#openIncomeExpenseReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportAccountsPositionButton" text="Accounts and Position" maxWidth="Infinity" onAction="#openAccountsPositionReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportProjectsGoalsButton" text="Projects and Goals" maxWidth="Infinity" onAction="#openProjectsGoalsReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportLoansObligationsButton" text="Loans and Obligations" maxWidth="Infinity" onAction="#openLoansObligationsReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportSmartAnalysisButton" text="Smart Analysis" maxWidth="Infinity" onAction="#openSmartAnalysisReports" styleClass="setup-section-button"/>
+                            <Button fx:id="reportSystemReportsButton" text="System Reports" maxWidth="Infinity" onAction="#openSystemReports" styleClass="setup-section-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Data And Records" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                        <VBox spacing="5">
-                            <Button text="Audit Logs" maxWidth="Infinity" onAction="#showAuditLogs" styleClass="nav-sub-button"/>
-                            <Button text="Sync Center" maxWidth="Infinity" onAction="#showSyncCenter" styleClass="nav-sub-button"/>
+                        <VBox fx:id="dataRecordsNavigation" spacing="8">
+                            <Button fx:id="dataIntakeButton" text="Data Intake" wrapText="true" maxWidth="Infinity" onAction="#openDataIntake" styleClass="setup-section-button"/>
+                            <Button fx:id="recordsControlButton" text="Records Control" wrapText="true" maxWidth="Infinity" onAction="#openRecordsControl" styleClass="setup-section-button"/>
+                            <Button fx:id="dataQualityRecordsButton" text="Data Quality and Reconciliation" wrapText="true" maxWidth="Infinity" onAction="#openDataQualityRecords" styleClass="setup-section-button"/>
+                            <Button fx:id="auditHistoryButton" text="Audit and History" wrapText="true" maxWidth="Infinity" onAction="#openAuditHistory" styleClass="setup-section-button"/>
+                            <Button fx:id="syncRecoveryButton" text="Sync and Recovery" wrapText="true" maxWidth="Infinity" onAction="#openSyncRecovery" styleClass="setup-section-button"/>
+                            <Button fx:id="dataMaintenanceButton" text="&#9888; Data Maintenance" wrapText="true" maxWidth="Infinity" onAction="#openDataMaintenance" styleClass="setup-section-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Setup" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
-                        <VBox spacing="5">
-                            <Button text="Administration" maxWidth="Infinity" onAction="#showAdministration" styleClass="nav-sub-button"/>
-                            <Button fx:id="userManagementSidebarButton" text="User Management" maxWidth="Infinity" onAction="#showUserManagement" styleClass="nav-sub-button"/>
-                            <Button text="Categories" maxWidth="Infinity" onAction="#showCategories" styleClass="nav-sub-button"/>
-                            <Button text="Payment Methods" maxWidth="Infinity" onAction="#showPaymentMethods" styleClass="nav-sub-button"/>
-                            <Button text="Currencies" maxWidth="Infinity" onAction="#showCurrencies" styleClass="nav-sub-button"/>
+                        <VBox fx:id="setupNavigation" spacing="8">
+                            <Button fx:id="setupAdministrationButton" text="Administration" maxWidth="Infinity" onAction="#openAdministration" styleClass="setup-section-button"/>
+                            <Button fx:id="setupSecurityUsersButton" text="Security and Users" maxWidth="Infinity" onAction="#openSecurityAndUsers" styleClass="setup-section-button"/>
+                            <Button fx:id="setupFinancialConfigurationButton" text="Financial Configuration" maxWidth="Infinity" onAction="#openFinancialConfiguration" styleClass="setup-section-button"/>
+                            <Button fx:id="setupSmartIntelligenceButton" text="Smart Intelligence" maxWidth="Infinity" onAction="#openSmartIntelligence" styleClass="setup-section-button"/>
+                            <Button fx:id="setupDataSystemButton" text="Data and System" maxWidth="Infinity" onAction="#openDataAndSystem" styleClass="setup-section-button"/>
                         </VBox>
                     </TitledPane>
                 </VBox>

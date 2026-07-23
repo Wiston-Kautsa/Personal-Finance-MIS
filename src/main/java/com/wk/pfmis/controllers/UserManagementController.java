@@ -28,6 +28,7 @@ public class UserManagementController {
     @FXML private TableColumn<SystemUser, String> emailColumn;
     @FXML private TableColumn<SystemUser, String> roleColumn;
     @FXML private TableColumn<SystemUser, String> statusColumn;
+    @FXML private TableColumn<SystemUser, String> passwordStatusColumn;
     @FXML private TableColumn<SystemUser, String> lastLoginColumn;
     @FXML private Label workspaceLabel;
     @FXML private Label messageLabel;
@@ -55,6 +56,7 @@ public class UserManagementController {
         emailColumn.setCellValueFactory(new PropertyValueFactory<>("email"));
         roleColumn.setCellValueFactory(new PropertyValueFactory<>("roleDisplay"));
         statusColumn.setCellValueFactory(new PropertyValueFactory<>("status"));
+        passwordStatusColumn.setCellValueFactory(new PropertyValueFactory<>("passwordStatus"));
         lastLoginColumn.setCellValueFactory(new PropertyValueFactory<>("lastLoginAt"));
         authDateColumn.setCellValueFactory(new PropertyValueFactory<>("createdAt"));
         authUsernameColumn.setCellValueFactory(new PropertyValueFactory<>("username"));

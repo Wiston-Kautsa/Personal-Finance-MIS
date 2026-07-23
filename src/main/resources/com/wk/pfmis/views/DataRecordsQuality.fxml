@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.DataRecordsSectionController"
+      spacing="12" styleClass="content-view">
+    <Label fx:id="sectionTitleLabel" text="Data Quality and Reconciliation" styleClass="view-title"/>
+    <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
+        <tabs>
+            <Tab fx:id="dataHealthOverviewTab" text="Data Health Overview"/>
+            <Tab fx:id="missingInformationTab" text="Missing Information"/>
+            <Tab fx:id="duplicateRecordsTab" text="Duplicate Records"/>
+            <Tab fx:id="accountReconciliationTab" text="Account Reconciliation"/>
+            <Tab fx:id="relationshipErrorsTab" text="Relationship Errors"/>
+            <Tab fx:id="exceptionsTab" text="Exceptions"/>
+        </tabs>
+    </TabPane>
+    <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+</VBox>

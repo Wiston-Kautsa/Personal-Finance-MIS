@@ -17,6 +17,21 @@ public final class UserSession {
         workspaceUser = user;
     }
 
+    public static synchronized void refreshAuthenticatedUser(SystemUser user) {
+        requireAuthenticated();
+        if (user == null || user.getId() != authenticatedUser.getId()) {
+            throw new IllegalArgumentException("Updated user details must match the signed-in account.");
+        }
+        if (!user.isActive()) {
+            throw new IllegalArgumentException("The signed-in account is no longer active.");
+        }
+        boolean viewingOwnWorkspace = workspaceUser.getId() == authenticatedUser.getId();
+        authenticatedUser = user;
+        if (viewingOwnWorkspace) {
+            workspaceUser = user;
+        }
+    }
+
     public static synchronized void switchWorkspace(SystemUser targetUser) {
         requireAuthenticated();
         if (!authenticatedUser.isSuperAdmin()) {

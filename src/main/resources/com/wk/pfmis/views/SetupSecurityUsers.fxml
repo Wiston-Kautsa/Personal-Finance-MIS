@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.SetupSectionController"
+      spacing="12" styleClass="content-view">
+    <Label fx:id="sectionTitleLabel" text="Security and Users" styleClass="view-title"/>
+    <TabPane fx:id="setupTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
+        <tabs>
+            <Tab fx:id="myAccountTab" text="My Account"/>
+            <Tab fx:id="userManagementTab" text="User Management"/>
+            <Tab fx:id="securityHistoryTab" text="Login &amp; Security History"/>
+            <Tab fx:id="sessionAutoLockTab" text="Session &amp; Auto-Lock"/>
+        </tabs>
+    </TabPane>
+    <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+</VBox>

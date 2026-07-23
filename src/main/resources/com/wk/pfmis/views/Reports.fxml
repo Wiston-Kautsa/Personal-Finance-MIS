@@ -2,9 +2,13 @@
 
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.chart.BarChart?>
+<?import javafx.scene.chart.CategoryAxis?>
+<?import javafx.scene.chart.NumberAxis?>
 <?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
@@ -13,15 +17,27 @@
 <VBox spacing="12" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.ReportsController" styleClass="panel reports-panel">
     <VBox spacing="10" styleClass="report-control-panel" VBox.vgrow="NEVER">
-        <Label text="Reports" styleClass="section-heading"/>
+        <Label fx:id="reportGroupTitleLabel" text="Reports" styleClass="section-heading"/>
+        <Label fx:id="reportGroupDescriptionLabel" text="Select a report category from the sidebar, then choose the exact report here." wrapText="true" styleClass="muted-label"/>
+        <FlowPane fx:id="quickReportsPane" hgap="8" vgap="8" alignment="CENTER_LEFT" styleClass="quick-report-row"/>
         <FlowPane hgap="10" vgap="8" alignment="CENTER_LEFT" styleClass="report-toolbar">
-            <ComboBox fx:id="reportTypeBox" prefWidth="210"/>
+            <ComboBox fx:id="reportTypeBox" promptText="Choose report" prefWidth="260"/>
             <ComboBox fx:id="monthBox" prefWidth="135"/>
             <ComboBox fx:id="yearBox" prefWidth="105"/>
+            <ComboBox fx:id="groupingBox" prefWidth="125"/>
+            <ComboBox fx:id="accountFilterBox" prefWidth="165"/>
+            <ComboBox fx:id="categoryFilterBox" prefWidth="165"/>
+            <ComboBox fx:id="projectFilterBox" prefWidth="165"/>
+            <ComboBox fx:id="statusFilterBox" prefWidth="145"/>
+            <DatePicker fx:id="startDatePicker" promptText="Start date" prefWidth="135"/>
+            <DatePicker fx:id="endDatePicker" promptText="End date" prefWidth="135"/>
             <Button text="Generate Report" onAction="#refresh" styleClass="primary-button"/>
+            <Button text="Preview" onAction="#previewReport" styleClass="secondary-button"/>
             <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+            <Button text="Reset Filters" onAction="#resetFilters" styleClass="secondary-button"/>
             <Button text="Export PDF" onAction="#exportPdf" styleClass="secondary-button"/>
             <Button text="Export Excel" onAction="#exportExcel" styleClass="secondary-button"/>
+            <Button text="Export CSV" onAction="#exportCsv" styleClass="secondary-button"/>
             <Button text="Print" onAction="#printReport" styleClass="secondary-button"/>
         </FlowPane>
     </VBox>
@@ -75,4 +91,39 @@
             </TableView>
         </VBox>
     </HBox>
+
+    <VBox fx:id="analysisReportPane" spacing="8" styleClass="report-table-panel" VBox.vgrow="ALWAYS">
+        <Label fx:id="analysisReportTitle" text="Smart Analysis" styleClass="table-title"/>
+        <BarChart fx:id="analysisChart" legendVisible="false" animated="false" prefHeight="220">
+            <xAxis>
+                <CategoryAxis label="Item"/>
+            </xAxis>
+            <yAxis>
+                <NumberAxis label="MWK"/>
+            </yAxis>
+        </BarChart>
+        <TableView fx:id="analysisTable" prefHeight="300" VBox.vgrow="ALWAYS">
+            <columns>
+                <TableColumn fx:id="analysisAreaColumn" text="Area" prefWidth="150"/>
+                <TableColumn fx:id="analysisItemColumn" text="Item" prefWidth="220"/>
+                <TableColumn fx:id="analysisAmountColumn" text="Amount" prefWidth="130"/>
+                <TableColumn fx:id="analysisComparisonColumn" text="Comparison" prefWidth="130"/>
+                <TableColumn fx:id="analysisVarianceColumn" text="Variance" prefWidth="130"/>
+                <TableColumn fx:id="analysisPercentColumn" text="Percent" prefWidth="95"/>
+                <TableColumn fx:id="analysisStatusColumn" text="Status" prefWidth="145"/>
+                <TableColumn fx:id="analysisRecommendationColumn" text="Recommended Action" prefWidth="360"/>
+            </columns>
+        </TableView>
+    </VBox>
+
+    <VBox fx:id="smartConclusionPane" spacing="8" styleClass="settings-status-box" VBox.vgrow="NEVER">
+        <Label text="Financial Interpretation" styleClass="table-title"/>
+        <Label fx:id="financialInterpretationLabel" text="" wrapText="true" styleClass="settings-status-text"/>
+        <Label text="Risks Identified" styleClass="table-title"/>
+        <Label fx:id="risksIdentifiedLabel" text="" wrapText="true" styleClass="settings-status-text"/>
+        <Label text="Recommended Actions" styleClass="table-title"/>
+        <Label fx:id="recommendedActionsLabel" text="" wrapText="true" styleClass="settings-status-text"/>
+        <Label text="Confidence and Data Limitations" styleClass="table-title"/>
+        <Label fx:id="confidenceLimitationsLabel" text="" wrapText="true" styleClass="form-note"/>
+    </VBox>
 </VBox>

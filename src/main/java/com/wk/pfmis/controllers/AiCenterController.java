@@ -65,7 +65,7 @@ public class AiCenterController {
     private void runReportsAnalysis() {
         runAiRequest(
                 "Reports analysis",
-                "Analyse all PFMIS reports using verified data: monthly summary, income report, expense report, project report, account report, and loan report. Explain what each report shows, missing or risky data, whether cancelled transactions are excluded, and what the user should verify before relying on the reports."
+                "Analyse all PFMIS reports using verified data: monthly, quarterly, half-year and annual summaries, cash flow, budget versus actual, net worth, financial position, income source analysis, category spending, expense trends, savings and goals progress, loan, money borrowed, money lent, debt aging, upcoming obligations, recurring transactions, project performance, account reconciliation, transfers, forecast, financial health, unusual transactions, recommendations, data quality, audit trail and backup history. Explain what each report shows, missing or risky data, whether cancelled transactions are excluded, and what the user should verify before relying on the reports."
         );
     }
 
@@ -182,7 +182,7 @@ public class AiCenterController {
     }
 
     private String reportCoverageText() {
-        return "Monthly, income, expense, project, account, loan, controls.";
+        return "Summary, cash flow, budgets, net worth, goals, debts, obligations, trends, quality, audit.";
     }
 
     private String providerStatus(AiSettings settings) {
