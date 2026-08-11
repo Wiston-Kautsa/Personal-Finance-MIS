@@ -29,8 +29,12 @@ import javafx.scene.layout.VBox;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class RecordDisposalController {
+    private static final Logger LOGGER = Logger.getLogger(RecordDisposalController.class.getName());
+
     @FXML private Label statusLabel;
     @FXML private ComboBox<String> recordTypeBox;
     @FXML private ComboBox<String> workspaceBox;
@@ -144,7 +148,8 @@ public class RecordDisposalController {
             clearInlineAction();
             searchRecords();
         } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to remove selected records", exception);
+            LOGGER.log(Level.SEVERE, "Failed to remove selected records from Record Disposal", exception);
+            UiAlerts.info("Selected records could not be deleted. Review the selected records and try again.");
         }
     }
 
@@ -171,7 +176,8 @@ public class RecordDisposalController {
             searchRecords();
             resultArea.setText(restored + " deleted record(s) restored. Dependencies were revalidated and the action was audited.");
         } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to restore selected records", exception);
+            LOGGER.log(Level.SEVERE, "Failed to restore selected records from Record Disposal", exception);
+            UiAlerts.info("Selected records could not be restored. Review the selected records and try again.");
         }
     }
 
@@ -222,7 +228,8 @@ public class RecordDisposalController {
                     "Audit recorded."
             ));
         } catch (RuntimeException exception) {
-            securityPane.setError(rootMessage(exception));
+            LOGGER.log(Level.SEVERE, "Failed to permanently purge selected records", exception);
+            securityPane.setError("PFMIS could not permanently purge the selected records. Check the selected records and try again.");
         } finally {
             securityPane.clearPassword();
         }
@@ -287,7 +294,7 @@ public class RecordDisposalController {
 
     private void updateSummary() {
         int found = candidates.size();
-        long removable = candidates.stream().filter(row -> "Can be removed".equals(row.getRemovalStatus())).count();
+        long removable = candidates.stream().filter(row -> "ELIGIBLE".equals(row.data().eligibility())).count();
         long protectedRecords = Math.max(0, found - removable);
         resultArea.setText(lines(
                 "Records found: " + found,
@@ -329,7 +336,14 @@ public class RecordDisposalController {
                 resultArea.setText("Review the impact and tick the confirmation box before deleting records.");
                 return;
             }
-            executeRemoveSelectedRecords(selected, reasonArea);
+            delete.setDisable(true);
+            try {
+                executeRemoveSelectedRecords(selected, reasonArea);
+            } finally {
+                if (inlineActionPane != null && inlineActionPane.isVisible()) {
+                    delete.setDisable(false);
+                }
+            }
         });
         renderInlineAction(
                 "Delete Selected Records",
@@ -356,7 +370,14 @@ public class RecordDisposalController {
                 resultArea.setText("Review the restore details and tick the confirmation box before continuing.");
                 return;
             }
-            executeRestoreSelectedRecords(selected, reasonArea);
+            restore.setDisable(true);
+            try {
+                executeRestoreSelectedRecords(selected, reasonArea);
+            } finally {
+                if (inlineActionPane != null && inlineActionPane.isVisible()) {
+                    restore.setDisable(false);
+                }
+            }
         });
         renderInlineAction(
                 "Restore Item",
@@ -389,7 +410,16 @@ public class RecordDisposalController {
         );
         Button purge = new Button("Purge Permanently");
         purge.getStyleClass().add("maintenance-danger-button");
-        purge.setOnAction(event -> executePermanentPurge(selected, securityPane));
+        purge.setOnAction(event -> {
+            purge.setDisable(true);
+            try {
+                executePermanentPurge(selected, securityPane);
+            } finally {
+                if (inlineActionPane != null && inlineActionPane.isVisible()) {
+                    purge.setDisable(false);
+                }
+            }
+        });
         renderInlineAction("Purge Item Permanently", "", securityPane, null, purge);
     }
 
@@ -453,11 +483,14 @@ public class RecordDisposalController {
 
     private String displayStatus(String eligibility, String recommendation) {
         if ("ELIGIBLE".equals(eligibility)) {
-            return "Can be removed";
+            return "Soft delete available";
         }
         String lower = recommendation == null ? "" : recommendation.toLowerCase();
-        if (lower.contains("cancel")) {
-            return "Cancel instead";
+        if (lower.contains("opening balance")) {
+            return "System record - edit source";
+        }
+        if (lower.contains("linked transaction")) {
+            return "Linked workflow required";
         }
         if (lower.contains("archive")) {
             return "Archive instead";

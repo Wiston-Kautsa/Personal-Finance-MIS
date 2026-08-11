@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class TransactionsController {
+    private static final System.Logger LOGGER = System.getLogger(TransactionsController.class.getName());
     private static final String DEFAULT_LOAN_CATEGORY_NAME = "Personal Loan";
     private static final String LEGACY_LOAN_CATEGORY_NAME = "Loans";
     private static final List<String> LOAN_CATEGORY_NAMES = List.of(
@@ -135,66 +136,42 @@ public class TransactionsController {
 
     @FXML
     private void saveTransaction() {
+        if (saveButton.isDisabled()) {
+            return;
+        }
+        saveButton.setDisable(true);
+        boolean persisted = false;
         try {
-            Account account = accountBox.getValue();
-            if (account == null) {
-                UiAlerts.info("Select an account.");
+            TransactionFormData formData = validateTransactionForm();
+            try {
+                LOGGER.log(System.Logger.Level.INFO, "Saving transaction started: purpose={0}, type={1}, status={2}",
+                        formData.purpose(), formData.transactionType(), formData.status());
+                persistTransaction(formData);
+                persisted = true;
+                LOGGER.log(System.Logger.Level.INFO, "Saving transaction committed: purpose={0}, type={1}, status={2}",
+                        formData.purpose(), formData.transactionType(), formData.status());
+            } catch (RuntimeException exception) {
+                logSaveFailure("Database persistence failed before commit", exception);
+                UiAlerts.info(saveFailureMessage());
                 return;
             }
-            double amount = Double.parseDouble(amountField.getText().replace(",", "").trim());
-            boolean loanPurpose = isLoanPurpose(purposeBox.getValue());
-            Integer categoryId = resolveCategoryId(loanPurpose);
-            Integer projectId = loanPurpose || projectBox.getValue() == null ? null : projectBox.getValue().getId();
-            Integer activityId = loanPurpose || activityBox.getValue() == null ? null : activityBox.getValue().getId();
-            Integer personId = resolvePersonId();
-            if (requiresPerson() && personId == null) {
-                UiAlerts.info("Enter or select a person for this transaction.");
-                return;
+
+            try {
+                resetTransactionFormAfterSave();
+                refresh();
+                DataRefreshBus.notifyDataChanged();
+                UiAlerts.info("Transaction saved and account balance updated.");
+            } catch (RuntimeException exception) {
+                logSaveFailure("Post-save UI refresh failed after commit", exception);
+                UiAlerts.info(saveRefreshFailureMessage());
             }
-            if (editingTransaction == null) {
-                String purpose = purposeBox.getValue();
-                database.recordTransaction(
-                        account.getId(),
-                        categoryId,
-                        projectId,
-                        activityId,
-                        personId,
-                        transactionTypeForPurpose(typeBox.getValue(), purpose),
-                        purpose,
-                        statusBox.getValue(),
-                        amount,
-                        datePicker.getValue(),
-                        descriptionArea.getText().trim(),
-                        null,
-                        null
-                );
-            } else {
-                database.updateTransaction(
-                        editingTransaction.getId(),
-                        account.getId(),
-                        categoryId,
-                        projectId,
-                        activityId,
-                        personId,
-                        transactionTypeForPurpose(typeBox.getValue(), purposeBox.getValue()),
-                        purposeBox.getValue(),
-                        statusBox.getValue(),
-                        amount,
-                        datePicker.getValue(),
-                        descriptionArea.getText().trim(),
-                        editingTransaction.getPaymentMethod(),
-                        editingTransaction.getReferenceNumber()
-                );
-                editingTransaction = null;
-            }
-            amountField.clear();
-            descriptionArea.clear();
-            activityBox.setValue(null);
-            refresh();
-            DataRefreshBus.notifyDataChanged();
-            UiAlerts.info("Transaction saved and account balance updated.");
         } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to save transaction", exception);
+            logSaveFailure("Transaction validation failed", exception);
+            UiAlerts.info(UiAlerts.rootMessage(exception));
+        } finally {
+            if (!persisted || amountField.getText().isBlank()) {
+                saveButton.setDisable(false);
+            }
         }
     }
 
@@ -251,7 +228,6 @@ public class TransactionsController {
         categoryBox.setDisable(false);
         categoryBox.setEditable(true);
         categoryBox.setPromptText("Select, type, or use Other");
-        categoryBox.getEditor().setPromptText("Select, type, or use Other");
         CategoryInput.setItemsForType(categoryBox, database.listCategories(), transactionCategoryType());
     }
 
@@ -669,7 +645,6 @@ public class TransactionsController {
         descriptionLabel.setText(description);
         amountField.setPromptText(loanMode ? "0.00" : "30000");
         personBox.setPromptText(personPrompt);
-        personBox.getEditor().setPromptText(personPrompt);
         saveButton.setText(saveText);
         recordsLabel.setText(records);
         setProjectActivityVisible(!loanMode);
@@ -729,6 +704,119 @@ public class TransactionsController {
                         .orElse(value);
             }
         });
+    }
+
+    private TransactionFormData validateTransactionForm() {
+        Account account = accountBox.getValue();
+        if (account == null) {
+            throw new IllegalArgumentException("Select an account.");
+        }
+        double amount = parseAmount();
+        boolean loanPurpose = isLoanPurpose(purposeBox.getValue());
+        Integer categoryId = resolveCategoryId(loanPurpose);
+        Integer projectId = loanPurpose || projectBox.getValue() == null ? null : projectBox.getValue().getId();
+        Integer activityId = loanPurpose || activityBox.getValue() == null ? null : activityBox.getValue().getId();
+        Integer personId = resolvePersonId();
+        if (requiresPerson() && personId == null) {
+            throw new IllegalArgumentException("Enter or select a person for this transaction.");
+        }
+        String purpose = purposeBox.getValue();
+        return new TransactionFormData(
+                account.getId(),
+                categoryId,
+                projectId,
+                activityId,
+                personId,
+                transactionTypeForPurpose(typeBox.getValue(), purpose),
+                purpose,
+                statusBox.getValue(),
+                amount,
+                datePicker.getValue(),
+                descriptionArea.getText().trim()
+        );
+    }
+
+    private double parseAmount() {
+        try {
+            return Double.parseDouble(amountField.getText().replace(",", "").trim());
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Enter a valid amount.", exception);
+        }
+    }
+
+    private void persistTransaction(TransactionFormData formData) {
+        if (editingTransaction == null) {
+            database.recordTransaction(
+                    formData.accountId(),
+                    formData.categoryId(),
+                    formData.projectId(),
+                    formData.activityId(),
+                    formData.personId(),
+                    formData.transactionType(),
+                    formData.purpose(),
+                    formData.status(),
+                    formData.amount(),
+                    formData.date(),
+                    formData.description(),
+                    null,
+                    null
+            );
+        } else {
+            database.updateTransaction(
+                    editingTransaction.getId(),
+                    formData.accountId(),
+                    formData.categoryId(),
+                    formData.projectId(),
+                    formData.activityId(),
+                    formData.personId(),
+                    formData.transactionType(),
+                    formData.purpose(),
+                    formData.status(),
+                    formData.amount(),
+                    formData.date(),
+                    formData.description(),
+                    editingTransaction.getPaymentMethod(),
+                    editingTransaction.getReferenceNumber()
+            );
+            editingTransaction = null;
+        }
+    }
+
+    private void resetTransactionFormAfterSave() {
+        amountField.clear();
+        descriptionArea.clear();
+        activityBox.setValue(null);
+    }
+
+    private String saveFailureMessage() {
+        return operationNoun() + " could not be saved. Please check the entered information and try again.";
+    }
+
+    private String saveRefreshFailureMessage() {
+        return operationNoun() + " was saved successfully, but the screen could not be refreshed. "
+                + "Do not save it again. Please refresh or reopen this page.";
+    }
+
+    private String operationNoun() {
+        String heading = headingLabel == null ? "" : headingLabel.getText();
+        if (heading != null && heading.toLowerCase(Locale.ENGLISH).contains("expense")) {
+            return "Expense";
+        }
+        if (heading != null && heading.toLowerCase(Locale.ENGLISH).contains("income")) {
+            return "Income";
+        }
+        return "Transaction";
+    }
+
+    private void logSaveFailure(String phase, RuntimeException exception) {
+        Throwable root = UiAlerts.rootCause(exception);
+        LOGGER.log(
+                System.Logger.Level.ERROR,
+                phase + " in TransactionsController.saveTransaction: "
+                        + (root == null ? exception.getClass().getSimpleName() : root.getClass().getSimpleName())
+                        + ": " + UiAlerts.rootMessage(exception),
+                exception
+        );
     }
 
     private Integer resolvePersonId() {
@@ -841,5 +929,20 @@ public class TransactionsController {
             text = selectedPerson == null ? "" : selectedPerson.getFullName();
         }
         return text == null ? "" : text.trim();
+    }
+
+    private record TransactionFormData(
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer activityId,
+            Integer personId,
+            String transactionType,
+            String purpose,
+            String status,
+            double amount,
+            LocalDate date,
+            String description
+    ) {
     }
 }

@@ -21,8 +21,12 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class IncomeController {
+    private static final Logger LOGGER = Logger.getLogger(IncomeController.class.getName());
+
     @FXML private Label todayIncomeLabel;
     @FXML private Label monthIncomeLabel;
     @FXML private Label selectedAccountLabel;
@@ -94,8 +98,9 @@ public class IncomeController {
 
     @FXML
     private void postIncome() {
+        IncomeForm form;
         try {
-            IncomeForm form = readForm(true);
+            form = readForm(true);
             if (database.hasSimilarIncomeTransaction(
                     form.account().getId(),
                     form.amount(),
@@ -108,7 +113,18 @@ public class IncomeController {
             )) {
                 return;
             }
-            int transactionId = database.recordIncomeTransaction(
+        } catch (IllegalArgumentException exception) {
+            UiAlerts.info(exception.getMessage());
+            return;
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Income validation or duplicate check failed before posting", exception);
+            UiAlerts.info("Income could not be posted. Please check the entered information and try again.");
+            return;
+        }
+
+        int transactionId;
+        try {
+            transactionId = database.recordIncomeTransaction(
                     form.account().getId(),
                     form.categoryId(),
                     form.projectId(),
@@ -121,6 +137,13 @@ public class IncomeController {
                     form.paymentMethod(),
                     form.referenceNumber()
             );
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Income database posting failed before commit", exception);
+            UiAlerts.info("Income could not be posted. Please check the entered information and try again.");
+            return;
+        }
+
+        try {
             DataRefreshBus.notifyDataChanged();
             refresh();
             Account updatedAccount = accountById(form.account().getId());
@@ -138,8 +161,9 @@ public class IncomeController {
                     updatedAccount == null ? "Refresh required" : MoneyUtil.mwk(updatedAccount.getCurrentBalance())
             ));
             resetEntryFields();
-        } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to post income", exception);
+        } catch (Exception exception) {
+            LOGGER.log(Level.SEVERE, "Income posted, but post-save UI refresh failed for transaction " + transactionId, exception);
+            UiAlerts.info("Income was posted successfully, but the screen could not be refreshed. Do not post it again. Please refresh or reopen this page.");
         }
     }
 

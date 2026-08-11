@@ -16,11 +16,14 @@ import javafx.scene.control.TextField;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class GoalContributionController {
     private static final String METHOD_TRANSFER = "Transfer to dedicated goal account";
     private static final String METHOD_ALLOCATION = "Allocate existing savings";
     private static final String METHOD_EXTERNAL = "External contribution received";
+    private static final Logger LOGGER = Logger.getLogger(GoalContributionController.class.getName());
 
     @FXML private ComboBox<Goal> goalBox;
     @FXML private DatePicker contributionDatePicker;
@@ -54,17 +57,29 @@ public class GoalContributionController {
 
     @FXML
     private void recordContribution() {
+        Goal goal;
+        double amount;
+        LocalDate date;
+        String method;
+        String reference;
+        String description;
         try {
-            Goal goal = requireGoal();
-            double amount = parsePositiveAmount(amountField.getText(), "Enter a contribution amount greater than zero.");
-            LocalDate date = contributionDatePicker.getValue();
+            goal = requireGoal();
+            amount = parsePositiveAmount(amountField.getText(), "Enter a contribution amount greater than zero.");
+            date = contributionDatePicker.getValue();
             if (date == null) {
                 throw new IllegalArgumentException("Select the contribution date.");
             }
-            String method = methodBox.getValue();
-            String reference = textValue(referenceField);
-            String description = contributionDescription(goal, method);
-            int contributionId;
+            method = methodBox.getValue();
+            reference = textValue(referenceField);
+            description = contributionDescription(goal, method);
+        } catch (IllegalArgumentException exception) {
+            UiAlerts.info(exception.getMessage());
+            return;
+        }
+
+        int contributionId;
+        try {
             if (METHOD_TRANSFER.equals(method)) {
                 contributionId = recordTransferContribution(goal, amount, date, reference, description);
             } else if (METHOD_EXTERNAL.equals(method)) {
@@ -72,6 +87,13 @@ public class GoalContributionController {
             } else {
                 contributionId = recordAllocationContribution(goal, amount, date, reference, description);
             }
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Goal contribution database posting failed before commit", exception);
+            UiAlerts.info("Goal contribution could not be recorded. Please check the entered information and try again.");
+            return;
+        }
+
+        try {
             Goal updatedGoal = goalById(goal.getId());
             double remaining = updatedGoal == null ? Math.max(0, goal.getTargetAmount() - amount) : updatedGoal.getRemainingAmount();
             double allocated = updatedGoal == null ? amount : updatedGoal.getCurrentAmount();
@@ -96,10 +118,9 @@ public class GoalContributionController {
             clearEntryFields();
             refresh();
             DataRefreshBus.notifyDataChanged();
-        } catch (IllegalArgumentException exception) {
-            UiAlerts.info(exception.getMessage());
-        } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to record goal contribution", exception);
+        } catch (Exception exception) {
+            LOGGER.log(Level.SEVERE, "Goal contribution recorded, but post-save UI refresh failed for contribution " + contributionId, exception);
+            UiAlerts.info("Goal contribution was recorded successfully, but the screen could not be refreshed. Do not record it again. Please refresh or reopen this page.");
         }
     }
 

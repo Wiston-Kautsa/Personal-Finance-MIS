@@ -19,11 +19,14 @@ import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class LoanRepaymentController {
     private static final String EVENT_MANUAL = "Manual repayment";
     private static final String EVENT_AUTO_RETRY = "Automatic repayment retry";
     private static final NumberFormat MONEY_FORMAT = NumberFormat.getNumberInstance(Locale.US);
+    private static final Logger LOGGER = Logger.getLogger(LoanRepaymentController.class.getName());
 
     @FXML private ComboBox<String> eventBox;
     @FXML private Label personLabel;
@@ -76,21 +79,32 @@ public class LoanRepaymentController {
 
     @FXML
     private void recordRepayment() {
+        CentralLoanRecord loan;
+        Account account;
+        LocalDate paymentDate;
+        double amount;
         try {
-            CentralLoanRecord loan = loanBox.getValue();
+            loan = loanBox.getValue();
             if (loan == null) {
                 throw new IllegalArgumentException("Select the loan being repaid.");
             }
-            Account account = accountBox.getValue();
+            account = accountBox.getValue();
             if (account == null) {
                 throw new IllegalArgumentException("Select the payment account.");
             }
-            LocalDate paymentDate = paymentDatePicker.getValue();
+            paymentDate = paymentDatePicker.getValue();
             if (paymentDate == null) {
                 throw new IllegalArgumentException("Enter the payment date.");
             }
-            double amount = parsePositiveAmount(totalAmountField, "Enter the amount being paid.");
-            int paymentId = database.recordCentralLoanPayment(new CentralLoanPaymentCommand(
+            amount = parsePositiveAmount(totalAmountField, "Enter the amount being paid.");
+        } catch (IllegalArgumentException exception) {
+            resultArea.setText(exception.getMessage());
+            return;
+        }
+
+        int paymentId;
+        try {
+            paymentId = database.recordCentralLoanPayment(new CentralLoanPaymentCommand(
                     loan.id(),
                     null,
                     account.getId(),
@@ -100,6 +114,13 @@ public class LoanRepaymentController {
                     safe(notesArea.getText()),
                     EVENT_AUTO_RETRY.equals(eventBox.getValue())
             ));
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Loan repayment database posting failed before commit", exception);
+            UiAlerts.info("Loan repayment could not be recorded. Please check the entered information and try again.");
+            return;
+        }
+
+        try {
             CentralLoanRecord refreshed = database.getCentralLoan(loan.id());
             CentralLoanPaymentRecord payment = database.listCentralLoanPayments(loan.id()).stream()
                     .filter(row -> row.id() == paymentId)
@@ -109,10 +130,9 @@ public class LoanRepaymentController {
             DataRefreshBus.notifyDataChanged();
             refresh();
             selectLoan(refreshed.id());
-        } catch (IllegalArgumentException exception) {
-            resultArea.setText(exception.getMessage());
-        } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to record repayment", exception);
+        } catch (Exception exception) {
+            LOGGER.log(Level.SEVERE, "Loan repayment recorded, but post-save UI refresh failed for payment " + paymentId, exception);
+            UiAlerts.info("Loan repayment was recorded successfully, but the screen could not be refreshed. Do not record it again. Please refresh or reopen this page.");
         }
     }
 

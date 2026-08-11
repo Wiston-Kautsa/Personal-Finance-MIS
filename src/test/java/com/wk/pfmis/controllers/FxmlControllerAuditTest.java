@@ -74,6 +74,42 @@ class FxmlControllerAuditTest {
     }
 
     @Test
+    void editableComboBoxesDoNotSetBoundEditorPromptText() throws Exception {
+        List<String> failures = new ArrayList<>();
+        Path sourceRoot = Path.of("src/main/java");
+        try (var paths = Files.walk(sourceRoot)) {
+            for (Path source : paths.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String content = Files.readString(source);
+                if (content.contains(".getEditor().setPromptText(")) {
+                    failures.add(sourceRoot.relativize(source) + " sets prompt text on a ComboBox editor");
+                }
+            }
+        }
+        assertTrue(failures.isEmpty(), String.join(System.lineSeparator(), failures));
+    }
+
+    @Test
+    void loginScreenUsesSingleStandardAuthFlowAndModernTwoSectionLayout() throws Exception {
+        Path loginFxml = fxmlFiles().stream()
+                .filter(path -> path.getFileName().toString().equals("Login.fxml"))
+                .findFirst()
+                .orElseThrow();
+        String content = Files.readString(loginFxml);
+
+        assertFalse(content.contains("Create First Administrator"));
+        assertFalse(content.contains("Create the First Super Administrator"));
+        assertFalse(content.contains("Create User and Open Workspace"));
+        assertFalse(content.contains("Sign in as Super Administrator"));
+        assertFalse(content.contains(">OR<"));
+        assertTrue(content.contains("styleClass=\"auth-brand-panel\""));
+        assertTrue(content.contains("styleClass=\"auth-form-panel\""));
+        assertTrue(content.contains("fx:id=\"usernameField\""));
+        assertTrue(content.contains("fx:id=\"passwordField\""));
+        assertTrue(content.contains("fx:id=\"signInButton\""));
+        assertTrue(content.contains("fx:id=\"savedLoginPanel\""));
+    }
+
+    @Test
     void savingsGroupsNavigationIsTopLevelAndModeSpecific() throws Exception {
         Path dashboard = fxmlFiles().stream()
                 .filter(path -> path.getFileName().toString().equals("Dashboard.fxml"))

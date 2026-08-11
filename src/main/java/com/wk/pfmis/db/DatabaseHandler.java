@@ -18989,7 +18989,7 @@ public class DatabaseHandler {
         String description = safeText(resultSet.getString("description_value"), spec.recordType() + " " + id);
         double amount = resultSet.getDouble("amount_value");
         int dependencies = dependencyCountForDisposal(connection, spec.tableName(), id, status);
-        DisposalAssessment assessment = disposalAssessment(spec.recordType(), spec.tableName(), id, status, description, amount, dependencies);
+        DisposalAssessment assessment = disposalAssessment(connection, spec.recordType(), spec.tableName(), id, status, description, amount, dependencies);
         return new RecordDisposalCandidateData(
                 spec.tableName(),
                 spec.recordType(),
@@ -19011,6 +19011,7 @@ public class DatabaseHandler {
     }
 
     private DisposalAssessment disposalAssessment(
+            Connection connection,
             String recordType,
             String tableName,
             int id,
@@ -19024,9 +19025,31 @@ public class DatabaseHandler {
             return new DisposalAssessment("NOT ELIGIBLE", "Do not delete audit evidence.", "Audit and Smart Analysis logs are retained as evidence.");
         }
         if ("transactions".equals(tableName)) {
+            TransactionDisposalProfile transaction = transactionDisposalProfile(connection, id);
+            if (transaction.openingBalance()) {
+                return new DisposalAssessment(
+                        "NOT ELIGIBLE",
+                        "Use Edit Opening Balance from the account record.",
+                        "Opening-balance transactions are maintained by their account and cannot be deleted independently."
+                );
+            }
+            if (dependencies > 0) {
+                return new DisposalAssessment(
+                        "NOT ELIGIBLE",
+                        "Use the linked transaction workflow.",
+                        dependencies + " linked transaction or protected financial dependency/dependencies were found."
+                );
+            }
+            if (transaction.standaloneIncomeOrExpense()) {
+                return new DisposalAssessment(
+                        "ELIGIBLE",
+                        "Soft delete available.",
+                        "Standalone income and expense transactions can be soft-deleted; balances are recalculated from active transactions."
+                );
+            }
             boolean explicitNonProduction = containsAny(description + " " + status, "test", "demo", "sample", "training", "temporary");
             boolean safeStatus = List.of("DRAFT", "FAILED", "REJECTED", "ABANDONED", "TEMPORARY").contains(cleanStatus);
-            if (dependencies == 0 && (safeStatus || explicitNonProduction)) {
+            if (safeStatus || explicitNonProduction) {
                 return new DisposalAssessment("ELIGIBLE", "Proceed with request, backup and confirmation.", "The transaction is not posted or is explicitly marked non-production.");
             }
             if ("CANCELLED".equals(cleanStatus)) {
@@ -19123,15 +19146,109 @@ public class DatabaseHandler {
     private int transactionDisposalDependencies(Connection connection, int id, String status) throws SQLException {
         int dependencies = countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE related_transaction_id = ?", id);
         dependencies += countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE id = ? AND related_transaction_id IS NOT NULL", id);
-        String cleanStatus = safeText(status, "COMPLETED").toUpperCase(Locale.ENGLISH);
-        if (List.of("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED").contains(cleanStatus)) {
+        String purpose = stringValue(connection, "SELECT COALESCE(transaction_purpose, '') FROM transactions WHERE id = ?", id);
+        String type = stringValue(connection, "SELECT COALESCE(transaction_type, '') FROM transactions WHERE id = ?", id);
+        String source = stringValue(connection, "SELECT COALESCE(source, '') FROM transactions WHERE id = ?", id);
+        if ("OPENING_BALANCE".equalsIgnoreCase(type)
+                || "OPENING_BALANCE".equalsIgnoreCase(purpose)
+                || "OPENING_BALANCE".equalsIgnoreCase(source)) {
             dependencies++;
         }
-        String purpose = stringValue(connection, "SELECT COALESCE(transaction_purpose, '') FROM transactions WHERE id = ?", id);
-        if (List.of("MONEY_LENT", "MONEY_BORROWED", "LENT_REPAID", "BORROWED_REPAID", "TRANSFER_IN", "TRANSFER_OUT", "PROJECT_EXPENSE").contains(purpose)) {
+        if (List.of(
+                "MONEY_LENT",
+                "MONEY_BORROWED",
+                "LENT_REPAID",
+                "BORROWED_REPAID",
+                "TRANSFER_IN",
+                "TRANSFER_OUT",
+                "TRANSFER_FEE",
+                "TRANSFER_FEE_REVERSAL",
+                "LOAN_PRINCIPAL_PAYMENT",
+                "LOAN_SETTLEMENT",
+                "LOAN_PROCEEDS",
+                "COMMUNITY_LOAN_RECEIVABLE_INCREASE",
+                "COMMUNITY_LOAN_RECEIVABLE_DECREASE",
+                "COMMUNITY_LOAN_LIABILITY_INCREASE",
+                "COMMUNITY_LOAN_LIABILITY_DECREASE"
+        ).contains(purpose)) {
             dependencies++;
         }
         return dependencies;
+    }
+
+    private TransactionDisposalProfile transactionDisposalProfile(Connection connection, int id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COALESCE(transaction_type, '') AS transaction_type,
+                       COALESCE(transaction_purpose, '') AS transaction_purpose,
+                       COALESCE(source, '') AS source,
+                       COALESCE(related_transaction_id, 0) AS related_transaction_id,
+                       EXISTS (
+                           SELECT 1
+                           FROM transactions related
+                           WHERE related.related_transaction_id = transactions.id
+                       ) AS has_related_child
+                FROM transactions
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return new TransactionDisposalProfile("", "", "", false, false, false, false);
+                }
+                String type = safeText(resultSet.getString("transaction_type"), "").toUpperCase(Locale.ENGLISH);
+                String purpose = safeText(resultSet.getString("transaction_purpose"), "").toUpperCase(Locale.ENGLISH);
+                String source = safeText(resultSet.getString("source"), "").toUpperCase(Locale.ENGLISH);
+                boolean hasRelatedLink = resultSet.getInt("related_transaction_id") > 0
+                        || resultSet.getInt("has_related_child") == 1;
+                boolean openingBalance = "OPENING_BALANCE".equals(type)
+                        || "OPENING_BALANCE".equals(purpose)
+                        || "OPENING_BALANCE".equals(source);
+                boolean protectedWorkflow = hasRelatedLink
+                        || "TRANSFER".equals(type)
+                        || "LOAN".equals(type)
+                        || "TRANSFER".equals(source)
+                        || "TRANSFER_FEE".equals(source)
+                        || "REVERSAL".equals(source)
+                        || Set.of(
+                        "MONEY_LENT",
+                        "MONEY_BORROWED",
+                        "LENT_REPAID",
+                        "BORROWED_REPAID",
+                        "TRANSFER_IN",
+                        "TRANSFER_OUT",
+                        "TRANSFER_FEE",
+                        "TRANSFER_FEE_REVERSAL",
+                        "LOAN_PRINCIPAL_PAYMENT",
+                        "LOAN_SETTLEMENT",
+                        "LOAN_PROCEEDS",
+                        "COMMUNITY_LOAN_RECEIVABLE_INCREASE",
+                        "COMMUNITY_LOAN_RECEIVABLE_DECREASE",
+                        "COMMUNITY_LOAN_LIABILITY_INCREASE",
+                        "COMMUNITY_LOAN_LIABILITY_DECREASE"
+                ).contains(purpose);
+                boolean incomeOrExpense = Set.of("INCOME", "EXPENSE").contains(type);
+                return new TransactionDisposalProfile(
+                        type,
+                        purpose,
+                        source,
+                        hasRelatedLink,
+                        openingBalance,
+                        protectedWorkflow,
+                        incomeOrExpense && !openingBalance && !protectedWorkflow
+                );
+            }
+        }
+    }
+
+    private record TransactionDisposalProfile(
+            String type,
+            String purpose,
+            String source,
+            boolean hasRelatedLink,
+            boolean openingBalance,
+            boolean protectedWorkflow,
+            boolean standaloneIncomeOrExpense
+    ) {
     }
 
     private double totalWorkspaceBalance(Connection connection) throws SQLException {

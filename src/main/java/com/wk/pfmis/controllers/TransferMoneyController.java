@@ -35,11 +35,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class TransferMoneyController {
     private static final String STATUS_DRAFT = "Draft";
     private static final String STATUS_POSTED = "Posted";
     private static final NumberFormat MONEY_FORMAT = NumberFormat.getNumberInstance(Locale.US);
+    private static final Logger LOGGER = Logger.getLogger(TransferMoneyController.class.getName());
 
     @FXML private DatePicker transferDatePicker;
     @FXML private ComboBox<String> statusBox;
@@ -123,8 +126,9 @@ public class TransferMoneyController {
 
     @FXML
     private void transferMoney() {
+        TransferForm form;
         try {
-            TransferForm form = readForm(true);
+            form = readForm(true);
             if (form.exchangeRateQuote() != null && !UiAlerts.confirm("Transfer Summary", transferSummary(form))) {
                 return;
             }
@@ -140,8 +144,18 @@ public class TransferMoneyController {
             )) {
                 return;
             }
+        } catch (IllegalArgumentException exception) {
+            UiAlerts.info(exception.getMessage());
+            return;
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Transfer validation or duplicate check failed before posting", exception);
+            UiAlerts.info("Transfer could not be posted. Please check the entered information and try again.");
+            return;
+        }
 
-            TransferPostingResult result = database.recordTransferWithFee(
+        TransferPostingResult result;
+        try {
+            result = database.recordTransferWithFee(
                     form.fromAccount().getId(),
                     form.toAccount().getId(),
                     form.amountSent(),
@@ -154,6 +168,13 @@ public class TransferMoneyController {
                     form.referenceNumber(),
                     fxMetadata(form)
             );
+        } catch (RuntimeException exception) {
+            LOGGER.log(Level.SEVERE, "Transfer database posting failed before commit", exception);
+            UiAlerts.info("Transfer could not be posted. Please check the entered information and try again.");
+            return;
+        }
+
+        try {
             statusBox.getSelectionModel().select(STATUS_POSTED);
             resultArea.setText("""
                     Transfer completed successfully.
@@ -181,10 +202,9 @@ public class TransferMoneyController {
             ));
             refresh();
             DataRefreshBus.notifyDataChanged();
-        } catch (IllegalArgumentException exception) {
-            UiAlerts.info(exception.getMessage());
-        } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to transfer money", exception);
+        } catch (Exception exception) {
+            LOGGER.log(Level.SEVERE, "Transfer posted, but post-save UI refresh failed for reference " + result.transferReference(), exception);
+            UiAlerts.info("Transfer was posted successfully, but the screen could not be refreshed. Do not post it again. Please refresh or reopen this page.");
         }
     }
 

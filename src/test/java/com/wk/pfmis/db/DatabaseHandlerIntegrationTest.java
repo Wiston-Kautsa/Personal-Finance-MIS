@@ -1374,6 +1374,200 @@ class DatabaseHandlerIntegrationTest {
         assertEquals(175000, accountById(destinationId).getCurrentBalance(), 0.005);
     }
 
+    @Test
+    @Order(35)
+    void completedStandaloneExpenseCanBeSoftDeletedAndRestoredWithoutDuplicateBalanceEffects() throws Exception {
+        int accountId = database.addAccount("Disposal Expense Cash", "Cash", "MWK", "Cash", "", 100000,
+                LocalDate.of(2026, 8, 11).toString(), 0, "Deletion regression", "", "ACTIVE", "test");
+        Category category = database.findOrCreateCategory("Public Transport Disposal", "EXPENSE");
+        String description = "This is money i used for transport to and from work today";
+        database.recordTransaction(
+                accountId,
+                category.getId(),
+                null,
+                null,
+                null,
+                "EXPENSE",
+                "NORMAL",
+                "COMPLETED",
+                4000,
+                LocalDate.of(2026, 8, 11),
+                description,
+                null,
+                null
+        );
+        int transactionId = transactionIdByDescription(description);
+        assertEquals(96000, accountById(accountId).getCurrentBalance(), 0.005);
+
+        List<DatabaseHandler.RecordDisposalCandidateData> candidates = database.searchRecordDisposalCandidates(
+                "Transaction",
+                String.valueOf(transactionId),
+                "All",
+                null,
+                null,
+                "",
+                false
+        );
+        assertEquals(1, candidates.size());
+        DatabaseHandler.RecordDisposalCandidateData candidate = candidates.getFirst();
+        assertEquals("ELIGIBLE", candidate.eligibility());
+        assertEquals(0, candidate.dependencies());
+        assertEquals("Soft delete available.", candidate.recommendation());
+
+        DatabaseHandler.RecordDisposalImpact impact = database.previewRecordDisposalImpact(candidates);
+        assertEquals(1, impact.eligibleRecords());
+        assertEquals(0, impact.blockedRecords());
+        assertEquals(4000, impact.balanceDifference(), 0.005);
+
+        database.executeRecordDisposal(candidates, "Remove duplicate user-entered expense", "JUnit regression", "test-backup.db", "test-checksum");
+
+        assertTrue(transactionDeletedFlag(transactionId));
+        assertEquals(100000, accountById(accountId).getCurrentBalance(), 0.005);
+        assertFalse(database.listTransactionsForAccount(accountId).stream().anyMatch(transaction -> transaction.getId() == transactionId));
+        assertTrue(database.listDeletedRecords("Transaction", description, 10).stream()
+                .anyMatch(record -> record.recordId() == transactionId));
+
+        assertThrows(IllegalStateException.class, () -> database.executeRecordDisposal(
+                candidates,
+                "Duplicate delete attempt",
+                "JUnit regression",
+                "test-backup.db",
+                "test-checksum"
+        ));
+        assertEquals(100000, accountById(accountId).getCurrentBalance(), 0.005);
+
+        database.restoreDeletedRecord("Transaction", transactionId, "Restore expense deletion regression");
+
+        assertFalse(transactionDeletedFlag(transactionId));
+        assertEquals(96000, accountById(accountId).getCurrentBalance(), 0.005);
+        assertTrue(database.listTransactionsForAccount(accountId).stream().anyMatch(transaction -> transaction.getId() == transactionId));
+        assertEquals(1, transactionRowsByDescription(description));
+
+        assertThrows(IllegalArgumentException.class, () -> database.restoreDeletedRecord("Transaction", transactionId, "Duplicate restore attempt"));
+        assertEquals(96000, accountById(accountId).getCurrentBalance(), 0.005);
+        assertEquals(1, transactionRowsByDescription(description));
+    }
+
+    @Test
+    @Order(36)
+    void openingBalanceTransactionRemainsProtectedFromStandaloneDeletion() throws Exception {
+        int accountId = database.addAccount("Protected Opening Balance Cash", "Cash", "MWK", "Cash", "", 150000,
+                LocalDate.of(2026, 8, 11).toString(), 0, "Opening balance deletion regression", "", "ACTIVE", "test");
+        int transactionId = openingBalanceTransactionId(accountId);
+
+        List<DatabaseHandler.RecordDisposalCandidateData> candidates = database.searchRecordDisposalCandidates(
+                "Transaction",
+                String.valueOf(transactionId),
+                "All",
+                null,
+                null,
+                "",
+                false
+        );
+
+        assertEquals(1, candidates.size());
+        DatabaseHandler.RecordDisposalCandidateData candidate = candidates.getFirst();
+        assertEquals("NOT ELIGIBLE", candidate.eligibility());
+        assertEquals("Use Edit Opening Balance from the account record.", candidate.recommendation());
+        assertThrows(IllegalArgumentException.class, () -> database.softDeleteRecord("Transaction", transactionId, "Should stay protected"));
+        assertFalse(transactionDeletedFlag(transactionId));
+        assertEquals(150000, accountById(accountId).getCurrentBalance(), 0.005);
+    }
+
+    @Test
+    @Order(37)
+    void completedStandaloneIncomeCanBeSoftDeletedAndRestoredWithoutDuplicateBalanceEffects() throws Exception {
+        int accountId = database.addAccount("Disposal Income Cash", "Cash", "MWK", "Cash", "", 100000,
+                LocalDate.of(2026, 8, 11).toString(), 0, "Income deletion regression", "", "ACTIVE", "test");
+        Category category = database.findOrCreateCategory("Consulting Disposal", "INCOME");
+        String description = "Income disposal regression payment";
+        int transactionId = database.recordIncomeTransaction(
+                accountId,
+                category.getId(),
+                null,
+                null,
+                null,
+                20000,
+                "MWK",
+                LocalDate.of(2026, 8, 11),
+                description,
+                "Cash",
+                "INC-DISPOSAL-REGRESSION"
+        );
+        assertEquals(120000, accountById(accountId).getCurrentBalance(), 0.005);
+
+        List<DatabaseHandler.RecordDisposalCandidateData> candidates = database.searchRecordDisposalCandidates(
+                "Transaction",
+                String.valueOf(transactionId),
+                "All",
+                null,
+                null,
+                "",
+                false
+        );
+
+        assertEquals(1, candidates.size());
+        DatabaseHandler.RecordDisposalCandidateData candidate = candidates.getFirst();
+        assertEquals("ELIGIBLE", candidate.eligibility());
+        assertEquals("Soft delete available.", candidate.recommendation());
+
+        DatabaseHandler.RecordDisposalImpact impact = database.previewRecordDisposalImpact(candidates);
+        assertEquals(1, impact.eligibleRecords());
+        assertEquals(0, impact.blockedRecords());
+        assertEquals(-20000, impact.balanceDifference(), 0.005);
+
+        database.executeRecordDisposal(candidates, "Remove duplicate user-entered income", "JUnit regression", "test-backup.db", "test-checksum");
+
+        assertTrue(transactionDeletedFlag(transactionId));
+        assertEquals(100000, accountById(accountId).getCurrentBalance(), 0.005);
+        assertFalse(database.listTransactionsForAccount(accountId).stream().anyMatch(transaction -> transaction.getId() == transactionId));
+
+        database.restoreDeletedRecord("Transaction", transactionId, "Restore income deletion regression");
+
+        assertFalse(transactionDeletedFlag(transactionId));
+        assertEquals(120000, accountById(accountId).getCurrentBalance(), 0.005);
+        assertTrue(database.listTransactionsForAccount(accountId).stream().anyMatch(transaction -> transaction.getId() == transactionId));
+
+        assertThrows(IllegalArgumentException.class, () -> database.restoreDeletedRecord("Transaction", transactionId, "Duplicate restore attempt"));
+        assertEquals(120000, accountById(accountId).getCurrentBalance(), 0.005);
+    }
+
+    @Test
+    @Order(38)
+    void linkedTransferTransactionsRemainProtectedFromStandaloneDeletion() throws Exception {
+        int sourceId = database.addAccount("Protected Transfer Source", "Cash", "MWK", "Cash", "", 100000,
+                LocalDate.of(2026, 8, 11).toString(), 0, "Transfer deletion regression", "", "ACTIVE", "test");
+        int destinationId = database.addAccount("Protected Transfer Destination", "Cash", "MWK", "Cash", "", 20000,
+                LocalDate.of(2026, 8, 11).toString(), 0, "Transfer deletion regression", "", "ACTIVE", "test");
+        database.recordTransfer(sourceId, destinationId, 10000, 10000,
+                LocalDate.of(2026, 8, 11), "protected transfer deletion regression", "Cash", "TRX-DELETE-PROTECTED");
+        int outgoingId = transactionIdByReferencePurpose("TRX-DELETE-PROTECTED", "TRANSFER_OUT");
+
+        assertEquals(90000, accountById(sourceId).getCurrentBalance(), 0.005);
+        assertEquals(30000, accountById(destinationId).getCurrentBalance(), 0.005);
+
+        List<DatabaseHandler.RecordDisposalCandidateData> candidates = database.searchRecordDisposalCandidates(
+                "Transaction",
+                String.valueOf(outgoingId),
+                "All",
+                null,
+                null,
+                "",
+                false
+        );
+
+        assertEquals(1, candidates.size());
+        DatabaseHandler.RecordDisposalCandidateData candidate = candidates.getFirst();
+        assertEquals("NOT ELIGIBLE", candidate.eligibility());
+        assertEquals("Use the linked transaction workflow.", candidate.recommendation());
+        assertTrue(candidate.dependencies() > 0);
+
+        assertThrows(IllegalArgumentException.class, () -> database.softDeleteRecord("Transaction", outgoingId, "Should require linked workflow"));
+        assertFalse(transactionDeletedFlag(outgoingId));
+        assertEquals(90000, accountById(sourceId).getCurrentBalance(), 0.005);
+        assertEquals(30000, accountById(destinationId).getCurrentBalance(), 0.005);
+    }
+
     private static Account accountById(int accountId) {
         return database.listAccounts().stream()
                 .filter(account -> account.getId() == accountId)
@@ -1475,6 +1669,87 @@ class DatabaseHandlerIntegrationTest {
             statement.setInt(1, accountId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static int openingBalanceTransactionId(int accountId) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT id
+                     FROM transactions
+                     WHERE account_id = ?
+                       AND transaction_type = 'OPENING_BALANCE'
+                       AND transaction_purpose = 'OPENING_BALANCE'
+                       AND transaction_status = 'COMPLETED'
+                     ORDER BY id DESC
+                     LIMIT 1
+                     """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : -1;
+            }
+        }
+    }
+
+    private static int transactionIdByDescription(String description) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT id
+                     FROM transactions
+                     WHERE description = ?
+                     ORDER BY id DESC
+                     LIMIT 1
+                     """)) {
+            statement.setString(1, description);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : -1;
+            }
+        }
+    }
+
+    private static int transactionRowsByDescription(String description) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*)
+                     FROM transactions
+                     WHERE description = ?
+                     """)) {
+            statement.setString(1, description);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static int transactionIdByReferencePurpose(String referenceNumber, String purpose) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT id
+                     FROM transactions
+                     WHERE reference_number = ?
+                       AND transaction_purpose = ?
+                     ORDER BY id DESC
+                     LIMIT 1
+                     """)) {
+            statement.setString(1, referenceNumber);
+            statement.setString(2, purpose);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : -1;
+            }
+        }
+    }
+
+    private static boolean transactionDeletedFlag(int transactionId) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COALESCE(is_deleted, 0)
+                     FROM transactions
+                     WHERE id = ?
+                     """)) {
+            statement.setInt(1, transactionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) == 1;
             }
         }
     }
