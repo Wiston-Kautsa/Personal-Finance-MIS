@@ -23,7 +23,7 @@ public class RegisterController {
 
     @FXML
     public void initialize() {
-        boolean firstUser = !authDatabase.hasUsers();
+        boolean firstUser = !authDatabase.hasActiveSuperAdministrator();
         headingLabel.setText(firstUser ? "Create the First Super Administrator" : "Registration Is Controlled by the Super Administrator");
         roleHintLabel.setText(firstUser
                 ? "Enter new credentials. The first account becomes the Super Administrator; PFMIS does not provide a built-in password."
@@ -38,7 +38,7 @@ public class RegisterController {
     @FXML
     private void register() {
         clearMessage();
-        if (authDatabase.hasUsers()) {
+        if (authDatabase.hasActiveSuperAdministrator()) {
             showError("Additional users must be created by a Super Administrator.");
             return;
         }

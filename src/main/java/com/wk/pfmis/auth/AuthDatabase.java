@@ -63,12 +63,20 @@ public final class AuthDatabase {
     }
 
     private Connection connect() throws SQLException {
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.authDatabasePath());
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + authDatabasePath());
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA foreign_keys = ON");
             statement.execute("PRAGMA busy_timeout = 5000");
         }
         return connection;
+    }
+
+    private Path authDatabasePath() {
+        String explicit = System.getProperty("pfmis.auth.db.path", "").trim();
+        if (!explicit.isBlank()) {
+            return Path.of(explicit).toAbsolutePath().normalize();
+        }
+        return DatabaseHandler.authDatabasePath();
     }
 
     public void initialize() {
@@ -273,6 +281,50 @@ public final class AuthDatabase {
         }
     }
 
+    public boolean hasActiveSuperAdministrator() {
+        try (Connection connection = connect()) {
+            return hasActiveSuperAdministrator(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check the Super Administrator account.", exception);
+        }
+    }
+
+    public boolean usernameExists(String username) {
+        String cleanUsername = username == null ? "" : username.trim().toLowerCase(Locale.ENGLISH);
+        if (cleanUsername.isBlank()) {
+            return false;
+        }
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT EXISTS(SELECT 1 FROM users WHERE lower(username) = ?)
+                     """)) {
+            statement.setString(1, cleanUsername);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) == 1;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check the username.", exception);
+        }
+    }
+
+    public boolean emailExists(String email) {
+        String cleanEmail = email == null ? "" : email.trim().toLowerCase(Locale.ENGLISH);
+        if (cleanEmail.isBlank()) {
+            return false;
+        }
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT EXISTS(SELECT 1 FROM users WHERE lower(COALESCE(email, '')) = ?)
+                     """)) {
+            statement.setString(1, cleanEmail);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) == 1;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check the email address.", exception);
+        }
+    }
+
     public SystemUser registerUser(String fullName, String username, String email, String password) {
         return registerUserInternal(fullName, username, email, password, null, null);
     }
@@ -292,26 +344,30 @@ public final class AuthDatabase {
         }
         PasswordSecurity.PasswordRecord passwordRecord = PasswordSecurity.hash(password);
         int createdUserId;
-        boolean createdFirstUser;
+        boolean shouldMigrateLegacyWorkspace;
 
         try (Connection connection = connect()) {
             connection.setAutoCommit(false);
             try {
-                createdFirstUser = userCount(connection) == 0;
-                if (!createdFirstUser && actingUserId == null) {
+                int existingUsers = userCount(connection);
+                boolean creatingBootstrapSuperAdmin = !hasActiveSuperAdministrator(connection) && actingUserId == null;
+                shouldMigrateLegacyWorkspace = existingUsers == 0;
+                if (!creatingBootstrapSuperAdmin && actingUserId == null) {
                     throw new SecurityException("New users must be created by a super administrator.");
                 }
-                if (!createdFirstUser && !isActiveSuperAdmin(connection, actingUserId)) {
+                if (!creatingBootstrapSuperAdmin && !isActiveSuperAdmin(connection, actingUserId)) {
                     throw new SecurityException("Only an active super administrator can create users.");
                 }
-                String role = createdFirstUser
+                String role = creatingBootstrapSuperAdmin
                         ? SystemUser.ROLE_SUPER_ADMIN
                         : normalizeRequestedRole(requestedRole);
                 String sql = """
                         INSERT INTO users (
                             username, full_name, email, password_hash, password_salt,
-                            password_iterations, role, status, must_change_password
-                        ) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, 'ACTIVE', ?)
+                            password_iterations, role, status, must_change_password,
+                            created_at, updated_at
+                        ) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, 'ACTIVE', ?,
+                                  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         """;
                 try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
                     statement.setString(1, cleanUsername);
@@ -321,7 +377,7 @@ public final class AuthDatabase {
                     statement.setString(5, passwordRecord.salt());
                     statement.setInt(6, passwordRecord.iterations());
                     statement.setString(7, role);
-                    statement.setInt(8, !createdFirstUser && actingUserId != null ? 1 : 0);
+                    statement.setInt(8, !creatingBootstrapSuperAdmin && actingUserId != null ? 1 : 0);
                     statement.executeUpdate();
                     try (ResultSet keys = statement.getGeneratedKeys()) {
                         if (!keys.next()) {
@@ -350,7 +406,7 @@ public final class AuthDatabase {
             throw new IllegalStateException("Failed to register the user.", exception);
         }
 
-        if (createdFirstUser) {
+        if (shouldMigrateLegacyWorkspace) {
             DatabaseHandler.migrateLegacyDatabaseToUser(createdUserId);
         }
         return findUserById(createdUserId);
@@ -788,6 +844,20 @@ public final class AuthDatabase {
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() && resultSet.getInt(1) == 1;
             }
+        }
+    }
+
+    private boolean hasActiveSuperAdministrator(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM users
+                    WHERE role = 'SUPER_ADMIN'
+                      AND status = 'ACTIVE'
+                )
+                """);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getInt(1) == 1;
         }
     }
 
