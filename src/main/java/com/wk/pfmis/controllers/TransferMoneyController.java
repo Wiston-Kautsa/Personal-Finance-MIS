@@ -1,22 +1,40 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.db.DatabaseHandler.TransferFxMetadata;
 import com.wk.pfmis.db.DatabaseHandler.TransferPostingResult;
+import com.wk.pfmis.fx.ExchangeRateQuote;
+import com.wk.pfmis.fx.ExchangeRateService;
+import com.wk.pfmis.fx.ExchangeRateSource;
+import com.wk.pfmis.fx.FxMath;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.Category;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.VBox;
 
+import java.math.BigDecimal;
 import java.text.NumberFormat;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public class TransferMoneyController {
     private static final String STATUS_DRAFT = "Draft";
@@ -37,10 +55,20 @@ public class TransferMoneyController {
     @FXML private ComboBox<String> paymentMethodBox;
     @FXML private TextField referenceField;
     @FXML private TextArea descriptionArea;
+    @FXML private VBox exchangeRateCard;
+    @FXML private Label exchangeRateDisplayLabel;
+    @FXML private Label exchangeRateSourceLabel;
+    @FXML private Label exchangeRateUpdatedLabel;
+    @FXML private Label estimatedReceivedLabel;
+    @FXML private Button refreshRateButton;
+    @FXML private Button manualRateButton;
     @FXML private Label transferCheckLabel;
     @FXML private TextArea resultArea;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private final ExchangeRateService exchangeRateService = ExchangeRateService.getInstance();
+    private ExchangeRateQuote selectedQuote;
+    private CompletableFuture<?> pendingRateLoad;
 
     @FXML
     public void initialize() {
@@ -56,6 +84,7 @@ public class TransferMoneyController {
         CategoryInput.configure(feeCategoryBox);
         fromAccountBox.valueProperty().addListener((observable, oldValue, newValue) -> refreshAccountState());
         toAccountBox.valueProperty().addListener((observable, oldValue, newValue) -> refreshAccountState());
+        amountField.textProperty().addListener((observable, oldValue, newValue) -> updateEstimatedReceived());
         refresh();
     }
 
@@ -96,6 +125,9 @@ public class TransferMoneyController {
     private void transferMoney() {
         try {
             TransferForm form = readForm(true);
+            if (form.exchangeRateQuote() != null && !UiAlerts.confirm("Transfer Summary", transferSummary(form))) {
+                return;
+            }
             if (database.hasSimilarTransfer(
                     form.fromAccount().getId(),
                     form.toAccount().getId(),
@@ -119,7 +151,8 @@ public class TransferMoneyController {
                     form.transferDate(),
                     form.description(),
                     form.paymentMethod(),
-                    form.referenceNumber()
+                    form.referenceNumber(),
+                    fxMetadata(form)
             );
             statusBox.getSelectionModel().select(STATUS_POSTED);
             resultArea.setText("""
@@ -133,6 +166,7 @@ public class TransferMoneyController {
 
                     Source balance: %s
                     Destination balance: %s
+                    Exchange rate: %s
                     Reference: %s
                     """.formatted(
                     form.fromAccount().getAccountName(),
@@ -142,6 +176,7 @@ public class TransferMoneyController {
                     money(form.fromAccount().getCurrency(), form.transferFee()),
                     money(form.fromAccount().getCurrency(), result.sourceBalance()),
                     money(form.toAccount().getCurrency(), result.destinationBalance()),
+                    form.exchangeRateQuote() == null ? "1" : rateText(form.exchangeRateQuote()),
                     result.transferReference()
             ));
             refresh();
@@ -162,6 +197,7 @@ public class TransferMoneyController {
         feeCategoryBox.setValue(null);
         feeCategoryBox.getEditor().clear();
         exchangeRateField.clear();
+        selectedQuote = null;
         paymentMethodBox.setValue(null);
         paymentMethodBox.getEditor().clear();
         referenceField.clear();
@@ -220,9 +256,14 @@ public class TransferMoneyController {
         boolean sameCurrency = sameCurrency(fromAccount, toAccount);
         Double exchangeRate = null;
         double amountReceived = amount;
+        ExchangeRateQuote quote = null;
         if (!sameCurrency) {
-            exchangeRate = parsePositiveAmount(exchangeRateField.getText(), "Enter the exchange rate for different currencies.");
-            amountReceived = amount * exchangeRate;
+            quote = selectedQuote;
+            if (quote == null) {
+                throw new IllegalArgumentException("Exchange rate unavailable. Connect to the internet to obtain the latest rate or enter a manual rate.");
+            }
+            exchangeRate = quote.rate().doubleValue();
+            amountReceived = FxMath.convert(BigDecimal.valueOf(amount), quote.rate()).doubleValue();
         }
 
         Integer feeCategoryId = null;
@@ -242,7 +283,8 @@ public class TransferMoneyController {
                 transferDate,
                 paymentMethodValue(),
                 clean(referenceField.getText()),
-                descriptionWithExchangeRate(sameCurrency, exchangeRate)
+                descriptionWithExchangeRate(sameCurrency, quote),
+                quote
         );
     }
 
@@ -254,16 +296,100 @@ public class TransferMoneyController {
         currencyField.setText(fromAccount == null ? "" : clean(fromAccount.getCurrency()));
 
         boolean differentCurrency = fromAccount != null && toAccount != null && !sameCurrency(fromAccount, toAccount);
-        exchangeRateField.setDisable(!differentCurrency);
+        exchangeRateField.setDisable(true);
         exchangeRateField.setPromptText(differentCurrency
-                ? "Required for " + clean(fromAccount.getCurrency()) + " to " + clean(toAccount.getCurrency())
+                ? "Automatic rate for " + clean(fromAccount.getCurrency()) + " to " + clean(toAccount.getCurrency())
                 : "Not required");
         if (!differentCurrency) {
             exchangeRateField.clear();
+            selectedQuote = null;
+            showExchangeRateCard(false);
+        } else {
+            showExchangeRateCard(true);
+            loadExchangeRate();
         }
         transferCheckLabel.setText(differentCurrency
-                ? "The accounts use different currencies. Enter a reviewed exchange rate before posting."
+                ? "The accounts use different currencies. Review the exchange-rate card before posting."
                 : "A transfer moves money between your own accounts; it is not income or an expense.");
+    }
+
+    @FXML
+    private void refreshExchangeRate() {
+        loadExchangeRate();
+    }
+
+    @FXML
+    private void useManualRate() {
+        Account fromAccount = fromAccountBox.getValue();
+        Account toAccount = toAccountBox.getValue();
+        if (fromAccount == null || toAccount == null || sameCurrency(fromAccount, toAccount)) {
+            UiAlerts.info("Select two accounts with different currencies first.");
+            return;
+        }
+        Dialog<ExchangeRateQuote> dialog = new Dialog<>();
+        dialog.setTitle("Enter Manual Exchange Rate");
+        dialog.setHeaderText(clean(fromAccount.getCurrency()) + " to " + clean(toAccount.getCurrency()));
+        TextField rateField = new TextField();
+        rateField.setPromptText("Exchange rate");
+        TextField notesField = new TextField();
+        notesField.setPromptText("Reason or notes");
+        Label preview = new Label("Enter a rate greater than 0.");
+        preview.setWrapText(true);
+        rateField.textProperty().addListener((observable, oldValue, newValue) -> {
+            try {
+                BigDecimal rate = parsePositiveDecimal(newValue, "Exchange rate must be greater than 0.");
+                preview.setText("1 " + clean(fromAccount.getCurrency()) + " = " + clean(toAccount.getCurrency()) + " " + formatNumber(rate));
+            } catch (RuntimeException exception) {
+                preview.setText("Exchange rate must be greater than 0.");
+            }
+        });
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.add(new Label("From Currency *"), 0, 0);
+        grid.add(new Label(clean(fromAccount.getCurrency())), 1, 0);
+        grid.add(new Label("To Currency *"), 0, 1);
+        grid.add(new Label(clean(toAccount.getCurrency())), 1, 1);
+        grid.add(new Label("Exchange Rate *"), 0, 2);
+        grid.add(rateField, 1, 2);
+        grid.add(new Label("Reason / Notes"), 0, 3);
+        grid.add(notesField, 1, 3);
+        grid.add(preview, 1, 4);
+        dialog.getDialogPane().setContent(grid);
+        ButtonType save = new ButtonType("Save Manual Rate", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(save, ButtonType.CANCEL);
+        dialog.setResultConverter(button -> {
+            if (!save.equals(button)) {
+                return null;
+            }
+            BigDecimal rate = parsePositiveDecimal(rateField.getText(), "Exchange rate must be greater than 0.");
+            return new ExchangeRateQuote(
+                    clean(fromAccount.getCurrency()),
+                    clean(toAccount.getCurrency()),
+                    rate,
+                    transferDatePicker.getValue() == null ? LocalDate.now() : transferDatePicker.getValue(),
+                    Instant.now(),
+                    "PFMIS Manual Rate",
+                    ExchangeRateSource.MANUAL,
+                    "MANUAL",
+                    true,
+                    false,
+                    notesField.getText()
+            );
+        });
+        Optional<ExchangeRateQuote> result = dialog.showAndWait();
+        result.ifPresent(quote -> {
+            exchangeRateService.saveManualRate(
+                    quote.fromCurrency(),
+                    quote.toCurrency(),
+                    quote.rate(),
+                    quote.effectiveDate(),
+                    null,
+                    quote.notes()
+            );
+            selectedQuote = quote;
+            applyQuote(quote);
+        });
     }
 
     private List<String> paymentMethodSuggestions() {
@@ -276,16 +402,134 @@ public class TransferMoneyController {
         return methods;
     }
 
-    private String descriptionWithExchangeRate(boolean sameCurrency, Double exchangeRate) {
+    private String descriptionWithExchangeRate(boolean sameCurrency, ExchangeRateQuote quote) {
         List<String> parts = new ArrayList<>();
         String description = clean(descriptionArea.getText());
         if (!description.isBlank()) {
             parts.add(description);
         }
-        if (!sameCurrency && exchangeRate != null) {
-            parts.add("Exchange rate: " + exchangeRate);
+        if (!sameCurrency && quote != null) {
+            parts.add("Exchange rate locked: " + rateText(quote)
+                    + " | Source: " + quote.source()
+                    + " | Retrieved: " + quote.retrievedAt());
         }
         return String.join("\n", parts);
+    }
+
+    private void loadExchangeRate() {
+        Account fromAccount = fromAccountBox.getValue();
+        Account toAccount = toAccountBox.getValue();
+        if (fromAccount == null || toAccount == null || sameCurrency(fromAccount, toAccount)) {
+            return;
+        }
+        if (pendingRateLoad != null && !pendingRateLoad.isDone()) {
+            pendingRateLoad.cancel(true);
+        }
+        selectedQuote = null;
+        exchangeRateField.setText("");
+        exchangeRateDisplayLabel.setText("Loading...");
+        exchangeRateSourceLabel.setText("Updating exchange rate...");
+        exchangeRateUpdatedLabel.setText("");
+        estimatedReceivedLabel.setText("Estimated amount received: Loading...");
+        if (refreshRateButton != null) {
+            refreshRateButton.setDisable(true);
+            refreshRateButton.setText("Updating...");
+        }
+        pendingRateLoad = CompletableFuture
+                .supplyAsync(() -> exchangeRateService.getLatestRate(fromAccount.getCurrency(), toAccount.getCurrency()))
+                .whenComplete((quote, throwable) -> Platform.runLater(() -> {
+                    if (refreshRateButton != null) {
+                        refreshRateButton.setDisable(false);
+                        refreshRateButton.setText("Refresh Rate");
+                    }
+                    if (throwable == null) {
+                        selectedQuote = quote;
+                        applyQuote(quote);
+                    } else {
+                        selectedQuote = null;
+                        exchangeRateDisplayLabel.setText("Exchange rate unavailable");
+                        exchangeRateSourceLabel.setText("Connect to the internet or enter a manual rate.");
+                        exchangeRateUpdatedLabel.setText("");
+                        estimatedReceivedLabel.setText("Estimated amount received: Unavailable");
+                    }
+                }));
+    }
+
+    private void applyQuote(ExchangeRateQuote quote) {
+        exchangeRateField.setText(quote.rate().toPlainString());
+        exchangeRateDisplayLabel.setText(rateText(quote));
+        exchangeRateSourceLabel.setText("Source: " + quote.source() + " | Provider: " + quote.providerName());
+        exchangeRateUpdatedLabel.setText("Updated: " + timestampText(quote.retrievedAt()));
+        updateEstimatedReceived();
+    }
+
+    private void updateEstimatedReceived() {
+        if (selectedQuote == null || estimatedReceivedLabel == null) {
+            return;
+        }
+        try {
+            BigDecimal amount = parsePositiveDecimal(amountField.getText(), "Enter the transfer amount.");
+            BigDecimal converted = FxMath.convert(amount, selectedQuote.rate());
+            estimatedReceivedLabel.setText("Estimated amount received: " + money(selectedQuote.toCurrency(), converted.doubleValue()));
+        } catch (RuntimeException exception) {
+            estimatedReceivedLabel.setText("Estimated amount received: Enter an amount.");
+        }
+    }
+
+    private void showExchangeRateCard(boolean visible) {
+        if (exchangeRateCard != null) {
+            exchangeRateCard.setVisible(visible);
+            exchangeRateCard.setManaged(visible);
+        }
+    }
+
+    private TransferFxMetadata fxMetadata(TransferForm form) {
+        ExchangeRateQuote quote = form.exchangeRateQuote();
+        if (quote == null) {
+            return null;
+        }
+        return new TransferFxMetadata(
+                BigDecimal.valueOf(form.amountSent()),
+                form.fromAccount().getCurrency(),
+                quote.rate(),
+                BigDecimal.valueOf(form.amountReceived()),
+                form.toAccount().getCurrency(),
+                quote.source().name(),
+                quote.retrievedAt(),
+                quote.providerName(),
+                quote.rateType(),
+                quote.effectiveDate()
+        );
+    }
+
+    private String transferSummary(TransferForm form) {
+        ExchangeRateQuote quote = form.exchangeRateQuote();
+        return """
+                From:
+                %s
+
+                Amount:
+                %s
+
+                Exchange Rate:
+                %s
+
+                Rate Source:
+                %s
+
+                Destination:
+                %s
+
+                Amount Received:
+                %s
+                """.formatted(
+                form.fromAccount().getAccountName(),
+                money(form.fromAccount().getCurrency(), form.amountSent()),
+                quote == null ? "1" : rateText(quote),
+                quote == null ? "Same currency" : quote.source(),
+                form.toAccount().getAccountName(),
+                money(form.toAccount().getCurrency(), form.amountReceived())
+        );
     }
 
     private double parsePositiveAmount(String value, String emptyMessage) {
@@ -318,6 +562,21 @@ public class TransferMoneyController {
         }
     }
 
+    private BigDecimal parsePositiveDecimal(String value, String emptyMessage) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(emptyMessage);
+        }
+        try {
+            BigDecimal amount = new BigDecimal(value.replace(",", "").trim());
+            if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("Exchange rate must be greater than 0.");
+            }
+            return amount;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Enter amounts using numbers only.");
+        }
+    }
+
     private String balanceText(Account account) {
         if (account == null) {
             return "Balance: -";
@@ -327,6 +586,25 @@ public class TransferMoneyController {
 
     private String money(String currency, double amount) {
         return clean(currency).isBlank() ? MONEY_FORMAT.format(amount) : clean(currency) + " " + MONEY_FORMAT.format(amount);
+    }
+
+    private String rateText(ExchangeRateQuote quote) {
+        return "1 " + quote.fromCurrency() + " = " + quote.toCurrency() + " " + formatNumber(quote.rate());
+    }
+
+    private String formatNumber(BigDecimal amount) {
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.US);
+        format.setMinimumFractionDigits(2);
+        format.setMaximumFractionDigits(6);
+        return format.format(amount);
+    }
+
+    private String timestampText(Instant instant) {
+        return instant == null
+                ? "-"
+                : DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH)
+                .withZone(ZoneId.systemDefault())
+                .format(instant);
     }
 
     private boolean sameCurrency(Account first, Account second) {
@@ -376,7 +654,8 @@ public class TransferMoneyController {
             LocalDate transferDate,
             String paymentMethod,
             String referenceNumber,
-            String description
+            String description,
+            ExchangeRateQuote exchangeRateQuote
     ) {
     }
 }

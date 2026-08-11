@@ -15,7 +15,13 @@ FIRST RUN
 4. Use Manage Users to create or administer additional accounts.
 
 RELEASE PACKAGING
-Use `scripts/package-release.ps1` to create shareable application archives. The package script runs release validation, writes a release manifest, and writes a SHA-256 checksum file.
+PFMIS produces two separate release artifacts:
+- Source package: `PFMIS-Source-<timestamp>.zip`
+- Windows installer: `PFMIS-<version>-x64.exe`
+
+Use `scripts/package-source-release.ps1` or `scripts/package-release.ps1` to create source archives for review and handoff. A source archive is not a user installer and does not include Java, JavaFX, SQLite JDBC, JNA or a native launcher.
+
+Use `scripts/build-windows-installer.ps1` on Windows with JDK 21, Maven, jpackage and WiX to create the self-contained Windows 10/11 x64 installer. The installed shortcuts must launch the native jpackage `PFMIS.exe` GUI launcher directly. They must not launch `run-pfmis.bat`, Maven, `cmd.exe`, PowerShell or a console Java wrapper.
 
 Release packages must not contain `.env` variants, SQLite/database files, lock files, backups, logs, personal reports, generated exports, local AI model files, nested archives or credentials. Use `.env.example` as the configuration template.
 

@@ -1,6 +1,7 @@
 package com.wk.pfmis.mail;
 
 import com.wk.pfmis.config.AppConfig;
+import com.wk.pfmis.config.MailConfig;
 
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
@@ -21,8 +22,11 @@ import java.util.Locale;
 
 public final class EmailService {
     private static final EmailService INSTANCE = new EmailService();
-    private static final int SOCKET_TIMEOUT_MILLIS = 20_000;
 
+    private final boolean enabled;
+    private final int connectTimeoutMillis;
+    private final int readTimeoutMillis;
+    private final int writeTimeoutMillis;
     private final String smtpHost;
     private final int smtpPort;
     private final boolean smtpStartTls;
@@ -36,6 +40,11 @@ public final class EmailService {
     private final String password;
 
     private EmailService() {
+        MailConfig mailConfig = AppConfig.mailConfig();
+        enabled = mailConfig.enabled();
+        connectTimeoutMillis = (int) mailConfig.connectTimeout().toMillis();
+        readTimeoutMillis = (int) mailConfig.readTimeout().toMillis();
+        writeTimeoutMillis = (int) mailConfig.writeTimeout().toMillis();
         smtpHost = AppConfig.get("PFMIS_SMTP_HOST", "smtp.gmail.com");
         smtpPort = AppConfig.getInt("PFMIS_SMTP_PORT", 587);
         smtpStartTls = AppConfig.getBoolean("PFMIS_SMTP_STARTTLS", true);
@@ -58,7 +67,8 @@ public final class EmailService {
     }
 
     public boolean isSendConfigured() {
-        return hasText(smtpHost)
+        return enabled
+                && hasText(smtpHost)
                 && smtpPort > 0
                 && (smtpSsl || smtpStartTls)
                 && isEmailLike(fromAddress)
@@ -67,7 +77,8 @@ public final class EmailService {
     }
 
     public boolean isReceiveConfigured() {
-        return hasText(imapHost)
+        return enabled
+                && hasText(imapHost)
                 && imapPort > 0
                 && imapSsl
                 && hasText(username)
@@ -75,6 +86,9 @@ public final class EmailService {
     }
 
     public String sendConfigurationStatus() {
+        if (!enabled) {
+            return "Email integration is disabled.";
+        }
         if (isSendConfigured()) {
             return "Outgoing email configured as " + systemEmailAddress() + ".";
         }
@@ -85,6 +99,9 @@ public final class EmailService {
     }
 
     public String receiveConfigurationStatus() {
+        if (!enabled) {
+            return "Email integration is disabled.";
+        }
         if (isReceiveConfigured()) {
             return "Incoming email configured on " + imapHost + ":" + imapPort + ".";
         }
@@ -194,16 +211,16 @@ public final class EmailService {
 
     private Socket plainSocket(String host, int port) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), SOCKET_TIMEOUT_MILLIS);
-        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        socket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
+        socket.setSoTimeout(readTimeoutMillis);
         return socket;
     }
 
     private SSLSocket tlsSocket(String host, int port) throws IOException {
         SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
         SSLSocket socket = (SSLSocket) factory.createSocket();
-        socket.connect(new InetSocketAddress(host, port), SOCKET_TIMEOUT_MILLIS);
-        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        socket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
+        socket.setSoTimeout(readTimeoutMillis);
         configureEndpointVerification(socket);
         return socket;
     }
@@ -211,7 +228,7 @@ public final class EmailService {
     private Socket upgradeToTls(Socket plainSocket) throws IOException {
         SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
         Socket tlsSocket = factory.createSocket(plainSocket, smtpHost, smtpPort, true);
-        tlsSocket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        tlsSocket.setSoTimeout(readTimeoutMillis);
         if (tlsSocket instanceof SSLSocket sslSocket) {
             configureEndpointVerification(sslSocket);
             sslSocket.startHandshake();

@@ -93,8 +93,8 @@
 <p>This guide explains how to place <code>llama-server.exe</code> and the <code>.gguf</code> model where PFMIS expects them.</p>
 
 <div class="note">
-    <p><strong>PFMIS project folder:</strong></p>
-    <pre>D:\School\JAVA\MyFin_MIS</pre>
+    <p><strong>PFMIS application folder:</strong></p>
+    <pre>&lt;PFMIS application folder&gt;</pre>
 </div>
 
 <h2>1. Files You Need</h2>
@@ -106,12 +106,12 @@
 
 <h2>2. Copy llama-server.exe</h2>
 <p>Open the downloaded llama.cpp ZIP file. Copy <code>llama-server.exe</code> into this folder:</p>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\runtime\</pre>
 
 <p>If the llama.cpp ZIP contains DLL files, copy those DLL files into the same folder as <code>llama-server.exe</code>.</p>
 
 <h3>Expected result</h3>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\llama-server.exe</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\runtime\llama-server.exe</pre>
 
 <h2>3. Copy The Model</h2>
 <p>Find the downloaded model file. It must end with <code>.gguf</code>.</p>
@@ -119,10 +119,10 @@
 <pre>pfmis-model.gguf</pre>
 
 <p>Copy it into this folder:</p>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\models\</pre>
 
 <h3>Expected result</h3>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\pfmis-model.gguf</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\models\pfmis-model.gguf</pre>
 
 <div class="warning">
     <p><strong>Important:</strong> Make sure the final filename is exactly <code>pfmis-model.gguf</code>. It should not become <code>pfmis-model.gguf.gguf</code> or <code>pfmis-model.gguf.txt</code>.</p>
@@ -130,7 +130,7 @@
 
 <h2>4. Confirm The Folder Structure</h2>
 <p>After copying, the folders should look like this:</p>
-<pre>D:\School\JAVA\MyFin_MIS
+<pre>&lt;PFMIS application folder&gt;
 |-- local-ai
     |-- runtime
     |   |-- llama-server.exe
@@ -178,11 +178,11 @@ API key: Not required</pre>
 
 <h3>PFMIS says the runtime is missing</h3>
 <p>Check that this file exists:</p>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\runtime\llama-server.exe</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\runtime\llama-server.exe</pre>
 
 <h3>PFMIS says the model is missing</h3>
 <p>Check that this file exists:</p>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\models\pfmis-model.gguf</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\models\pfmis-model.gguf</pre>
 
 <h3>The model takes long to load</h3>
 <p>This is normal for large files. A smaller quantized model such as Q4 is better for older computers.</p>
@@ -199,7 +199,7 @@ API key: Not required</pre>
 <h2>9. Licence Reminder</h2>
 <p>Before distributing PFMIS with the model, confirm that the selected model licence allows redistribution, offline installation, and your intended use.</p>
 <p>The llama.cpp runtime licence and the model licence are separate. Include both licence notices in:</p>
-<pre>D:\School\JAVA\MyFin_MIS\local-ai\licenses\</pre>
+<pre>&lt;PFMIS application folder&gt;\local-ai\licenses\</pre>
 
 <h2>Final Checklist</h2>
 <ul class="checklist">

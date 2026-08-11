@@ -3,6 +3,9 @@ package com.wk.pfmis.controllers;
 import com.wk.pfmis.MainApp;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.db.DatabaseHandler.SavingsGroupOverview;
+import com.wk.pfmis.fx.ConversionResult;
+import com.wk.pfmis.fx.ExchangeRateService;
+import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Project;
@@ -42,6 +45,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
+import java.math.BigDecimal;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -49,9 +53,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DashboardController {
@@ -172,6 +178,7 @@ public class DashboardController {
     @FXML private TableColumn<FinanceTransaction, Double> dashboardAmountColumn;
     @FXML private VBox alertsBox;
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private final ExchangeRateService exchangeRateService = ExchangeRateService.getInstance();
     private static final String REPORT_GROUP_OVERVIEW = "Overview";
     private static final String REPORT_GROUP_INCOME_EXPENSES = "Income and Expenses";
     private static final String REPORT_GROUP_ACCOUNTS_POSITION = "Accounts and Position";
@@ -1229,13 +1236,13 @@ public class DashboardController {
         double savingsRate = stats.getMonthlyIncome() == 0 ? 0 : (stats.getMonthlySavings() / stats.getMonthlyIncome()) * 100;
         String baseCurrency = database.getBaseCurrencyCode();
         SavingsGroupOverview savingsGroups = database.getSavingsGroupOverview();
-        double availableCashAndBank = database.getAvailableCashAndBankBalance();
+        DashboardFxBalance convertedBalance = dashboardFxBalance(baseCurrency);
         double communitySavingsBalance = database.getCommunitySavingsBalance();
-        totalBalanceLabel.setText(MoneyUtil.format(baseCurrency, availableCashAndBank));
+        totalBalanceLabel.setText(MoneyUtil.format(baseCurrency, convertedBalance.total()));
         incomeLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyIncome()));
         expensesLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyExpenses()));
         savingsLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlySavings()));
-        balanceDetailLabel.setText("Cash, bank and mobile money only");
+        balanceDetailLabel.setText(convertedBalance.detail());
         incomeDetailLabel.setText(incomeRecords + " income records");
         expensesDetailLabel.setText(expenseRecords + " expense records");
         savingsDetailLabel.setText(String.format("%.1f%% savings rate", savingsRate));
@@ -1255,6 +1262,47 @@ public class DashboardController {
         refreshDashboardTable(transactions);
         refreshPlanSnapshot(stats, savingsGroups, baseCurrency);
         refreshAlerts(stats, baseCurrency);
+    }
+
+    private DashboardFxBalance dashboardFxBalance(String baseCurrency) {
+        BigDecimal total = BigDecimal.ZERO;
+        int converted = 0;
+        int missing = 0;
+        boolean cached = false;
+        Set<String> currencies = new LinkedHashSet<>();
+        for (Account account : database.listAccounts()) {
+            if (!"ACTIVE".equalsIgnoreCase(account.getStatus()) || account.isLiabilityAccount()) {
+                continue;
+            }
+            String currency = account.getCurrency() == null || account.getCurrency().isBlank()
+                    ? baseCurrency
+                    : account.getCurrency().trim().toUpperCase(Locale.ENGLISH);
+            currencies.add(currency);
+            BigDecimal balance = BigDecimal.valueOf(account.getCurrentBalance());
+            if (currency.equalsIgnoreCase(baseCurrency)) {
+                total = total.add(balance);
+                converted++;
+                continue;
+            }
+            try {
+                ConversionResult result = exchangeRateService.convertUsingLastKnown(balance, currency, baseCurrency);
+                total = total.add(result.convertedAmount());
+                cached = cached || result.quote().stale();
+                converted++;
+            } catch (RuntimeException exception) {
+                missing++;
+            }
+        }
+        String detail = "Across " + converted + " account(s) in " + currencies.size() + " currenc" + (currencies.size() == 1 ? "y" : "ies");
+        if (missing > 0) {
+            detail += ". Some balances could not be converted because an exchange rate is unavailable.";
+        } else if (cached) {
+            detail += ". Using saved exchange rates.";
+        }
+        return new DashboardFxBalance(total, detail);
+    }
+
+    private record DashboardFxBalance(BigDecimal total, String detail) {
     }
 
     private void configureDashboardTable() {

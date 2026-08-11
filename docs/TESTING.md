@@ -10,6 +10,9 @@ Current coverage focuses on:
 - Release validation pass/fail behavior
 - Release validation redaction of sensitive values
 - Money parsing, MWK minor-unit scale, explicit rounding, arithmetic and currency mismatch rejection
+- Foreign-exchange provider parsing, retries, invalid response handling and BigDecimal conversion math
+- Typed environment configuration parsing for FX, mail and logging settings
+- SQLite migration coverage for exchange-rate history and transfer FX rate locking
 - Chipeleganyu contribution status rules for automatic deduction and missed-contribution reversal protection
 
 This is an initial regression baseline, not the complete financial-system test suite.
@@ -41,5 +44,6 @@ target/site/jacoco/index.html
 - Bank Nkhonde and Chipeleganyu workflows
 - Report totals versus ledger totals
 - Backup and restore integrity
+- Full multi-currency report display coverage across loans, savings groups, projects and assets
 
 No release should claim production readiness until these areas are covered by tests.

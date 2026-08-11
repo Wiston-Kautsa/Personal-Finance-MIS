@@ -101,6 +101,8 @@ public class TransactionLedgerController {
                 "Bank Nkhonde Contribution",
                 "Investment",
                 "Asset Purchase",
+                "Asset Sale",
+                "Opening Balance",
                 "Adjustment",
                 "Draft"
         ));
@@ -778,28 +780,42 @@ public class TransactionLedgerController {
 
     private String typeLabel(FinanceTransaction transaction) {
         String purpose = safe(transaction.getTransactionPurpose());
+        String type = safe(transaction.getTransactionType());
+        if ("OPENING_BALANCE".equals(type) || "OPENING_BALANCE".equals(purpose)) {
+            return "Opening Balance";
+        }
         if ("LOAN_PROCEEDS".equals(purpose)) {
             return "Loan Proceeds";
         }
         if (List.of("LOAN_PRINCIPAL_PAYMENT", "LOAN_INTEREST_PAYMENT", "LOAN_FEE", "LOAN_PENALTY", "LOAN_SETTLEMENT", "BORROWED_REPAID", "LENT_REPAID").contains(purpose)) {
             return "Loan Repayment";
         }
-        if ("TRANSFER".equals(transaction.getTransactionType())) {
+        if ("TRANSFER".equals(type)) {
             return "Transfer";
         }
-        if ("LOAN".equals(transaction.getTransactionType())) {
+        if ("LOAN".equals(type)) {
             return "Loan";
         }
-        if ("EXPENSE".equals(transaction.getTransactionType()) && "TRANSFER_FEE".equals(transaction.getTransactionPurpose())) {
+        if ("EXPENSE".equals(type) && "TRANSFER_FEE".equals(purpose)) {
             return "Transfer Fee";
         }
-        if (isLoanPurpose(transaction.getTransactionPurpose())) {
+        if ("ASSET_SALE".equals(type) || "ASSET_SALE_PROCEEDS".equals(purpose)) {
+            return "Asset Sale";
+        }
+        if ("ADJUSTMENT".equals(type)) {
+            return switch (purpose) {
+                case "BALANCE_INCREASE" -> "Balance Increase";
+                case "BALANCE_DECREASE" -> "Balance Decrease";
+                default -> "Adjustment";
+            };
+        }
+        if (isLoanPurpose(purpose)) {
             return "Loan";
         }
-        return switch (safe(transaction.getTransactionType())) {
+        return switch (type) {
             case "INCOME" -> "Income";
             case "EXPENSE" -> "Expense";
-            default -> safe(transaction.getTransactionType());
+            default -> type;
         };
     }
 
@@ -838,16 +854,43 @@ public class TransactionLedgerController {
 
     private boolean isLoanIn(FinanceTransaction transaction) {
         return "LOAN".equals(transaction.getTransactionType())
-                && List.of("MONEY_BORROWED", "LENT_REPAID", "LOAN_PROCEEDS").contains(safe(transaction.getTransactionPurpose()));
+                && List.of(
+                        "MONEY_BORROWED",
+                        "LENT_REPAID",
+                        "LOAN_PROCEEDS",
+                        "COMMUNITY_LOAN_RECEIVABLE_INCREASE",
+                        "COMMUNITY_LOAN_LIABILITY_INCREASE"
+                ).contains(safe(transaction.getTransactionPurpose()));
     }
 
     private boolean isLoanOut(FinanceTransaction transaction) {
         return "LOAN".equals(transaction.getTransactionType())
-                && List.of("MONEY_LENT", "BORROWED_REPAID", "LOAN_PRINCIPAL_PAYMENT", "LOAN_SETTLEMENT").contains(safe(transaction.getTransactionPurpose()));
+                && List.of(
+                        "MONEY_LENT",
+                        "BORROWED_REPAID",
+                        "LOAN_PRINCIPAL_PAYMENT",
+                        "LOAN_SETTLEMENT",
+                        "COMMUNITY_LOAN_RECEIVABLE_DECREASE",
+                        "COMMUNITY_LOAN_LIABILITY_DECREASE"
+                ).contains(safe(transaction.getTransactionPurpose()));
+    }
+
+    private boolean isBalanceIncrease(FinanceTransaction transaction) {
+        return "ADJUSTMENT".equals(transaction.getTransactionType())
+                && "BALANCE_INCREASE".equals(transaction.getTransactionPurpose());
+    }
+
+    private boolean isBalanceDecrease(FinanceTransaction transaction) {
+        return "ADJUSTMENT".equals(transaction.getTransactionType())
+                && "BALANCE_DECREASE".equals(transaction.getTransactionPurpose());
     }
 
     private double moneyInAmount(FinanceTransaction transaction) {
-        if ("INCOME".equals(transaction.getTransactionType()) || isTransferIn(transaction) || isLoanIn(transaction)) {
+        if ("INCOME".equals(transaction.getTransactionType())
+                || "ASSET_SALE".equals(transaction.getTransactionType())
+                || isTransferIn(transaction)
+                || isLoanIn(transaction)
+                || isBalanceIncrease(transaction)) {
             return transaction.getAmount();
         }
         return 0;
@@ -856,7 +899,8 @@ public class TransactionLedgerController {
     private double moneyOutAmount(FinanceTransaction transaction) {
         if ("EXPENSE".equals(transaction.getTransactionType())
                 || ("TRANSFER".equals(transaction.getTransactionType()) && "TRANSFER_OUT".equals(transaction.getTransactionPurpose()))
-                || isLoanOut(transaction)) {
+                || isLoanOut(transaction)
+                || isBalanceDecrease(transaction)) {
             return transaction.getAmount();
         }
         return 0;
@@ -870,12 +914,17 @@ public class TransactionLedgerController {
     }
 
     private double balanceEffect(FinanceTransaction transaction) {
-        if ("INCOME".equals(transaction.getTransactionType()) || isTransferIn(transaction) || isLoanIn(transaction)) {
+        if ("INCOME".equals(transaction.getTransactionType())
+                || "ASSET_SALE".equals(transaction.getTransactionType())
+                || isTransferIn(transaction)
+                || isLoanIn(transaction)
+                || isBalanceIncrease(transaction)) {
             return transaction.getAmount();
         }
         if ("EXPENSE".equals(transaction.getTransactionType())
                 || ("TRANSFER".equals(transaction.getTransactionType()) && "TRANSFER_OUT".equals(transaction.getTransactionPurpose()))
-                || isLoanOut(transaction)) {
+                || isLoanOut(transaction)
+                || isBalanceDecrease(transaction)) {
             return -transaction.getAmount();
         }
         return 0;

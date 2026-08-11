@@ -12,5 +12,7 @@ module com.wk.pfmis {
     opens com.wk.pfmis.models to javafx.base;
 
     exports com.wk.pfmis;
+    exports com.wk.pfmis.config;
     exports com.wk.pfmis.domain;
+    exports com.wk.pfmis.fx;
 }

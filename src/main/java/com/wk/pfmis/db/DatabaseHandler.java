@@ -4,6 +4,9 @@ import com.wk.pfmis.ai.AiCredentialStore;
 import com.wk.pfmis.domain.ChipeleganyuContributionStatus;
 import com.wk.pfmis.domain.ChipeleganyuMissedReason;
 import com.wk.pfmis.domain.Money;
+import com.wk.pfmis.fx.ExchangeRateQuote;
+import com.wk.pfmis.fx.ExchangeRateSource;
+import com.wk.pfmis.fx.FxMath;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AiInteractionRecord;
 import com.wk.pfmis.models.AiSettings;
@@ -53,6 +56,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.LocalDateTime;
@@ -63,8 +67,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Currency;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -94,6 +101,64 @@ public class DatabaseHandler {
     private static final String PURPOSE_TRANSFER_FEE_REVERSAL = "TRANSFER_FEE_REVERSAL";
     private static final String PURPOSE_INCOME_REVERSAL = "INCOME_REVERSAL";
     private static final String PURPOSE_REVERSAL = "REVERSAL";
+    private static final List<String> LEDGER_TRANSACTION_TYPES = List.of(
+            "INCOME",
+            "EXPENSE",
+            "TRANSFER",
+            "LOAN",
+            "ADJUSTMENT",
+            "ASSET_SALE",
+            "OPENING_BALANCE"
+    );
+    private static final List<String> LEDGER_TRANSACTION_PURPOSES = List.of(
+            PURPOSE_NORMAL,
+            PURPOSE_PROJECT_EXPENSE,
+            PURPOSE_MONEY_LENT,
+            PURPOSE_MONEY_BORROWED,
+            PURPOSE_LENT_REPAID,
+            PURPOSE_BORROWED_REPAID,
+            PURPOSE_SUPPORT_GIVEN,
+            PURPOSE_SAVINGS,
+            PURPOSE_GOAL_CONTRIBUTION,
+            PURPOSE_LOAN_INTEREST,
+            PURPOSE_LOAN_PENALTY,
+            "TRANSFER_IN",
+            "TRANSFER_OUT",
+            PURPOSE_TRANSFER_FEE,
+            PURPOSE_TRANSFER_FEE_REVERSAL,
+            PURPOSE_REVERSAL,
+            PURPOSE_INCOME_REVERSAL,
+            "BALANCE_INCREASE",
+            "BALANCE_DECREASE",
+            "ASSET_PURCHASE",
+            "ASSET_SALE_PROCEEDS",
+            "ASSET_SELLING_COST",
+            "LOAN_PROCEEDS",
+            "LOAN_PRINCIPAL_PAYMENT",
+            "LOAN_INTEREST_PAYMENT",
+            "LOAN_FEE",
+            "LOAN_SETTLEMENT",
+            "COMMUNITY_LOAN_LIABILITY_INCREASE",
+            "COMMUNITY_LOAN_LIABILITY_DECREASE",
+            "COMMUNITY_LOAN_RECEIVABLE_INCREASE",
+            "COMMUNITY_LOAN_RECEIVABLE_DECREASE",
+            "OPENING_BALANCE"
+    );
+    private static final List<String> LEDGER_TRANSACTION_STATUSES = List.of(
+            "COMPLETED",
+            "OPEN",
+            "PARTIALLY_CLEARED",
+            "CLEARED",
+            "FROZEN",
+            "CANCELLED",
+            "REVERSED"
+    );
+    private static final String TRANSACTION_VALIDATION_INSERT_TRIGGER = "trg_transactions_validate_insert";
+    private static final String TRANSACTION_VALIDATION_UPDATE_TRIGGER = "trg_transactions_validate_update";
+    private static final int TRANSACTION_LEDGER_VALIDATION_VERSION = 31;
+    private static final String TRANSACTION_LEDGER_VALIDATION_MIGRATION_KEY = "transaction-ledger-validation-v2";
+    private static final int AUTOMATIC_FX_RATES_VERSION = 32;
+    private static final String AUTOMATIC_FX_RATES_MIGRATION_KEY = "automatic-fx-rates-v1";
     private static final Set<String> GENERIC_TRANSACTION_TYPES = Set.of("INCOME", "EXPENSE", "LOAN");
     private static final Set<String> GENERIC_TRANSACTION_STATUSES = Set.of("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED");
     private static final Set<String> TERMINAL_TRANSACTION_STATUSES = Set.of("CANCELLED", "REVERSED");
@@ -111,6 +176,34 @@ public class DatabaseHandler {
     }
 
     private record GenericTransactionCommand(String transactionType, String purpose, String status) {
+    }
+
+    private record TransactionTriggerMetadata(String name, String tableName, String sql) {
+    }
+
+    private record TransactionValidationTriggerRepairResult(
+            boolean changed,
+            List<String> upgradedTriggers,
+            boolean insertTriggerCreated,
+            boolean updateTriggerCreated
+    ) {
+        static TransactionValidationTriggerRepairResult none() {
+            return new TransactionValidationTriggerRepairResult(false, List.of(), false, false);
+        }
+    }
+
+    public record TransferFxMetadata(
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal exchangeRate,
+            BigDecimal convertedAmount,
+            String convertedCurrency,
+            String exchangeRateSource,
+            Instant exchangeRateTimestamp,
+            String exchangeRateProvider,
+            String exchangeRateType,
+            LocalDate exchangeRateDate
+    ) {
     }
 
     public record TransactionHistoryFilter(
@@ -1413,6 +1506,7 @@ public class DatabaseHandler {
         try (Connection connection = connect()) {
             boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
+            TransactionValidationTriggerRepairResult transactionTriggerRepair = TransactionValidationTriggerRepairResult.none();
             try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS accounts (
@@ -1627,7 +1721,7 @@ public class DatabaseHandler {
                         FOREIGN KEY (related_transaction_id) REFERENCES transactions(id)
                     )
                     """);
-            migrateTransactionsTable(connection);
+            transactionTriggerRepair = migrateTransactionsTable(connection);
             createValidTransactionsView(connection);
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS app_settings (
@@ -1642,6 +1736,7 @@ public class DatabaseHandler {
             initializePaymentMethods(connection);
             initializeBackupHistory(connection);
             initializeSystemEventLog(connection);
+            logTransactionValidationTriggerRepair(connection, transactionTriggerRepair);
             initializeAiInteractionLog(connection);
             initializeReportInputTables(connection);
             initializeDataIntakeTables(connection);
@@ -1650,6 +1745,7 @@ public class DatabaseHandler {
             initializeSetupPolicyTables(connection);
             initializeAssetsTables(connection);
             initializeCentralLoansTables(connection);
+            initializeExchangeRates(connection);
             migrateHouseholdBudgetMembersTable(connection);
             initializeRecordDeletionWorkflow(connection);
             createIndexes(connection);
@@ -1694,8 +1790,18 @@ public class DatabaseHandler {
                 return;
             }
             try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
-                if (!tableExists(connection, "accounts")
-                        || columnExists(connection, "accounts", "is_system_account")) {
+                boolean legacyAccountSchema = tableExists(connection, "accounts")
+                        && !columnExists(connection, "accounts", "is_system_account");
+                boolean legacyTransactionValidation = false;
+                if (tableExists(connection, "transactions")) {
+                    for (TransactionTriggerMetadata trigger : listTransactionTriggers(connection)) {
+                        if (isObsoletePfmisTransactionValidationTrigger(trigger)) {
+                            legacyTransactionValidation = true;
+                            break;
+                        }
+                    }
+                }
+                if (!legacyAccountSchema && !legacyTransactionValidation) {
                     return;
                 }
             }
@@ -1881,6 +1987,81 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "payment_methods", "default_account", "TEXT");
         addColumnIfMissing(connection, "payment_methods", "status", "TEXT NOT NULL DEFAULT 'ACTIVE'");
         addColumnIfMissing(connection, "payment_methods", "updated_at", "TEXT");
+    }
+
+    private void initializeExchangeRates(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS exchange_rates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        base_currency TEXT NOT NULL,
+                        quote_currency TEXT NOT NULL,
+                        rate NUMERIC NOT NULL,
+                        rate_date TEXT NOT NULL,
+                        rate_timestamp TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        rate_type TEXT NOT NULL,
+                        provider_name TEXT,
+                        is_manual INTEGER NOT NULL DEFAULT 0,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        expires_at TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CHECK (upper(base_currency) <> upper(quote_currency)),
+                        CHECK (rate > 0)
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_exchange_rates_pair_date ON exchange_rates(base_currency, quote_currency, rate_date DESC, rate_timestamp DESC)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_exchange_rates_provider ON exchange_rates(provider_name)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_exchange_rates_active_manual ON exchange_rates(base_currency, quote_currency, is_manual, is_active)");
+        }
+        addColumnIfMissing(connection, "exchange_rates", "expires_at", "TEXT");
+        addColumnIfMissing(connection, "exchange_rates", "notes", "TEXT");
+        migrateLegacyCurrencyRatesToFxHistory(connection);
+        recordSchemaMigration(
+                connection,
+                AUTOMATIC_FX_RATES_VERSION,
+                AUTOMATIC_FX_RATES_MIGRATION_KEY,
+                "Automatic exchange-rate history and transaction FX locking"
+        );
+    }
+
+    private void migrateLegacyCurrencyRatesToFxHistory(Connection connection) throws SQLException {
+        String baseCurrency = baseCurrencyCode(connection);
+        String sql = """
+                SELECT currency_code, rate_to_base, updated_at
+                FROM currencies
+                WHERE base_currency = 0
+                  AND rate_to_base > 0
+                  AND upper(currency_code) <> upper(?)
+                """;
+        try (PreparedStatement select = connection.prepareStatement(sql)) {
+            select.setString(1, baseCurrency);
+            try (ResultSet resultSet = select.executeQuery()) {
+                while (resultSet.next()) {
+                    String currency = normalizedCurrencyCode(resultSet.getString("currency_code"));
+                    if (hasExchangeRate(connection, currency, baseCurrency, true)) {
+                        continue;
+                    }
+                    String timestamp = safeText(resultSet.getString("updated_at"), LocalDateTime.now().toString());
+                    ExchangeRateQuote quote = new ExchangeRateQuote(
+                            currency,
+                            baseCurrency,
+                            BigDecimal.valueOf(resultSet.getDouble("rate_to_base")),
+                            parseDatePrefix(timestamp),
+                            parseInstantOrNow(timestamp),
+                            "PFMIS Legacy Manual Rate",
+                            ExchangeRateSource.MANUAL,
+                            "MANUAL",
+                            true,
+                            false,
+                            "Migrated from currencies.rate_to_base"
+                    );
+                    saveExchangeRateQuote(connection, quote, null);
+                }
+            }
+        }
     }
 
     private boolean hasAiSettingsRow(Connection connection) throws SQLException {
@@ -2294,7 +2475,10 @@ public class DatabaseHandler {
         return fallback.isBlank() ? "TEXT" : fallback;
     }
 
-    private void migrateTransactionsTable(Connection connection) throws SQLException {
+    private TransactionValidationTriggerRepairResult migrateTransactionsTable(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "transactions", "category_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "project_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "person_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "related_transaction_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "project_activity_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "transaction_purpose", "TEXT DEFAULT 'NORMAL'");
@@ -2302,10 +2486,22 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "transactions", "source", "TEXT DEFAULT 'MANUAL'");
         addColumnIfMissing(connection, "transactions", "payment_method", "TEXT");
         addColumnIfMissing(connection, "transactions", "reference_number", "TEXT");
+        addColumnIfMissing(connection, "transactions", "created_at", "TEXT DEFAULT CURRENT_TIMESTAMP");
         addColumnIfMissing(connection, "transactions", "loan_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "loan_installment_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "savings_group_profile_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "original_amount", "NUMERIC");
+        addColumnIfMissing(connection, "transactions", "original_currency", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate", "NUMERIC");
+        addColumnIfMissing(connection, "transactions", "converted_amount", "NUMERIC");
+        addColumnIfMissing(connection, "transactions", "converted_currency", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate_source", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate_timestamp", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate_provider", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate_type", "TEXT");
+        addColumnIfMissing(connection, "transactions", "exchange_rate_date", "TEXT");
         addSoftDeleteColumns(connection, "transactions");
+        TransactionValidationTriggerRepairResult triggerRepair = repairLegacyTransactionValidationTriggers(connection);
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     UPDATE transactions
@@ -2320,6 +2516,212 @@ public class DatabaseHandler {
                       AND transaction_type IN ('INCOME', 'EXPENSE')
                     """);
         }
+        return triggerRepair;
+    }
+
+    private TransactionValidationTriggerRepairResult repairLegacyTransactionValidationTriggers(Connection connection) throws SQLException {
+        ensureSchemaMetadataTables(connection);
+        List<String> upgradedTriggers = new ArrayList<>();
+        for (TransactionTriggerMetadata trigger : listTransactionTriggers(connection)) {
+            if (isObsoletePfmisTransactionValidationTrigger(trigger)) {
+                dropTrigger(connection, trigger.name());
+                upgradedTriggers.add(trigger.name());
+            }
+        }
+
+        boolean insertCreated = ensureCanonicalTransactionValidationTrigger(
+                connection,
+                TRANSACTION_VALIDATION_INSERT_TRIGGER,
+                "INSERT"
+        );
+        boolean updateCreated = ensureCanonicalTransactionValidationTrigger(
+                connection,
+                TRANSACTION_VALIDATION_UPDATE_TRIGGER,
+                "UPDATE"
+        );
+        recordSchemaMigration(
+                connection,
+                TRANSACTION_LEDGER_VALIDATION_VERSION,
+                TRANSACTION_LEDGER_VALIDATION_MIGRATION_KEY,
+                "Canonical transaction ledger validation triggers"
+        );
+        return new TransactionValidationTriggerRepairResult(
+                !upgradedTriggers.isEmpty() || insertCreated || updateCreated,
+                List.copyOf(upgradedTriggers),
+                insertCreated,
+                updateCreated
+        );
+    }
+
+    private boolean ensureCanonicalTransactionValidationTrigger(
+            Connection connection,
+            String triggerName,
+            String eventName
+    ) throws SQLException {
+        TransactionTriggerMetadata existing = transactionTriggerByName(connection, triggerName);
+        if (existing != null && isCompatibleTransactionValidationTriggerSql(existing.sql())) {
+            return false;
+        }
+        if (existing != null) {
+            dropTrigger(connection, triggerName);
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(canonicalTransactionValidationTriggerSql(triggerName, eventName));
+        }
+        return true;
+    }
+
+    private List<TransactionTriggerMetadata> listTransactionTriggers(Connection connection) throws SQLException {
+        List<TransactionTriggerMetadata> triggers = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT name, tbl_name, sql
+                FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND tbl_name = 'transactions'
+                ORDER BY name
+                """);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                triggers.add(new TransactionTriggerMetadata(
+                        resultSet.getString("name"),
+                        resultSet.getString("tbl_name"),
+                        resultSet.getString("sql")
+                ));
+            }
+        }
+        return triggers;
+    }
+
+    private TransactionTriggerMetadata transactionTriggerByName(Connection connection, String triggerName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT name, tbl_name, sql
+                FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND tbl_name = 'transactions'
+                  AND name = ?
+                LIMIT 1
+                """)) {
+            statement.setString(1, triggerName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return new TransactionTriggerMetadata(
+                            resultSet.getString("name"),
+                            resultSet.getString("tbl_name"),
+                            resultSet.getString("sql")
+                    );
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isObsoletePfmisTransactionValidationTrigger(TransactionTriggerMetadata trigger) {
+        String sql = safeText(trigger.sql(), "");
+        if (sql.isBlank() || !"transactions".equalsIgnoreCase(safeText(trigger.tableName(), ""))) {
+            return false;
+        }
+        String upperSql = sql.toUpperCase(Locale.ENGLISH);
+        String upperName = safeText(trigger.name(), "").toUpperCase(Locale.ENGLISH);
+        boolean validatesTransactionLedger = upperSql.contains("RAISE")
+                && (upperSql.contains("TRANSACTION_TYPE")
+                || upperSql.contains("TRANSACTION_PURPOSE")
+                || upperSql.contains("TRANSACTION_STATUS"));
+        boolean pfmisValidationTrigger = upperName.startsWith("TRG_TRANSACTIONS_VALIDATE")
+                || (upperName.contains("TRANSACTION") && upperName.contains("VALID"))
+                || upperSql.contains("INVALID TRANSACTION TYPE")
+                || upperSql.contains("INVALID TRANSACTION PURPOSE")
+                || upperSql.contains("INVALID TRANSACTION STATUS")
+                || upperSql.contains("INVALID LEGACY TRANSACTION STATUS");
+        return validatesTransactionLedger
+                && pfmisValidationTrigger
+                && !isCompatibleTransactionValidationTriggerSql(sql);
+    }
+
+    private boolean isCompatibleTransactionValidationTriggerSql(String sql) {
+        String upperSql = safeText(sql, "").toUpperCase(Locale.ENGLISH);
+        return !upperSql.contains("POSTING_STATUS")
+                && !upperSql.contains("SETTLEMENT_STATUS")
+                && containsAllSqlTokens(upperSql, LEDGER_TRANSACTION_TYPES)
+                && containsAllSqlTokens(upperSql, LEDGER_TRANSACTION_PURPOSES)
+                && containsAllSqlTokens(upperSql, LEDGER_TRANSACTION_STATUSES);
+    }
+
+    private boolean containsAllSqlTokens(String upperSql, List<String> values) {
+        for (String value : values) {
+            if (!upperSql.contains(value.toUpperCase(Locale.ENGLISH))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void dropTrigger(Connection connection, String triggerName) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("DROP TRIGGER IF EXISTS " + sqliteIdentifier(triggerName));
+        }
+    }
+
+    private String canonicalTransactionValidationTriggerSql(String triggerName, String eventName) {
+        return """
+                CREATE TRIGGER %s
+                BEFORE %s ON transactions
+                BEGIN
+                    SELECT CASE
+                        WHEN NEW.amount <= 0 THEN RAISE(ABORT, 'Transaction amount must be greater than zero')
+                    END;
+                    SELECT CASE
+                        WHEN upper(COALESCE(NEW.transaction_type, '')) NOT IN (%s)
+                        THEN RAISE(ABORT, 'Invalid transaction type')
+                    END;
+                    SELECT CASE
+                        WHEN upper(COALESCE(NEW.transaction_purpose, 'NORMAL')) NOT IN (%s)
+                        THEN RAISE(ABORT, 'Invalid transaction purpose')
+                    END;
+                    SELECT CASE
+                        WHEN upper(COALESCE(NEW.transaction_status, 'COMPLETED')) NOT IN (%s)
+                        THEN RAISE(ABORT, 'Invalid transaction status')
+                    END;
+                END
+                """.formatted(
+                sqliteIdentifier(triggerName),
+                eventName,
+                sqlLiteralList(LEDGER_TRANSACTION_TYPES),
+                sqlLiteralList(LEDGER_TRANSACTION_PURPOSES),
+                sqlLiteralList(LEDGER_TRANSACTION_STATUSES)
+        );
+    }
+
+    private String sqlLiteralList(List<String> values) {
+        List<String> quoted = new ArrayList<>();
+        for (String value : values) {
+            quoted.add("'" + safeText(value, "").replace("'", "''") + "'");
+        }
+        return String.join(", ", quoted);
+    }
+
+    private String sqliteIdentifier(String identifier) {
+        return "\"" + requireText(identifier, "SQLite identifier").replace("\"", "\"\"") + "\"";
+    }
+
+    private void logTransactionValidationTriggerRepair(
+            Connection connection,
+            TransactionValidationTriggerRepairResult repair
+    ) throws SQLException {
+        if (repair == null || !repair.changed()) {
+            return;
+        }
+        String replaced = repair.upgradedTriggers().isEmpty()
+                ? "none"
+                : String.join(", ", repair.upgradedTriggers());
+        recordSystemLog(
+                connection,
+                "Database Migration",
+                "Transaction validation trigger upgraded",
+                "INFO",
+                "Transactions ledger validation triggers upgraded. Replaced: " + replaced
+                        + ". Insert trigger created: " + repair.insertTriggerCreated()
+                        + ". Update trigger created: " + repair.updateTriggerCreated() + "."
+        );
     }
 
     private void initializeCommunitySavingsTables(Connection connection) throws SQLException {
@@ -4290,6 +4692,24 @@ public class DatabaseHandler {
                         statement.executeUpdate();
                     }
                 }
+                if (!baseCurrency) {
+                    String baseCode = baseCurrencyCode(connection);
+                    if (!code.equalsIgnoreCase(baseCode)) {
+                        saveExchangeRateQuote(connection, new ExchangeRateQuote(
+                                code,
+                                baseCode,
+                                BigDecimal.valueOf(storedRate),
+                                LocalDate.now(),
+                                Instant.now(),
+                                "PFMIS Manual Rate",
+                                ExchangeRateSource.MANUAL,
+                                "MANUAL",
+                                true,
+                                false,
+                                "Saved from currency setup"
+                        ), null);
+                    }
+                }
                 connection.commit();
             } catch (SQLException | RuntimeException exception) {
                 connection.rollback();
@@ -4344,6 +4764,298 @@ public class DatabaseHandler {
             }
         }
         return DEFAULT_CURRENCY_CODE;
+    }
+
+    public void saveExchangeRate(ExchangeRateQuote quote) {
+        try (Connection connection = connect()) {
+            saveExchangeRateQuote(connection, quote, null);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save exchange rate", exception);
+        }
+    }
+
+    public void saveManualExchangeRate(
+            String fromCurrency,
+            String toCurrency,
+            BigDecimal rate,
+            LocalDate effectiveDate,
+            LocalDate expiryDate,
+            String notes
+    ) {
+        ExchangeRateQuote quote = new ExchangeRateQuote(
+                fromCurrency,
+                toCurrency,
+                rate,
+                effectiveDate == null ? LocalDate.now() : effectiveDate,
+                Instant.now(),
+                "PFMIS Manual Rate",
+                ExchangeRateSource.MANUAL,
+                "MANUAL",
+                true,
+                false,
+                notes
+        );
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                saveExchangeRateQuote(connection, quote, expiryDate);
+                recordSystemLog(
+                        connection,
+                        "Foreign Exchange",
+                        "Manual Rate Saved",
+                        "WARNING",
+                        quote.fromCurrency() + "/" + quote.toCurrency() + " manual rate saved for " + quote.effectiveDate() + "."
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save manual exchange rate", exception);
+        }
+    }
+
+    public Optional<ExchangeRateQuote> findActiveManualExchangeRate(String fromCurrency, String toCurrency, LocalDate date) {
+        return findStoredExchangeRate(fromCurrency, toCurrency, date, true, true);
+    }
+
+    public Optional<ExchangeRateQuote> findLatestExchangeRate(String fromCurrency, String toCurrency) {
+        return findStoredExchangeRate(fromCurrency, toCurrency, null, false, false);
+    }
+
+    public Optional<ExchangeRateQuote> findHistoricalExchangeRate(String fromCurrency, String toCurrency, LocalDate date) {
+        return findStoredExchangeRate(fromCurrency, toCurrency, date, false, false);
+    }
+
+    public List<ExchangeRateQuote> listLatestExchangeRatesToBase() {
+        String base = getBaseCurrencyCode();
+        List<ExchangeRateQuote> quotes = new ArrayList<>();
+        for (CurrencyRecord currency : listCurrencies()) {
+            if (!"ACTIVE".equalsIgnoreCase(currency.getStatus()) || currency.isBaseCurrency()) {
+                continue;
+            }
+            findLatestExchangeRate(currency.getCurrencyCode(), base).ifPresent(quotes::add);
+        }
+        return quotes;
+    }
+
+    public List<ExchangeRateQuote> listExchangeRateHistory(String fromCurrency, String toCurrency, int limit) {
+        String from = normalizedCurrencyCode(fromCurrency);
+        String to = normalizedCurrencyCode(toCurrency);
+        String sql = """
+                SELECT base_currency, quote_currency, rate, rate_date, rate_timestamp,
+                       source, rate_type, provider_name, is_manual, notes
+                FROM exchange_rates
+                WHERE upper(base_currency) = ?
+                  AND upper(quote_currency) = ?
+                ORDER BY rate_date DESC, rate_timestamp DESC, id DESC
+                LIMIT ?
+                """;
+        List<ExchangeRateQuote> history = new ArrayList<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, from);
+            statement.setString(2, to);
+            statement.setInt(3, Math.max(1, Math.min(500, limit)));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    history.add(exchangeRateQuote(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list exchange-rate history", exception);
+        }
+        return history;
+    }
+
+    public Map<String, ExchangeRateQuote> latestExchangeRateMapToBase() {
+        Map<String, ExchangeRateQuote> rates = new LinkedHashMap<>();
+        for (ExchangeRateQuote quote : listLatestExchangeRatesToBase()) {
+            rates.put(quote.fromCurrency(), quote);
+        }
+        return rates;
+    }
+
+    private Optional<ExchangeRateQuote> findStoredExchangeRate(
+            String fromCurrency,
+            String toCurrency,
+            LocalDate date,
+            boolean manualOnly,
+            boolean activeManualOnly
+    ) {
+        String from = normalizedCurrencyCode(fromCurrency);
+        String to = normalizedCurrencyCode(toCurrency);
+        if (from.equals(to)) {
+            return Optional.of(ExchangeRateQuote.sameCurrency(from));
+        }
+        String dateClause = date == null ? "" : " AND date(rate_date) <= date(?)";
+        String manualClause = manualOnly ? " AND is_manual = 1" : "";
+        String activeManualClause = activeManualOnly
+                ? " AND is_active = 1 AND (expires_at IS NULL OR trim(expires_at) = '' OR date(expires_at) >= date(?))"
+                : " AND is_active = 1";
+        String sql = """
+                SELECT base_currency, quote_currency, rate, rate_date, rate_timestamp,
+                       source, rate_type, provider_name, is_manual, notes
+                FROM exchange_rates
+                WHERE upper(base_currency) = ?
+                  AND upper(quote_currency) = ?
+                """ + dateClause + manualClause + activeManualClause + """
+
+                ORDER BY rate_date DESC, rate_timestamp DESC, id DESC
+                LIMIT 1
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            statement.setString(index++, from);
+            statement.setString(index++, to);
+            if (date != null) {
+                statement.setString(index++, date.toString());
+            }
+            if (activeManualOnly) {
+                statement.setString(index, date == null ? LocalDate.now().toString() : date.toString());
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return Optional.of(exchangeRateQuote(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load exchange rate", exception);
+        }
+        return Optional.empty();
+    }
+
+    private boolean hasExchangeRate(Connection connection, String fromCurrency, String toCurrency, boolean manualOnly) throws SQLException {
+        String sql = """
+                SELECT 1
+                FROM exchange_rates
+                WHERE upper(base_currency) = ?
+                  AND upper(quote_currency) = ?
+                """ + (manualOnly ? " AND is_manual = 1" : "") + """
+                LIMIT 1
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, normalizedCurrencyCode(fromCurrency));
+            statement.setString(2, normalizedCurrencyCode(toCurrency));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void saveExchangeRateQuote(Connection connection, ExchangeRateQuote quote, LocalDate expiryDate) throws SQLException {
+        if (quote.fromCurrency().equalsIgnoreCase(quote.toCurrency())) {
+            return;
+        }
+        if (quote.rate().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Exchange rate must be greater than zero.");
+        }
+        String sql = """
+                INSERT INTO exchange_rates (
+                    base_currency, quote_currency, rate, rate_date, rate_timestamp,
+                    source, rate_type, provider_name, is_manual, is_active, expires_at, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP)
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, quote.fromCurrency());
+            statement.setString(2, quote.toCurrency());
+            statement.setBigDecimal(3, quote.rate());
+            statement.setString(4, quote.effectiveDate().toString());
+            statement.setString(5, quote.retrievedAt().toString());
+            statement.setString(6, quote.source().name());
+            statement.setString(7, quote.rateType());
+            statement.setString(8, cleanNullable(quote.providerName()));
+            statement.setInt(9, quote.manual() ? 1 : 0);
+            statement.setString(10, expiryDate == null ? null : expiryDate.toString());
+            statement.setString(11, cleanNullable(quote.notes()));
+            statement.executeUpdate();
+        }
+        updateLegacyCurrencyRateIfApplicable(connection, quote);
+    }
+
+    private void updateLegacyCurrencyRateIfApplicable(Connection connection, ExchangeRateQuote quote) throws SQLException {
+        String baseCurrency = baseCurrencyCode(connection);
+        BigDecimal rateToBase = null;
+        String currencyCode = null;
+        if (quote.toCurrency().equalsIgnoreCase(baseCurrency)) {
+            currencyCode = quote.fromCurrency();
+            rateToBase = quote.rate();
+        } else if (quote.fromCurrency().equalsIgnoreCase(baseCurrency)) {
+            currencyCode = quote.toCurrency();
+            rateToBase = FxMath.inverse(quote.rate(), FxMath.DEFAULT_RATE_SCALE);
+        }
+        if (currencyCode == null || currencyCode.equalsIgnoreCase(baseCurrency)) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE currencies
+                SET rate_to_base = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE upper(currency_code) = ?
+                  AND base_currency = 0
+                """)) {
+            statement.setBigDecimal(1, rateToBase);
+            statement.setString(2, currencyCode);
+            statement.executeUpdate();
+        }
+    }
+
+    private ExchangeRateQuote exchangeRateQuote(ResultSet resultSet) throws SQLException {
+        boolean manual = resultSet.getInt("is_manual") == 1;
+        ExchangeRateSource source = sourceValue(resultSet.getString("source"), manual);
+        return new ExchangeRateQuote(
+                resultSet.getString("base_currency"),
+                resultSet.getString("quote_currency"),
+                resultSet.getBigDecimal("rate"),
+                parseDatePrefix(resultSet.getString("rate_date")),
+                parseInstantOrNow(resultSet.getString("rate_timestamp")),
+                resultSet.getString("provider_name"),
+                source,
+                resultSet.getString("rate_type"),
+                manual,
+                false,
+                resultSet.getString("notes")
+        );
+    }
+
+    private ExchangeRateSource sourceValue(String source, boolean manual) {
+        if (manual) {
+            return ExchangeRateSource.MANUAL;
+        }
+        try {
+            return ExchangeRateSource.valueOf(safeText(source, "CACHED").toUpperCase(Locale.ENGLISH));
+        } catch (IllegalArgumentException exception) {
+            return ExchangeRateSource.CACHED;
+        }
+    }
+
+    private LocalDate parseDatePrefix(String value) {
+        String clean = safeText(value, LocalDate.now().toString());
+        try {
+            return LocalDate.parse(clean.length() >= 10 ? clean.substring(0, 10) : clean);
+        } catch (DateTimeParseException exception) {
+            return LocalDate.now();
+        }
+    }
+
+    private Instant parseInstantOrNow(String value) {
+        String clean = safeText(value, "");
+        if (clean.isBlank()) {
+            return Instant.now();
+        }
+        try {
+            return Instant.parse(clean);
+        } catch (DateTimeParseException exception) {
+            try {
+                return LocalDateTime.parse(clean.replace(' ', 'T')).atZone(ZoneId.systemDefault()).toInstant();
+            } catch (DateTimeParseException ignored) {
+                return Instant.now();
+            }
+        }
     }
 
     private boolean currencyExists(Connection connection, String currencyCode) throws SQLException {
@@ -5021,6 +5733,7 @@ public class DatabaseHandler {
             String openingBalanceDate,
             String description
     ) throws SQLException {
+        // Opening balance rows are audit evidence only; account balance calculations use accounts.opening_balance.
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO transactions (
                     account_id, transaction_type, transaction_purpose, transaction_status,
@@ -18835,6 +19548,13 @@ public class DatabaseHandler {
         }
     }
 
+    private record RecoveredTransactionLedgerValues(
+            String transactionType,
+            String transactionPurpose,
+            String transactionStatus
+    ) {
+    }
+
     private int recoverCategories(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
         if (!tableExists(source, "categories")) {
             return 0;
@@ -19074,11 +19794,12 @@ public class DatabaseHandler {
                 Integer projectId = nullableSourceMappedId(rows, "project_id", maps.projects());
                 Integer personId = nullableSourceMappedId(rows, "person_id", maps.people());
                 String transactionDate = safeText(rows.getString("transaction_date"), "");
-                if (transactionDate.isBlank() || transactionDuplicateExists(target, accountId, rows, categoryId, projectId, personId)) {
+                RecoveredTransactionLedgerValues ledgerValues = recoveredTransactionLedgerValues(rows);
+                if (transactionDate.isBlank() || transactionDuplicateExists(target, accountId, rows, categoryId, projectId, personId, ledgerValues)) {
                     skipped++;
                     continue;
                 }
-                insertRecoveredTransaction(target, rows, accountId, categoryId, projectId, personId);
+                insertRecoveredTransaction(target, rows, accountId, categoryId, projectId, personId, ledgerValues);
                 recovered++;
             }
         }
@@ -19089,13 +19810,44 @@ public class DatabaseHandler {
         return columnExists(connection, tableName, columnName) ? columnName : fallback;
     }
 
+    private RecoveredTransactionLedgerValues recoveredTransactionLedgerValues(ResultSet row) throws SQLException {
+        String transactionType = normalizedToken(rowsText(row, "transaction_type", "EXPENSE"), "EXPENSE");
+        String transactionPurpose = normalizedToken(rowsText(row, "transaction_purpose", PURPOSE_NORMAL), PURPOSE_NORMAL);
+        String transactionStatus = normalizedRecoveredTransactionStatus(rowsText(row, "transaction_status", "COMPLETED"));
+        if (Set.of(PURPOSE_MONEY_LENT, PURPOSE_MONEY_BORROWED, PURPOSE_LENT_REPAID, PURPOSE_BORROWED_REPAID).contains(transactionPurpose)
+                && Set.of("INCOME", "EXPENSE").contains(transactionType)) {
+            transactionType = "LOAN";
+        }
+        requireRecoveredLedgerToken(LEDGER_TRANSACTION_TYPES, transactionType, "type", row.getInt("id"));
+        requireRecoveredLedgerToken(LEDGER_TRANSACTION_PURPOSES, transactionPurpose, "purpose", row.getInt("id"));
+        requireRecoveredLedgerToken(LEDGER_TRANSACTION_STATUSES, transactionStatus, "status", row.getInt("id"));
+        return new RecoveredTransactionLedgerValues(transactionType, transactionPurpose, transactionStatus);
+    }
+
+    private String normalizedRecoveredTransactionStatus(String status) {
+        String normalized = normalizedToken(status, "COMPLETED");
+        return switch (normalized) {
+            case "POSTED", "PAID" -> "COMPLETED";
+            default -> normalized;
+        };
+    }
+
+    private void requireRecoveredLedgerToken(List<String> allowed, String value, String fieldName, int sourceTransactionId) {
+        if (!allowed.contains(value)) {
+            throw new IllegalArgumentException("Unsupported transaction " + fieldName + " '" + value
+                    + "' in recovered database transaction #" + sourceTransactionId
+                    + ". Run PFMIS database initialization on the source database or remove unsupported records before recovery.");
+        }
+    }
+
     private Integer nullableSourceMappedId(ResultSet rows, String columnName, java.util.Map<Integer, Integer> map) throws SQLException {
         int sourceId = rows.getInt(columnName);
         return rows.wasNull() || sourceId <= 0 ? null : map.get(sourceId);
     }
 
     private boolean transactionDuplicateExists(Connection connection, Integer accountId, ResultSet row,
-                                               Integer categoryId, Integer projectId, Integer personId) throws SQLException {
+                                               Integer categoryId, Integer projectId, Integer personId,
+                                               RecoveredTransactionLedgerValues ledgerValues) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT 1
                 FROM transactions
@@ -19116,9 +19868,9 @@ public class DatabaseHandler {
             setNullableInt(statement, 2, categoryId);
             setNullableInt(statement, 3, projectId);
             setNullableInt(statement, 4, personId);
-            statement.setString(5, rowsText(row, "transaction_type", "EXPENSE"));
-            statement.setString(6, rowsText(row, "transaction_purpose", "NORMAL"));
-            statement.setString(7, rowsText(row, "transaction_status", "COMPLETED"));
+            statement.setString(5, ledgerValues.transactionType());
+            statement.setString(6, ledgerValues.transactionPurpose());
+            statement.setString(7, ledgerValues.transactionStatus());
             statement.setDouble(8, row.getDouble("amount"));
             statement.setString(9, row.getString("transaction_date"));
             statement.setString(10, cleanNullable(row.getString("reference_number")));
@@ -19130,7 +19882,8 @@ public class DatabaseHandler {
     }
 
     private void insertRecoveredTransaction(Connection connection, ResultSet row, Integer accountId,
-                                            Integer categoryId, Integer projectId, Integer personId) throws SQLException {
+                                            Integer categoryId, Integer projectId, Integer personId,
+                                            RecoveredTransactionLedgerValues ledgerValues) throws SQLException {
         boolean idAvailable = !transactionIdExists(connection, row.getInt("id"));
         String sql = idAvailable
                 ? """
@@ -19156,9 +19909,9 @@ public class DatabaseHandler {
             setNullableInt(statement, index++, categoryId);
             setNullableInt(statement, index++, projectId);
             setNullableInt(statement, index++, personId);
-            statement.setString(index++, rowsText(row, "transaction_type", "EXPENSE"));
-            statement.setString(index++, rowsText(row, "transaction_purpose", "NORMAL"));
-            statement.setString(index++, rowsText(row, "transaction_status", "COMPLETED"));
+            statement.setString(index++, ledgerValues.transactionType());
+            statement.setString(index++, ledgerValues.transactionPurpose());
+            statement.setString(index++, ledgerValues.transactionStatus());
             statement.setDouble(index++, row.getDouble("amount"));
             statement.setString(index++, row.getString("transaction_date"));
             statement.setString(index++, safeText(row.getString("description"), ""));
@@ -19250,7 +20003,29 @@ public class DatabaseHandler {
                 "source",
                 "payment_method",
                 "reference_number",
+                "original_amount",
+                "original_currency",
+                "exchange_rate",
+                "converted_amount",
+                "converted_currency",
+                "exchange_rate_source",
+                "exchange_rate_timestamp",
                 "is_deleted"
+        ));
+        requireTableColumns(connection, "exchange_rates", List.of(
+                "id",
+                "base_currency",
+                "quote_currency",
+                "rate",
+                "rate_date",
+                "rate_timestamp",
+                "source",
+                "rate_type",
+                "provider_name",
+                "is_manual",
+                "is_active",
+                "created_at",
+                "updated_at"
         ));
         requireTableColumns(connection, "schema_version", List.of("version", "description", "applied_at"));
         requireTableColumns(connection, "schema_migration_history", List.of("migration_key", "version", "description", "applied_at"));
@@ -19258,6 +20033,7 @@ public class DatabaseHandler {
         if (!viewExists(connection, "valid_transactions")) {
             throw new SQLException("Required view is missing: valid_transactions");
         }
+        validateTransactionValidationTriggers(connection);
         requireReadableQuery(connection, """
                 SELECT a.id, a.account_name, COALESCE(a.is_system_account, 0) AS is_system_account
                 FROM accounts a
@@ -19270,6 +20046,35 @@ public class DatabaseHandler {
                 FROM valid_transactions
                 LIMIT 1
                 """, "valid transaction ledger compatibility query");
+    }
+
+    private void validateTransactionValidationTriggers(Connection connection) throws SQLException {
+        List<String> incompatible = new ArrayList<>();
+        boolean insertTriggerCompatible = false;
+        boolean updateTriggerCompatible = false;
+        for (TransactionTriggerMetadata trigger : listTransactionTriggers(connection)) {
+            if (isObsoletePfmisTransactionValidationTrigger(trigger)) {
+                incompatible.add(trigger.name());
+            }
+            if (TRANSACTION_VALIDATION_INSERT_TRIGGER.equals(trigger.name())
+                    && isCompatibleTransactionValidationTriggerSql(trigger.sql())) {
+                insertTriggerCompatible = true;
+            }
+            if (TRANSACTION_VALIDATION_UPDATE_TRIGGER.equals(trigger.name())
+                    && isCompatibleTransactionValidationTriggerSql(trigger.sql())) {
+                updateTriggerCompatible = true;
+            }
+        }
+        if (!incompatible.isEmpty()) {
+            throw new SQLException("Incompatible legacy transaction validation trigger(s) remain: "
+                    + String.join(", ", incompatible)
+                    + ". Run PFMIS database initialization to apply "
+                    + TRANSACTION_LEDGER_VALIDATION_MIGRATION_KEY + ".");
+        }
+        if (!insertTriggerCompatible || !updateTriggerCompatible) {
+            throw new SQLException("Canonical transaction validation triggers are missing or incompatible: "
+                    + TRANSACTION_VALIDATION_INSERT_TRIGGER + ", " + TRANSACTION_VALIDATION_UPDATE_TRIGGER + ".");
+        }
     }
 
     private String sqliteIntegrityCheck(Connection connection) throws SQLException {
@@ -19639,6 +20444,34 @@ public class DatabaseHandler {
             String paymentMethod,
             String referenceNumber
     ) {
+        return recordTransferWithFee(
+                fromAccountId,
+                toAccountId,
+                amountSent,
+                amountReceived,
+                transferFee,
+                feeCategoryId,
+                date,
+                description,
+                paymentMethod,
+                referenceNumber,
+                null
+        );
+    }
+
+    public TransferPostingResult recordTransferWithFee(
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber,
+            TransferFxMetadata fxMetadata
+    ) {
         if (fromAccountId == toAccountId) {
             throw new IllegalArgumentException("Choose two different accounts for a transfer");
         }
@@ -19680,7 +20513,8 @@ public class DatabaseHandler {
                         date,
                         transferDescription("Transfer to " + toSnapshot.getAccountName(), description),
                         paymentMethod,
-                        transferReference
+                        transferReference,
+                        fxMetadata
                 );
                 incomingId = insertTransferRow(
                         connection,
@@ -19691,7 +20525,8 @@ public class DatabaseHandler {
                         date,
                         transferDescription("Transfer from " + fromSnapshot.getAccountName(), description),
                         paymentMethod,
-                        transferReference
+                        transferReference,
+                        fxMetadata
                 );
                 try (PreparedStatement update = connection.prepareStatement(
                         "UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
@@ -19758,11 +20593,28 @@ public class DatabaseHandler {
             String paymentMethod,
             String referenceNumber
     ) throws SQLException {
+        return insertTransferRow(connection, accountId, relatedTransactionId, purpose, amount, date, description, paymentMethod, referenceNumber, null);
+    }
+
+    private int insertTransferRow(
+            Connection connection,
+            int accountId,
+            Integer relatedTransactionId,
+            String purpose,
+            double amount,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber,
+            TransferFxMetadata fxMetadata
+    ) throws SQLException {
         String sql = """
                 INSERT INTO transactions (
                     account_id, related_transaction_id, transaction_type, transaction_purpose,
-                    transaction_status, amount, transaction_date, description, source, payment_method, reference_number
-                ) VALUES (?, ?, 'TRANSFER', ?, 'COMPLETED', ?, ?, ?, 'TRANSFER', ?, ?)
+                    transaction_status, amount, transaction_date, description, source, payment_method, reference_number,
+                    original_amount, original_currency, exchange_rate, converted_amount, converted_currency,
+                    exchange_rate_source, exchange_rate_timestamp, exchange_rate_provider, exchange_rate_type, exchange_rate_date
+                ) VALUES (?, ?, 'TRANSFER', ?, 'COMPLETED', ?, ?, ?, 'TRANSFER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (PreparedStatement insert = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             insert.setInt(1, accountId);
@@ -19773,6 +20625,7 @@ public class DatabaseHandler {
             insert.setString(6, description);
             insert.setString(7, cleanNullable(paymentMethod));
             insert.setString(8, cleanNullable(referenceNumber));
+            bindTransferFxMetadata(insert, 9, fxMetadata);
             insert.executeUpdate();
             try (ResultSet keys = insert.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -19781,6 +20634,25 @@ public class DatabaseHandler {
             }
         }
         throw new SQLException("Transfer row was saved without a generated id");
+    }
+
+    private void bindTransferFxMetadata(PreparedStatement statement, int startIndex, TransferFxMetadata metadata) throws SQLException {
+        if (metadata == null) {
+            for (int offset = 0; offset < 10; offset++) {
+                statement.setNull(startIndex + offset, java.sql.Types.NULL);
+            }
+            return;
+        }
+        statement.setBigDecimal(startIndex, metadata.originalAmount());
+        statement.setString(startIndex + 1, cleanNullable(metadata.originalCurrency()));
+        statement.setBigDecimal(startIndex + 2, metadata.exchangeRate());
+        statement.setBigDecimal(startIndex + 3, metadata.convertedAmount());
+        statement.setString(startIndex + 4, cleanNullable(metadata.convertedCurrency()));
+        statement.setString(startIndex + 5, cleanNullable(metadata.exchangeRateSource()));
+        statement.setString(startIndex + 6, metadata.exchangeRateTimestamp() == null ? null : metadata.exchangeRateTimestamp().toString());
+        statement.setString(startIndex + 7, cleanNullable(metadata.exchangeRateProvider()));
+        statement.setString(startIndex + 8, cleanNullable(metadata.exchangeRateType()));
+        statement.setString(startIndex + 9, metadata.exchangeRateDate() == null ? null : metadata.exchangeRateDate().toString());
     }
 
     private int insertTransferFeeRow(
@@ -20799,7 +21671,7 @@ public class DatabaseHandler {
         String type = safeText(filter.transactionType(), "").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_').replace('-', '_');
         if (!type.isBlank() && !type.startsWith("ALL")) {
             switch (type) {
-                case "INCOME", "EXPENSE", "TRANSFER", "ADJUSTMENT", "ASSET_SALE" -> {
+                case "INCOME", "EXPENSE", "TRANSFER", "ADJUSTMENT", "ASSET_SALE", "OPENING_BALANCE" -> {
                     clauses.add("t.transaction_type = ?");
                     params.add(type);
                 }

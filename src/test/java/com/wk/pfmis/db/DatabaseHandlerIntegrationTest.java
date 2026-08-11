@@ -10,10 +10,15 @@ import com.wk.pfmis.db.DatabaseHandler.CentralLoanInstallmentRecord;
 import com.wk.pfmis.db.DatabaseHandler.CentralLoanPaymentCommand;
 import com.wk.pfmis.db.DatabaseHandler.CentralLoanRecord;
 import com.wk.pfmis.db.DatabaseHandler.CentralLoanRegistrationCommand;
+import com.wk.pfmis.db.DatabaseHandler.CommunitySavingsGroupCommand;
+import com.wk.pfmis.db.DatabaseHandler.CommunitySavingsGroupSummary;
 import com.wk.pfmis.db.DatabaseHandler.SavingsGroupContributionCommand;
 import com.wk.pfmis.db.DatabaseHandler.SavingsGroupPayoutCommand;
 import com.wk.pfmis.db.DatabaseHandler.SavingsGroupProfileCommand;
 import com.wk.pfmis.db.DatabaseHandler.SavingsGroupTransactionRecord;
+import com.wk.pfmis.db.DatabaseHandler.TransferFxMetadata;
+import com.wk.pfmis.fx.ExchangeRateQuote;
+import com.wk.pfmis.fx.ExchangeRateSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -22,14 +27,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -58,6 +67,76 @@ class DatabaseHandlerIntegrationTest {
                         account_name TEXT NOT NULL,
                         account_type TEXT NOT NULL
                     )
+                    """);
+            statement.execute("""
+                    CREATE TABLE transactions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        transaction_type TEXT NOT NULL,
+                        transaction_purpose TEXT DEFAULT 'NORMAL',
+                        transaction_status TEXT DEFAULT 'COMPLETED',
+                        amount REAL NOT NULL,
+                        transaction_date TEXT NOT NULL,
+                        description TEXT,
+                        posting_status TEXT DEFAULT 'POSTED',
+                        settlement_status TEXT DEFAULT 'NOT_APPLICABLE'
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TRIGGER legacy_transaction_guard_before_insert
+                    BEFORE INSERT ON transactions
+                    BEGIN
+                        SELECT CASE
+                            WHEN NEW.transaction_type NOT IN ('INCOME', 'EXPENSE', 'TRANSFER')
+                            THEN RAISE(ABORT, 'Invalid transaction type')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.transaction_purpose, 'NORMAL') NOT IN (
+                                'NORMAL', 'PROJECT_EXPENSE', 'MONEY_LENT', 'MONEY_BORROWED',
+                                'LENT_REPAID', 'BORROWED_REPAID', 'SUPPORT_GIVEN', 'SAVINGS',
+                                'GOAL_CONTRIBUTION', 'TRANSFER_IN', 'TRANSFER_OUT'
+                            )
+                            THEN RAISE(ABORT, 'Invalid transaction purpose')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.transaction_status, 'COMPLETED') NOT IN (
+                                'COMPLETED', 'OPEN', 'PARTIALLY_CLEARED', 'CLEARED', 'CANCELLED'
+                            )
+                            THEN RAISE(ABORT, 'Invalid legacy transaction status')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.posting_status, 'POSTED') NOT IN ('POSTED', 'DRAFT')
+                            THEN RAISE(ABORT, 'Invalid posting status')
+                        END;
+                    END
+                    """);
+            statement.execute("""
+                    CREATE TRIGGER legacy_transaction_guard_before_update
+                    BEFORE UPDATE ON transactions
+                    BEGIN
+                        SELECT CASE
+                            WHEN NEW.transaction_type NOT IN ('INCOME', 'EXPENSE', 'TRANSFER')
+                            THEN RAISE(ABORT, 'Invalid transaction type')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.transaction_purpose, 'NORMAL') NOT IN (
+                                'NORMAL', 'PROJECT_EXPENSE', 'MONEY_LENT', 'MONEY_BORROWED',
+                                'LENT_REPAID', 'BORROWED_REPAID', 'SUPPORT_GIVEN', 'SAVINGS',
+                                'GOAL_CONTRIBUTION', 'TRANSFER_IN', 'TRANSFER_OUT'
+                            )
+                            THEN RAISE(ABORT, 'Invalid transaction purpose')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.transaction_status, 'COMPLETED') NOT IN (
+                                'COMPLETED', 'OPEN', 'PARTIALLY_CLEARED', 'CLEARED', 'CANCELLED'
+                            )
+                            THEN RAISE(ABORT, 'Invalid legacy transaction status')
+                        END;
+                        SELECT CASE
+                            WHEN COALESCE(NEW.settlement_status, 'NOT_APPLICABLE') NOT IN ('NOT_APPLICABLE', 'OPEN', 'SETTLED')
+                            THEN RAISE(ABORT, 'Invalid settlement status')
+                        END;
+                    END
                     """);
         }
         UserSession.login(new SystemUser(
@@ -90,12 +169,54 @@ class DatabaseHandlerIntegrationTest {
         assertTrue(columnExists("accounts", "created_at"));
         assertTrue(migrationHistoryExists("workspace-currency-registry"));
         assertTrue(migrationHistoryExists("report-input-tables"));
+        assertTrue(migrationHistoryExists("transaction-ledger-validation-v2"));
+        assertTrue(migrationHistoryExists("automatic-fx-rates-v1"));
+        assertTrue(columnExists("exchange_rates", "base_currency"));
+        assertTrue(columnExists("exchange_rates", "quote_currency"));
+        assertTrue(columnExists("exchange_rates", "rate"));
+        assertTrue(columnExists("exchange_rates", "provider_name"));
+        assertTrue(columnExists("exchange_rates", "is_manual"));
+        assertTrue(columnExists("transactions", "exchange_rate"));
+        assertTrue(columnExists("transactions", "converted_amount"));
+        assertTrue(columnExists("transactions", "exchange_rate_source"));
+        assertFalse(triggerExists("legacy_transaction_guard_before_insert"));
+        assertFalse(triggerExists("legacy_transaction_guard_before_update"));
+        assertCanonicalTransactionTrigger("trg_transactions_validate_insert");
+        assertCanonicalTransactionTrigger("trg_transactions_validate_update");
     }
 
     @Test
     @Order(2)
-    void createsCashAccountWithZeroOpeningBalance() {
+    void legacyTriggerMigrationAllowsOpeningBalanceAuditExactlyOnce() throws Exception {
         int accountId = database.addAccount(
+                "Current Account",
+                "Bank Account",
+                "MWK",
+                "National Bank",
+                "1001000817",
+                1000.50,
+                LocalDate.now().toString(),
+                0,
+                "Salary",
+                "City Center",
+                "ACTIVE",
+                "test"
+        );
+
+        Account account = accountById(accountId);
+        assertEquals("Current Account", account.getAccountName());
+        assertEquals("National Bank", account.getBankProviderName());
+        assertEquals(1000.50, account.getCurrentBalance(), 0.005);
+        assertEquals(1, rowCount("accounts"));
+        assertEquals(1, openingBalanceAuditCount(accountId));
+
+        database.initializeDatabase();
+
+        assertEquals(1, accountRowsByName("Current Account"));
+        assertEquals(1, openingBalanceAuditCount(accountId));
+        assertEquals(1000.50, accountById(accountId).getCurrentBalance(), 0.005);
+
+        int zeroAccountId = database.addAccount(
                 "Cash Box",
                 "Cash",
                 "MWK",
@@ -110,9 +231,10 @@ class DatabaseHandlerIntegrationTest {
                 "test"
         );
 
-        Account account = accountById(accountId);
-        assertEquals("Cash Box", account.getAccountName());
-        assertEquals(0, account.getCurrentBalance(), 0.005);
+        Account zeroAccount = accountById(zeroAccountId);
+        assertEquals("Cash Box", zeroAccount.getAccountName());
+        assertEquals(0, zeroAccount.getCurrentBalance(), 0.005);
+        assertEquals(0, openingBalanceAuditCount(zeroAccountId));
     }
 
     @Test
@@ -136,6 +258,33 @@ class DatabaseHandlerIntegrationTest {
         Account account = accountById(accountId);
         assertEquals("NBS Bank", account.getBankProviderName());
         assertEquals(1000.50, account.getCurrentBalance(), 0.005);
+    }
+
+    @Test
+    @Order(4)
+    void migratedLegacyTriggersAcceptDedicatedLedgerTypes() throws Exception {
+        int accountId = database.addAccount(
+                "Dedicated Ledger Trigger Account",
+                "Cash",
+                "MWK",
+                "Cash",
+                "",
+                0,
+                LocalDate.now().toString(),
+                0,
+                "Trigger acceptance",
+                "",
+                "ACTIVE",
+                "test"
+        );
+
+        insertLedgerTransaction(accountId, "LOAN", "MONEY_BORROWED", "OPEN", 10);
+        insertLedgerTransaction(accountId, "TRANSFER", "TRANSFER_IN", "COMPLETED", 20);
+        insertLedgerTransaction(accountId, "ASSET_SALE", "ASSET_SALE_PROCEEDS", "COMPLETED", 30);
+        insertLedgerTransaction(accountId, "ADJUSTMENT", "BALANCE_DECREASE", "COMPLETED", 5);
+
+        assertEquals(4, transactionRowsForAccount(accountId));
+        assertEquals(55, accountById(accountId).getCurrentBalance(), 0.005);
     }
 
     @Test
@@ -363,6 +512,56 @@ class DatabaseHandlerIntegrationTest {
         assertTrue(ledger.isSystemAccount());
         assertEquals("COMMUNITY_SAVINGS_INTERNAL", ledger.getAccountType());
         assertFalse(database.listAccounts().stream().anyMatch(account -> account.getId() == ledger.getId()));
+    }
+
+    @Test
+    @Order(15)
+    void communitySavingsHistoricalOpeningBalanceUsesAuditRowWithoutDoubleCounting() throws Exception {
+        int groupId = database.createCommunitySavingsGroup(new CommunitySavingsGroupCommand(
+                "Historical Bank Nkhonde",
+                "Bank Nkhonde",
+                "Existing group registered during trigger migration regression",
+                "MWK",
+                LocalDate.now().minusMonths(3),
+                LocalDate.now().plusMonths(9),
+                "Monthly",
+                100,
+                "",
+                "",
+                "",
+                "Monthly",
+                "15",
+                "",
+                0,
+                "",
+                "Historical opening balance test",
+                750.25,
+                true,
+                LocalDate.now().minusMonths(3),
+                LocalDate.now().minusMonths(3),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                LocalDate.now(),
+                "Opening balance carried from legacy group records.",
+                0,
+                0,
+                0,
+                "",
+                0,
+                "Cash"
+        ));
+
+        CommunitySavingsGroupSummary group = database.listCommunitySavingsGroups().stream()
+                .filter(row -> row.id() == groupId)
+                .findFirst()
+                .orElseThrow();
+        Account ledger = database.getInternalAccountById(group.linkedAccountId());
+        assertEquals(750.25, ledger.getCurrentBalance(), 0.005);
+        assertEquals(1, openingBalanceAuditCount(ledger.getId()));
     }
 
     @Test
@@ -1055,6 +1254,126 @@ class DatabaseHandlerIntegrationTest {
                 .anyMatch(transaction -> "JANUARY-REGRESSION".equals(transaction.getReferenceNumber())));
     }
 
+    @Test
+    @Order(32)
+    void currencyRateEntryIsPreservedAsManualExchangeRateHistory() {
+        database.saveCurrency("US Dollar", "USD", "USD", 1750.25, "ACTIVE");
+
+        ExchangeRateQuote quote = database.findActiveManualExchangeRate("USD", "MWK", LocalDate.now())
+                .orElseThrow();
+
+        assertEquals("USD", quote.fromCurrency());
+        assertEquals("MWK", quote.toCurrency());
+        assertEquals(0, new BigDecimal("1750.25").compareTo(quote.rate()));
+        assertEquals(ExchangeRateSource.MANUAL, quote.source());
+        assertTrue(quote.manual());
+        assertTrue(database.listExchangeRateHistory("USD", "MWK", 10).size() >= 1);
+    }
+
+    @Test
+    @Order(33)
+    void downloadedRatesRetainHistoryAndRejectMeaninglessRows() throws Exception {
+        database.saveExchangeRate(new ExchangeRateQuote(
+                "GBP",
+                "MWK",
+                new BigDecimal("2284.1000"),
+                LocalDate.of(2026, 8, 10),
+                Instant.parse("2026-08-10T18:20:00Z"),
+                "Frankfurter",
+                ExchangeRateSource.ONLINE,
+                "ONLINE",
+                false,
+                false,
+                ""
+        ));
+        database.saveExchangeRate(new ExchangeRateQuote(
+                "GBP",
+                "MWK",
+                new BigDecimal("2290.2200"),
+                LocalDate.of(2026, 8, 11),
+                Instant.parse("2026-08-11T10:30:00Z"),
+                "Frankfurter",
+                ExchangeRateSource.ONLINE,
+                "ONLINE",
+                false,
+                false,
+                ""
+        ));
+
+        List<ExchangeRateQuote> history = database.listExchangeRateHistory("GBP", "MWK", 10);
+
+        assertTrue(history.size() >= 2);
+        assertEquals(0, new BigDecimal("2290.2200").compareTo(database.findLatestExchangeRate("GBP", "MWK").orElseThrow().rate()));
+        assertThrows(IllegalArgumentException.class, () -> new ExchangeRateQuote(
+                "USD",
+                "USD",
+                BigDecimal.ZERO,
+                LocalDate.now(),
+                Instant.now(),
+                "Test",
+                ExchangeRateSource.ONLINE,
+                "ONLINE",
+                false,
+                false,
+                ""
+        ));
+        assertEquals(0, sameCurrencyRateRows());
+    }
+
+    @Test
+    @Order(34)
+    void crossCurrencyTransferLocksSelectedExchangeRateIntoBothTransactionRows() throws Exception {
+        database.saveCurrency("US Dollar", "USD", "USD", 1750, "ACTIVE");
+        int sourceId = database.addAccount("FX Lock USD Source", "Cash", "USD", "Cash", "", 200,
+                LocalDate.of(2026, 8, 11).toString(), 0, "FX source", "", "ACTIVE", "test");
+        int destinationId = database.addAccount("FX Lock MWK Destination", "Cash", "MWK", "Cash", "", 0,
+                LocalDate.of(2026, 8, 11).toString(), 0, "FX destination", "", "ACTIVE", "test");
+        Instant rateTimestamp = Instant.parse("2026-08-11T10:30:00Z");
+        TransferFxMetadata metadata = new TransferFxMetadata(
+                new BigDecimal("100.00"),
+                "USD",
+                new BigDecimal("1750.0000"),
+                new BigDecimal("175000.00"),
+                "MWK",
+                "ONLINE",
+                rateTimestamp,
+                "Frankfurter",
+                "ONLINE",
+                LocalDate.of(2026, 8, 11)
+        );
+
+        database.recordTransferWithFee(
+                sourceId,
+                destinationId,
+                100,
+                175000,
+                0,
+                null,
+                LocalDate.of(2026, 8, 11),
+                "locked FX transfer",
+                "Cash",
+                "FX-LOCK-REGRESSION",
+                metadata
+        );
+
+        TransactionFxRow outgoing = transferFxRow("FX-LOCK-REGRESSION", "TRANSFER_OUT");
+        TransactionFxRow incoming = transferFxRow("FX-LOCK-REGRESSION", "TRANSFER_IN");
+
+        assertEquals(0, new BigDecimal("100.00").compareTo(outgoing.originalAmount()));
+        assertEquals("USD", outgoing.originalCurrency());
+        assertEquals(0, new BigDecimal("1750.0000").compareTo(outgoing.exchangeRate()));
+        assertEquals(0, new BigDecimal("175000.00").compareTo(outgoing.convertedAmount()));
+        assertEquals("MWK", outgoing.convertedCurrency());
+        assertEquals("ONLINE", outgoing.exchangeRateSource());
+        assertEquals(rateTimestamp.toString(), outgoing.exchangeRateTimestamp());
+        assertEquals("Frankfurter", outgoing.exchangeRateProvider());
+        assertEquals("ONLINE", outgoing.exchangeRateType());
+        assertEquals("2026-08-11", outgoing.exchangeRateDate());
+        assertEquals(outgoing, incoming);
+        assertEquals(100, accountById(sourceId).getCurrentBalance(), 0.005);
+        assertEquals(175000, accountById(destinationId).getCurrentBalance(), 0.005);
+    }
+
     private static Account accountById(int accountId) {
         return database.listAccounts().stream()
                 .filter(account -> account.getId() == accountId)
@@ -1068,6 +1387,155 @@ class DatabaseHandlerIntegrationTest {
              ResultSet resultSet = statement.executeQuery("SELECT COUNT(*) FROM " + tableName)) {
             return resultSet.next() ? resultSet.getInt(1) : 0;
         }
+    }
+
+    private static int sameCurrencyRateRows() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("""
+                     SELECT COUNT(*)
+                     FROM exchange_rates
+                     WHERE upper(base_currency) = upper(quote_currency)
+                        OR rate <= 0
+                     """)) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
+        }
+    }
+
+    private static TransactionFxRow transferFxRow(String referenceNumber, String purpose) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT original_amount, original_currency, exchange_rate, converted_amount, converted_currency,
+                            exchange_rate_source, exchange_rate_timestamp, exchange_rate_provider,
+                            exchange_rate_type, exchange_rate_date
+                     FROM transactions
+                     WHERE reference_number = ?
+                       AND transaction_purpose = ?
+                     LIMIT 1
+                     """)) {
+            statement.setString(1, referenceNumber);
+            statement.setString(2, purpose);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                return new TransactionFxRow(
+                        decimalColumn(resultSet, "original_amount"),
+                        resultSet.getString("original_currency"),
+                        decimalColumn(resultSet, "exchange_rate"),
+                        decimalColumn(resultSet, "converted_amount"),
+                        resultSet.getString("converted_currency"),
+                        resultSet.getString("exchange_rate_source"),
+                        resultSet.getString("exchange_rate_timestamp"),
+                        resultSet.getString("exchange_rate_provider"),
+                        resultSet.getString("exchange_rate_type"),
+                        resultSet.getString("exchange_rate_date")
+                );
+            }
+        }
+    }
+
+    private static BigDecimal decimalColumn(ResultSet resultSet, String columnName) throws Exception {
+        String value = resultSet.getString(columnName);
+        return value == null ? null : new BigDecimal(value);
+    }
+
+    private static int accountRowsByName(String accountName) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM accounts WHERE account_name = ?"
+             )) {
+            statement.setString(1, accountName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static int transactionRowsForAccount(int accountId) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM transactions WHERE account_id = ?"
+             )) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static int openingBalanceAuditCount(int accountId) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*)
+                     FROM transactions
+                     WHERE account_id = ?
+                       AND transaction_type = 'OPENING_BALANCE'
+                       AND transaction_purpose = 'OPENING_BALANCE'
+                       AND transaction_status = 'COMPLETED'
+                     """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static void insertLedgerTransaction(
+            int accountId,
+            String transactionType,
+            String transactionPurpose,
+            String transactionStatus,
+            double amount
+    ) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO transactions (
+                         account_id, transaction_type, transaction_purpose, transaction_status,
+                         amount, transaction_date, description, source
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEST')
+                     """)) {
+            statement.setInt(1, accountId);
+            statement.setString(2, transactionType);
+            statement.setString(3, transactionPurpose);
+            statement.setString(4, transactionStatus);
+            statement.setDouble(5, amount);
+            statement.setString(6, LocalDate.now().toString());
+            statement.setString(7, "Trigger acceptance regression for " + transactionType + "/" + transactionPurpose);
+            statement.executeUpdate();
+        }
+    }
+
+    private static boolean triggerExists(String triggerName) throws Exception {
+        return triggerSql(triggerName) != null;
+    }
+
+    private static String triggerSql(String triggerName) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DatabaseHandler.databasePath());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT sql
+                     FROM sqlite_master
+                     WHERE type = 'trigger'
+                       AND name = ?
+                     """)) {
+            statement.setString(1, triggerName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getString("sql") : null;
+            }
+        }
+    }
+
+    private static void assertCanonicalTransactionTrigger(String triggerName) throws Exception {
+        String sql = triggerSql(triggerName);
+        assertNotNull(sql);
+        String upperSql = sql.toUpperCase(Locale.ENGLISH);
+        assertTrue(upperSql.contains("OPENING_BALANCE"));
+        assertTrue(upperSql.contains("ASSET_SALE"));
+        assertTrue(upperSql.contains("ADJUSTMENT"));
+        assertTrue(upperSql.contains("LOAN"));
+        assertTrue(upperSql.contains("FROZEN"));
+        assertTrue(upperSql.contains("LOAN_SETTLEMENT"));
+        assertTrue(upperSql.contains("COMMUNITY_LOAN_RECEIVABLE_INCREASE"));
+        assertFalse(upperSql.contains("POSTING_STATUS"));
+        assertFalse(upperSql.contains("SETTLEMENT_STATUS"));
     }
 
     private static boolean columnExists(String tableName, String columnName) throws Exception {
@@ -1101,5 +1569,19 @@ class DatabaseHandlerIntegrationTest {
              )) {
             return resultSet.next() ? resultSet.getInt(1) : -1;
         }
+    }
+
+    private record TransactionFxRow(
+            BigDecimal originalAmount,
+            String originalCurrency,
+            BigDecimal exchangeRate,
+            BigDecimal convertedAmount,
+            String convertedCurrency,
+            String exchangeRateSource,
+            String exchangeRateTimestamp,
+            String exchangeRateProvider,
+            String exchangeRateType,
+            String exchangeRateDate
+    ) {
     }
 }

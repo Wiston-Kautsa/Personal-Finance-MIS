@@ -9,6 +9,7 @@
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
@@ -56,6 +57,19 @@
                 <Label text="Description" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
                 <TextArea fx:id="descriptionArea" prefRowCount="3" GridPane.columnIndex="1" GridPane.rowIndex="7" GridPane.columnSpan="3"/>
             </GridPane>
+
+            <VBox fx:id="exchangeRateCard" spacing="8" visible="false" managed="false" styleClass="settings-status-card-wide">
+                <Label text="Exchange Rate" styleClass="field-label"/>
+                <Label fx:id="exchangeRateDisplayLabel" text="Loading..." wrapText="true" styleClass="section-heading"/>
+                <Label fx:id="exchangeRateSourceLabel" text="Source: -" wrapText="true" styleClass="form-note"/>
+                <Label fx:id="exchangeRateUpdatedLabel" text="Updated: -" wrapText="true" styleClass="form-note"/>
+                <Label fx:id="estimatedReceivedLabel" text="Estimated amount received: -" wrapText="true" styleClass="form-note"/>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Button fx:id="refreshRateButton" text="Refresh Rate" onAction="#refreshExchangeRate" styleClass="secondary-button"/>
+                    <Button fx:id="manualRateButton" text="Use Manual Rate" onAction="#useManualRate" styleClass="link-button"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                </HBox>
+            </VBox>
 
             <Label fx:id="transferCheckLabel" text="A transfer moves money between your own accounts; it is not income or an expense." styleClass="form-note"/>
 

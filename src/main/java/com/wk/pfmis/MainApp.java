@@ -2,8 +2,12 @@ package com.wk.pfmis;
 
 import com.wk.pfmis.ai.BundledLocalAiManager;
 import com.wk.pfmis.auth.AuthDatabase;
+import com.wk.pfmis.config.AppConfig;
+import com.wk.pfmis.config.FxConfig;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.controllers.ControllerSessionState;
+import com.wk.pfmis.diagnostics.PackagingRuntimeCheck;
+import com.wk.pfmis.fx.ExchangeRateService;
 import com.wk.pfmis.models.AiSettings;
 import com.wk.pfmis.models.BackupRecord;
 import com.wk.pfmis.models.SystemUser;
@@ -11,6 +15,7 @@ import com.wk.pfmis.security.PrivilegedActionService;
 import com.wk.pfmis.security.UserSession;
 import com.wk.pfmis.utils.ReadableTextSupport;
 import com.wk.pfmis.utils.RequiredFieldSupport;
+import com.wk.pfmis.utils.StartupDiagnostics;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
@@ -32,6 +37,8 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,24 +52,42 @@ public class MainApp extends Application {
     private ScheduledExecutorService automaticBackupExecutor;
 
     @Override
-    public void start(Stage stage) throws IOException {
-        instance = this;
-        primaryStage = stage;
-        if (!acquireSingleInstanceLock()) {
-            Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setTitle("PFMIS");
-            alert.setHeaderText("PFMIS is already running");
-            alert.setContentText("Only one system session can be opened at a time.");
-            alert.showAndWait();
-            Platform.exit();
-            return;
-        }
+    public void start(Stage stage) {
+        StartupDiagnostics.logStage("JavaFX start entered");
+        try {
+            instance = this;
+            primaryStage = stage;
+            StartupDiagnostics.logStage("Loading application configuration");
+            AppConfig.ensureLocalEnvFileExists();
+            System.setProperty(
+                    "org.slf4j.simpleLogger.defaultLogLevel",
+                    AppConfig.loggingConfig().level().name().toLowerCase(Locale.ENGLISH)
+            );
+            StartupDiagnostics.cleanupOldLogs(AppConfig.loggingConfig().retentionDays());
+            StartupDiagnostics.logStage("Acquiring single-instance lock");
+            if (!acquireSingleInstanceLock()) {
+                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                alert.setTitle("PFMIS");
+                alert.setHeaderText("PFMIS is already running");
+                alert.setContentText("Only one system session can be opened at a time.");
+                alert.showAndWait();
+                Platform.exit();
+                return;
+            }
 
-        AuthDatabase.getInstance().initialize();
-        stage.setMinWidth(900);
-        stage.setMinHeight(600);
-        showLogin();
-        stage.show();
+            StartupDiagnostics.logStage("Initializing authentication database");
+            AuthDatabase.getInstance().initialize();
+            stage.setMinWidth(900);
+            stage.setMinHeight(600);
+            StartupDiagnostics.logStage("Loading sign-in screen");
+            showLogin();
+            stage.show();
+            StartupDiagnostics.logStage("JavaFX sign-in screen displayed");
+        } catch (Throwable throwable) {
+            StartupDiagnostics.logFailure("PFMIS startup failed", throwable);
+            showStartupFailureDialog();
+            Platform.exit();
+        }
     }
 
     public static void showLogin() {
@@ -126,8 +151,10 @@ public class MainApp extends Application {
         ControllerSessionState.reset();
         DatabaseHandler database = DatabaseHandler.getInstance();
         try {
+            StartupDiagnostics.logStage("Initializing workspace database");
             database.initializeDatabase();
         } catch (RuntimeException exception) {
+            StartupDiagnostics.logFailure("Workspace database initialization failed", exception);
             stopWorkspaceServices();
             showWorkspaceMigrationFailure(reason, exception);
             return;
@@ -142,12 +169,32 @@ public class MainApp extends Application {
         );
         startAutomaticDailyBackup(database);
         startBundledLocalAiIfConfigured(database);
+        startExchangeRateRefresh(database);
         loadScene(
                 "Dashboard.fxml",
                 "PFMIS - " + workspace.getDisplayName() + " Workspace",
                 1180,
                 740
         );
+    }
+
+    private void startExchangeRateRefresh(DatabaseHandler database) {
+        FxConfig config = AppConfig.fxConfig();
+        if (!config.enabled()) {
+            database.recordSystemLog("Foreign Exchange", "Startup Refresh Skipped", "INFO", "Automatic exchange rates are disabled.");
+            return;
+        }
+        if (!config.refreshOnStartup()) {
+            database.recordSystemLog("Foreign Exchange", "Startup Refresh Skipped", "INFO", "Automatic exchange-rate startup refresh is disabled.");
+            return;
+        }
+        ExchangeRateService.getInstance().refreshRatesAsync().whenComplete((quotes, throwable) -> {
+            if (throwable == null) {
+                database.recordSystemLog("Foreign Exchange", "Startup Refresh Completed", "INFO", quotes.size() + " exchange rate(s) refreshed in background.");
+            } else {
+                database.recordSystemLog("Foreign Exchange", "Startup Refresh Failed", "WARNING", rootMessage(throwable));
+            }
+        });
     }
 
     private void showWorkspaceMigrationFailure(String retryReason, RuntimeException exception) {
@@ -282,7 +329,7 @@ public class MainApp extends Application {
                     database.recordSystemLog("Smart Analysis", "PFMIS Local AI ready", "INFO", "Bundled llama.cpp runtime started successfully.");
                 }
             } catch (RuntimeException exception) {
-                System.err.println(exception.getMessage());
+                StartupDiagnostics.logFailure("PFMIS Local AI startup failed", exception);
                 try {
                     database.recordSystemLog("Smart Analysis", "PFMIS Local AI failed", "ERROR", rootMessage(exception));
                 } catch (RuntimeException ignored) {
@@ -365,7 +412,33 @@ public class MainApp extends Application {
     }
 
     public static void main(String[] args) {
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
+                StartupDiagnostics.logFailure("Uncaught exception on " + thread.getName(), throwable));
+        StartupDiagnostics.logStage("Launcher main entered");
+        if (args != null && Arrays.asList(args).contains("--pfmis-runtime-check")) {
+            try {
+                PackagingRuntimeCheck.runChecks();
+                System.out.println("PFMIS packaged runtime check passed.");
+            } catch (Throwable throwable) {
+                StartupDiagnostics.logFailure("Packaged runtime check failed", throwable);
+                System.err.println("PFMIS packaged runtime check failed: " + throwable.getMessage());
+                System.exit(1);
+            }
+            return;
+        }
         launch(args);
+    }
+
+    private void showStartupFailureDialog() {
+        try {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle("PFMIS");
+            alert.setHeaderText("PFMIS could not start correctly.");
+            alert.setContentText("Diagnostic information has been saved to:\n" + StartupDiagnostics.startupLogPath());
+            alert.showAndWait();
+        } catch (RuntimeException ignored) {
+            // The startup log remains available even if JavaFX cannot display the dialog.
+        }
     }
 
     private static MainApp requireInstance() {

@@ -1,6 +1,7 @@
 target/
 out/
 dist/
+deliverables/
 .idea/
 .junie/
 *.iml

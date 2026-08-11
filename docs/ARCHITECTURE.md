@@ -7,6 +7,7 @@ PFMIS is currently a local JavaFX desktop application backed by SQLite files. It
 - JavaFX controllers load FXML screens from `src/main/resources`.
 - SQLite is used for local finance and authentication data.
 - `DatabaseHandler` still contains too much schema, SQL, migration, and business behavior.
+- Foreign exchange is centralized through `ExchangeRateService` and provider implementations; controllers should not call internet rate APIs directly.
 - Local AI can run through a bundled `llama.cpp` runtime when the model and executable are present.
 - External AI providers are optional and must be treated as a privacy-sensitive feature.
 

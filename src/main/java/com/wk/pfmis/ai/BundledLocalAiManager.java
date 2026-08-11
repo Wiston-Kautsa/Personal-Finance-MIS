@@ -1,6 +1,7 @@
 package com.wk.pfmis.ai;
 
 import com.wk.pfmis.models.AiSettings;
+import com.wk.pfmis.utils.StartupDiagnostics;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -163,7 +164,11 @@ public final class BundledLocalAiManager {
     }
 
     public static Path logDirectory() {
-        return localAiDirectory().resolve("logs");
+        return StartupDiagnostics.logDirectory();
+    }
+
+    public static Path logFile() {
+        return StartupDiagnostics.localAiLogPath();
     }
 
     public static URI healthUri() {
@@ -207,7 +212,7 @@ public final class BundledLocalAiManager {
             );
             processBuilder.directory(serverExecutable.getParent().toFile());
             processBuilder.redirectErrorStream(true);
-            processBuilder.redirectOutput(ProcessBuilder.Redirect.appendTo(logDirectory().resolve("llama-server.log").toFile()));
+            processBuilder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile().toFile()));
             Process process = processBuilder.start();
             currentEndpoint = endpoint;
             currentApiKey = apiKey;

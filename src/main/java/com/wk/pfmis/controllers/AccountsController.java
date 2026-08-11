@@ -1,6 +1,8 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.fx.ConversionResult;
+import com.wk.pfmis.fx.ExchangeRateService;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AccountReconciliationRecord;
 import com.wk.pfmis.models.CurrencyRecord;
@@ -32,6 +34,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -100,6 +103,7 @@ public class AccountsController {
     @FXML private VBox lifecycleInlinePane;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private final ExchangeRateService exchangeRateService = ExchangeRateService.getInstance();
     private final ObservableList<Account> accounts = FXCollections.observableArrayList();
     private final Map<Integer, AccountReconciliationRecord> latestReconciliations = new LinkedHashMap<>();
     private List<String> currencyOptions = List.of();
@@ -431,7 +435,7 @@ public class AccountsController {
         typeColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getAccountType())));
         providerColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getBankProviderName())));
         currencyColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getCurrency())));
-        balanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().getCurrency(), cell.getValue().getCurrentBalance())));
+        balanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(accountBalanceDisplay(cell.getValue())));
         reconciliationColumn.setCellValueFactory(cell -> new SimpleStringProperty(reconciliationStatus(cell.getValue())));
         statusColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayStatus(cell.getValue().getStatus())));
         accountsTable.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
@@ -607,6 +611,7 @@ public class AccountsController {
                 Opening balance: %s
                 Opening balance date: %s
                 Current balance: %s
+                Converted balance: %s
                 Available balance: %s
                 Minimum balance: %s
                 Purpose: %s
@@ -642,6 +647,7 @@ public class AccountsController {
                 money(account.getCurrency(), account.getOpeningBalance()),
                 blankToDash(account.getOpeningBalanceDate()),
                 money(account.getCurrency(), account.getCurrentBalance()),
+                convertedBalanceText(account),
                 money(account.getCurrency(), availableBalance(account)),
                 money(account.getCurrency(), account.getMinimumBalance()),
                 blankToDash(account.getAccountPurpose()),
@@ -670,6 +676,7 @@ public class AccountsController {
                 Default: %s
                 Currency: %s
                 Balance: %s
+                Equivalent: %s
                 Reconciliation: %s
                 Status: %s
                 """.formatted(
@@ -679,6 +686,7 @@ public class AccountsController {
                 account.getId() == defaultAccountId ? "Yes" : "No",
                 blankToDash(account.getCurrency()),
                 money(account.getCurrency(), account.getCurrentBalance()),
+                convertedBalanceText(account),
                 reconciliationStatus(account),
                 displayStatus(account.getStatus())
         );
@@ -1133,37 +1141,29 @@ public class AccountsController {
         List<Account> active = accounts.stream()
                 .filter(account -> "ACTIVE".equalsIgnoreCase(account.getStatus()))
                 .toList();
-        Set<String> currencies = active.stream()
-                .map(Account::getCurrency)
-                .filter(value -> value != null && !value.isBlank())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (currencies.isEmpty()) {
-            return money(currencyCodeFromDisplay(database.getDefaultCurrency()), 0);
+        String baseCurrency = database.getBaseCurrencyCode();
+        BigDecimal total = BigDecimal.ZERO;
+        int missing = 0;
+        for (Account account : active) {
+            String currency = blankAs(account.getCurrency(), baseCurrency).toUpperCase(Locale.ENGLISH);
+            if (currency.equalsIgnoreCase(baseCurrency)) {
+                total = total.add(BigDecimal.valueOf(account.getCurrentBalance()));
+                continue;
+            }
+            try {
+                total = total.add(exchangeRateService.convertUsingLastKnown(
+                        BigDecimal.valueOf(account.getCurrentBalance()),
+                        currency,
+                        baseCurrency
+                ).convertedAmount());
+            } catch (RuntimeException exception) {
+                missing++;
+            }
         }
-        if (currencies.size() == 1) {
-            String currency = currencies.iterator().next();
-            return money(currency, active.stream().mapToDouble(Account::getCurrentBalance).sum());
-        }
-
-        Map<String, CurrencyRecord> currencyRates = database.listCurrencies().stream()
-                .collect(Collectors.toMap(CurrencyRecord::getCurrencyCode, record -> record, (first, second) -> first));
-        CurrencyRecord base = currencyRates.values().stream()
-                .filter(CurrencyRecord::isBaseCurrency)
-                .findFirst()
-                .orElse(null);
-        if (base == null || currencies.stream().anyMatch(code -> {
-            CurrencyRecord record = currencyRates.get(code);
-            return record == null || record.getRateToBase() <= 0;
-        })) {
+        if (missing > 0) {
             return "Consolidated balance unavailable because some account currencies have no valid exchange rate.";
         }
-        double total = active.stream()
-                .mapToDouble(account -> {
-                    CurrencyRecord rate = currencyRates.get(account.getCurrency());
-                    return account.getCurrentBalance() * (rate == null ? 0 : rate.getRateToBase());
-                })
-                .sum();
-        return money(base.getCurrencyCode(), total);
+        return money(baseCurrency, total.doubleValue());
     }
 
     private void configureCurrencySearch() {
@@ -1492,6 +1492,31 @@ public class AccountsController {
         format.setMinimumFractionDigits(2);
         format.setMaximumFractionDigits(2);
         return code + " " + format.format(amount);
+    }
+
+    private String accountBalanceDisplay(Account account) {
+        String nativeBalance = money(account.getCurrency(), account.getCurrentBalance());
+        String equivalent = convertedBalanceText(account);
+        return "-".equals(equivalent) ? nativeBalance : nativeBalance + "\n≈ " + equivalent;
+    }
+
+    private String convertedBalanceText(Account account) {
+        String baseCurrency = database.getBaseCurrencyCode();
+        String currency = blankAs(account.getCurrency(), baseCurrency).toUpperCase(Locale.ENGLISH);
+        if (currency.equalsIgnoreCase(baseCurrency)) {
+            return "-";
+        }
+        try {
+            ConversionResult result = exchangeRateService.convertUsingLastKnown(
+                    BigDecimal.valueOf(account.getCurrentBalance()),
+                    currency,
+                    baseCurrency
+            );
+            return money(baseCurrency, result.convertedAmount().doubleValue())
+                    + " using " + result.quote().source();
+        } catch (RuntimeException exception) {
+            return "Unavailable";
+        }
     }
 
     private String formatAmount(double amount) {

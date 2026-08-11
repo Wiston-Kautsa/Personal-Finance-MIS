@@ -78,7 +78,7 @@ public class AccountHistoryController {
         balanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().getCurrency(), cell.getValue().getCurrentBalance())));
         accountStatusColumn.setCellValueFactory(new PropertyValueFactory<>("status"));
         dateColumn.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().transaction().getTransactionDate()));
-        typeColumn.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().transaction().getTransactionType()));
+        typeColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayTransactionType(cell.getValue().transaction())));
         categoryColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayCategory(cell.getValue().transaction())));
         amountColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().currency(), cell.getValue().transaction().getAmount())));
         paymentMethodColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().transaction().getPaymentMethod())));
@@ -195,7 +195,7 @@ public class AccountHistoryController {
         }
         UiAlerts.info(
                 "Date: " + transaction.getTransactionDate()
-                        + "\nType: " + transaction.getTransactionType()
+                        + "\nType: " + displayTransactionType(transaction)
                         + "\nCategory/Project: " + displayCategory(transaction)
                         + "\nAmount: " + money(selectedAccountCurrency(), transaction.getAmount())
                         + "\nMethod: " + blankToDash(transaction.getPaymentMethod())
@@ -447,13 +447,57 @@ public class AccountHistoryController {
         if ("EXPENSE".equals(type) || ("TRANSFER".equals(type) && "TRANSFER_OUT".equals(purpose))) {
             return -transaction.getAmount();
         }
-        if ("LOAN".equals(type) && List.of("MONEY_BORROWED", "LENT_REPAID").contains(purpose)) {
+        if ("LOAN".equals(type) && List.of(
+                "MONEY_BORROWED",
+                "LENT_REPAID",
+                "LOAN_PROCEEDS",
+                "COMMUNITY_LOAN_RECEIVABLE_INCREASE",
+                "COMMUNITY_LOAN_LIABILITY_INCREASE"
+        ).contains(purpose)) {
             return transaction.getAmount();
         }
-        if ("LOAN".equals(type) && List.of("MONEY_LENT", "BORROWED_REPAID").contains(purpose)) {
+        if ("LOAN".equals(type) && List.of(
+                "MONEY_LENT",
+                "BORROWED_REPAID",
+                "LOAN_PRINCIPAL_PAYMENT",
+                "LOAN_SETTLEMENT",
+                "COMMUNITY_LOAN_RECEIVABLE_DECREASE",
+                "COMMUNITY_LOAN_LIABILITY_DECREASE"
+        ).contains(purpose)) {
+            return -transaction.getAmount();
+        }
+        if ("ADJUSTMENT".equals(type) && "BALANCE_INCREASE".equals(purpose)) {
+            return transaction.getAmount();
+        }
+        if ("ADJUSTMENT".equals(type) && "BALANCE_DECREASE".equals(purpose)) {
             return -transaction.getAmount();
         }
         return 0;
+    }
+
+    private String displayTransactionType(FinanceTransaction transaction) {
+        String type = blankAs(transaction.getTransactionType(), "").toUpperCase(Locale.ENGLISH);
+        String purpose = blankAs(transaction.getTransactionPurpose(), "").toUpperCase(Locale.ENGLISH);
+        if ("OPENING_BALANCE".equals(type) || "OPENING_BALANCE".equals(purpose)) {
+            return "Opening Balance";
+        }
+        if ("ASSET_SALE".equals(type) || "ASSET_SALE_PROCEEDS".equals(purpose)) {
+            return "Asset Sale";
+        }
+        if ("ADJUSTMENT".equals(type)) {
+            return switch (purpose) {
+                case "BALANCE_INCREASE" -> "Balance Increase";
+                case "BALANCE_DECREASE" -> "Balance Decrease";
+                default -> "Adjustment";
+            };
+        }
+        return switch (type) {
+            case "INCOME" -> "Income";
+            case "EXPENSE" -> "Expense";
+            case "TRANSFER" -> "Transfer";
+            case "LOAN" -> "Loan";
+            default -> transaction.getTransactionType();
+        };
     }
 
     private boolean matchesHistorySearch(LedgerRow row) {
@@ -463,6 +507,7 @@ public class AccountHistoryController {
         }
         FinanceTransaction transaction = row.transaction();
         return contains(transaction.getTransactionDate(), search)
+                || contains(displayTransactionType(transaction), search)
                 || contains(transaction.getTransactionType(), search)
                 || contains(transaction.getTransactionPurpose(), search)
                 || contains(displayCategory(transaction), search)

@@ -17,10 +17,71 @@
 <ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
             fx:controller="com.wk.pfmis.controllers.CurrenciesController" styleClass="settings-scroll">
     <content>
-        <VBox spacing="12" styleClass="settings-page">
-            <TitledPane text="Currency Setup" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="14" styleClass="settings-page">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <VBox spacing="4">
+                    <Label text="Currencies &amp; Exchange Rates" styleClass="page-title"/>
+                    <Label text="Manage currencies, automatic exchange rates and conversion settings." wrapText="true" styleClass="form-note"/>
+                </VBox>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="refreshRatesButton" text="Refresh Rates" onAction="#refreshAllRates" minWidth="130" styleClass="primary-button"/>
+                <Button text="Add Manual Rate" onAction="#addManualRate" minWidth="135" styleClass="secondary-button"/>
+                <Button text="Settings" onAction="#showProviderSettings" minWidth="95" styleClass="link-button"/>
+            </HBox>
+
+            <VBox spacing="8" styleClass="settings-status-card-wide">
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Label fx:id="fxStatusTitleLabel" text="Automatic Exchange Rates" styleClass="section-heading"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Label text="Status" styleClass="form-note"/>
+                </HBox>
+                <Label fx:id="fxStatusDetailLabel" text="Saved exchange rates will be used when internet access is unavailable." wrapText="true" styleClass="settings-status-text"/>
+            </VBox>
+
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900">
+                <VBox spacing="5" styleClass="settings-status-card-wide">
+                    <Label text="Base Currency" styleClass="field-label"/>
+                    <Label fx:id="baseCurrencySummaryLabel" text="-" styleClass="section-heading"/>
+                </VBox>
+                <VBox spacing="5" styleClass="settings-status-card-wide">
+                    <Label text="Last Update" styleClass="field-label"/>
+                    <Label fx:id="lastUpdateSummaryLabel" text="No update yet" wrapText="true" styleClass="settings-status-text"/>
+                </VBox>
+                <VBox spacing="5" styleClass="settings-status-card-wide">
+                    <Label text="Active Rates" styleClass="field-label"/>
+                    <Label fx:id="activeRatesSummaryLabel" text="0" styleClass="section-heading"/>
+                </VBox>
+                <VBox spacing="5" styleClass="settings-status-card-wide">
+                    <Label text="Rate Source" styleClass="field-label"/>
+                    <Label fx:id="rateSourceSummaryLabel" text="-" wrapText="true" styleClass="settings-status-text"/>
+                </VBox>
+            </FlowPane>
+
+            <TitledPane text="Exchange Rate Table" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="10" styleClass="settings-section">
+                    <HBox spacing="8" alignment="CENTER_LEFT">
+                        <TextField fx:id="searchField" promptText="Search currencies..." minWidth="240" HBox.hgrow="ALWAYS"/>
+                        <ComboBox fx:id="rateStatusFilterBox" minWidth="150"/>
+                    </HBox>
+                    <TableView fx:id="currenciesTable" prefHeight="320" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+                        <placeholder>
+                            <Label text="Registered currencies and exchange rates will appear here." wrapText="true"/>
+                        </placeholder>
+                        <columns>
+                            <TableColumn fx:id="currencyCodeColumn" text="Currency" prefWidth="105" minWidth="95"/>
+                            <TableColumn fx:id="currencyNameColumn" text="Currency Name" prefWidth="190" minWidth="170"/>
+                            <TableColumn fx:id="rateToBaseColumn" text="Rate" prefWidth="250" minWidth="220"/>
+                            <TableColumn fx:id="currencyStatusColumn" text="Source" prefWidth="130" minWidth="110"/>
+                            <TableColumn fx:id="updatedAtColumn" text="Last Updated" prefWidth="170" minWidth="150"/>
+                            <TableColumn fx:id="symbolColumn" text="Symbol" prefWidth="90" minWidth="80"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Currency Setup" collapsible="true" expanded="false" maxWidth="Infinity" styleClass="section-pane">
                 <VBox spacing="12" styleClass="settings-section">
-                    <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="860">
                         <VBox spacing="6" styleClass="settings-field">
                             <Label text="Currency Name" wrapText="true" styleClass="field-label"/>
                             <TextField fx:id="currencyNameField" promptText="Malawian Kwacha" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
@@ -34,7 +95,7 @@
                             <TextField fx:id="symbolField" promptText="MWK" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="settings-field">
-                            <Label text="Rate To Base" wrapText="true" styleClass="field-label"/>
+                            <Label text="Manual Rate To Base" wrapText="true" styleClass="field-label"/>
                             <TextField fx:id="rateToBaseField" text="1.00" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="settings-field">
@@ -45,53 +106,13 @@
                     <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
                         <Region HBox.hgrow="ALWAYS"/>
                         <Button text="Save Currency" onAction="#saveCurrency" minWidth="125" styleClass="primary-button"/>
+                        <Button text="Set As Base" onAction="#setSelectedAsBase" minWidth="110" styleClass="secondary-button"/>
                         <Button text="Clear Form" onAction="#clearForm" minWidth="105" styleClass="secondary-button"/>
                     </HBox>
-                    <Label fx:id="statusLabel" text="Currency screen ready." wrapText="true" styleClass="settings-status-text"/>
                 </VBox>
             </TitledPane>
 
-            <TitledPane text="Available Currencies" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                <VBox spacing="10" styleClass="settings-section">
-                    <TableView fx:id="currenciesTable" prefHeight="250" VBox.vgrow="ALWAYS" styleClass="project-list-table">
-                        <placeholder>
-                            <Label text="Registered currencies and exchange rates will appear here." wrapText="true"/>
-                        </placeholder>
-                        <columns>
-                            <TableColumn fx:id="currencyNameColumn" text="Currency" prefWidth="190" minWidth="190"/>
-                            <TableColumn fx:id="currencyCodeColumn" text="Code" prefWidth="100" minWidth="100"/>
-                            <TableColumn fx:id="symbolColumn" text="Symbol" prefWidth="100" minWidth="100"/>
-                            <TableColumn fx:id="rateToBaseColumn" text="Rate To Base" prefWidth="145" minWidth="145"/>
-                            <TableColumn fx:id="currencyStatusColumn" text="Status" prefWidth="140" minWidth="140"/>
-                            <TableColumn fx:id="updatedAtColumn" text="Last Updated" prefWidth="150" minWidth="150"/>
-                        </columns>
-                    </TableView>
-                </VBox>
-            </TitledPane>
-
-            <TitledPane text="Currency Rules" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                <VBox spacing="12" styleClass="settings-section">
-                    <FlowPane hgap="12" vgap="12" prefWrapLength="820">
-                        <VBox spacing="5" styleClass="settings-status-card-wide">
-                            <Label text="Account Currency" wrapText="true" styleClass="field-label"/>
-                            <Label text="Each account can keep its own currency while reports use the base currency." wrapText="true" styleClass="settings-status-text"/>
-                        </VBox>
-                        <VBox spacing="5" styleClass="settings-status-card-wide">
-                            <Label text="Reports" wrapText="true" styleClass="field-label"/>
-                            <Label text="Report totals should convert foreign account balances using the latest saved rate." wrapText="true" styleClass="settings-status-text"/>
-                        </VBox>
-                        <VBox spacing="5" styleClass="settings-status-card-wide">
-                            <Label text="Manual Rates" wrapText="true" styleClass="field-label"/>
-                            <Label text="Exchange rates can be entered manually before automatic rate updates are added." wrapText="true" styleClass="settings-status-text"/>
-                        </VBox>
-                    </FlowPane>
-                    <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
-                        <Region HBox.hgrow="ALWAYS"/>
-                        <Button text="Set As Base" onAction="#setSelectedAsBase" minWidth="110" styleClass="secondary-button"/>
-                        <Button text="Update Rates" onAction="#updateRates" minWidth="115" styleClass="secondary-button"/>
-                    </HBox>
-                </VBox>
-            </TitledPane>
+            <Label fx:id="statusLabel" text="Currency screen ready." wrapText="true" styleClass="settings-status-text"/>
             <padding>
                 <Insets top="0" right="0" bottom="0" left="0"/>
             </padding>
