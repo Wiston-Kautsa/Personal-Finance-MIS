@@ -4,11 +4,16 @@ import com.wk.pfmis.ai.AiRecommendationService;
 import com.wk.pfmis.ai.BundledLocalAiManager;
 import com.wk.pfmis.ai.LocalAiStatusSnapshot;
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.mail.EmailService;
 import com.wk.pfmis.models.AiSettings;
+import com.wk.pfmis.models.EmailSettings;
+import com.wk.pfmis.security.UserSession;
+import com.wk.pfmis.services.SystemEmailService;
 import com.wk.pfmis.utils.ExportPathService;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -39,6 +44,20 @@ public class SettingsController {
     @FXML private Label apiKeyStatusLabel;
     @FXML private Label localAiStatusLabel;
     @FXML private Label downloadStatusLabel;
+    @FXML private Label emailSettingsStatusLabel;
+
+    @FXML private CheckBox emailEnabledBox;
+    @FXML private TextField systemEmailField;
+    @FXML private TextField senderNameField;
+    @FXML private TextField smtpHostField;
+    @FXML private TextField smtpPortField;
+    @FXML private TextField smtpUsernameField;
+    @FXML private PasswordField smtpPasswordField;
+    @FXML private TextField visibleSmtpPasswordField;
+    @FXML private CheckBox smtpAuthBox;
+    @FXML private CheckBox smtpStartTlsBox;
+    @FXML private TextField replyToField;
+    @FXML private Button smtpPasswordVisibilityButton;
 
     @FXML private CheckBox pfmisCopilotAgentBox;
     @FXML private CheckBox transactionCoachAgentBox;
@@ -63,6 +82,9 @@ public class SettingsController {
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private final AiRecommendationService aiService = new AiRecommendationService();
+    private final SystemEmailService systemEmailService = SystemEmailService.getInstance();
+    private final EmailService emailService = EmailService.getInstance();
+    private boolean smtpPasswordVisible;
 
     @FXML
     public void initialize() {
@@ -91,6 +113,8 @@ public class SettingsController {
             applyBundledLocalUi();
         });
         loadSettings();
+        configureSmtpPasswordVisibility();
+        loadEmailSettings();
         refreshLocalAiStatus();
     }
 
@@ -301,6 +325,56 @@ public class SettingsController {
         } catch (Exception exception) {
             UiAlerts.error("Failed to download Smart Analysis starter pack", exception);
         }
+    }
+
+    @FXML
+    private void saveEmailSettings() {
+        try {
+            requireSuperAdmin();
+            EmailSettings settings = formEmailSettings(true);
+            systemEmailService.saveSettings(settings, true, UserSession.getAuthenticatedUser().getId());
+            smtpPasswordField.clear();
+            visibleSmtpPasswordField.clear();
+            loadEmailSettings();
+            emailSettingsStatusLabel.setText("Email configuration saved.");
+        } catch (RuntimeException exception) {
+            emailSettingsStatusLabel.setText(rootMessage(exception));
+        }
+    }
+
+    @FXML
+    private void testEmailConfiguration() {
+        try {
+            requireSuperAdmin();
+            EmailSettings settings = formEmailSettings(true);
+            systemEmailService.validateSettings(settings);
+            emailSettingsStatusLabel.setText("Testing email configuration...");
+            CompletableFuture.runAsync(() -> emailService.sendTestEmail(settings))
+                    .whenComplete((ignored, throwable) -> Platform.runLater(() -> {
+                        if (throwable == null) {
+                            database.recordSystemLog("Administration", "TEST_EMAIL_SENT", "INFO",
+                                    "Test email sent by user " + UserSession.getAuthenticatedUser().getId() + ".");
+                            emailSettingsStatusLabel.setText("Test email sent successfully.");
+                        } else {
+                            database.recordSystemLog("Administration", "TEST_EMAIL_FAILED", "WARNING", rootMessage(throwable));
+                            emailSettingsStatusLabel.setText("PFMIS could not send the test email. Check the email configuration.");
+                        }
+                    }));
+        } catch (RuntimeException exception) {
+            emailSettingsStatusLabel.setText(rootMessage(exception));
+        }
+    }
+
+    @FXML
+    private void toggleSmtpPasswordVisibility() {
+        smtpPasswordVisible = !smtpPasswordVisible;
+        applySmtpPasswordVisibility();
+        smtpPasswordVisibilityButton.setText(smtpPasswordVisible ? "Hide" : "Show");
+        Platform.runLater(() -> {
+            TextField active = smtpPasswordVisible ? visibleSmtpPasswordField : smtpPasswordField;
+            active.requestFocus();
+            active.positionCaret(active.getText() == null ? 0 : active.getText().length());
+        });
     }
 
     private void loadSettings() {
@@ -662,6 +736,89 @@ public class SettingsController {
                 localAiStatusLabel.setText("Status: Error\nLocal AI status could not be checked.");
             }
         }));
+    }
+
+    private void loadEmailSettings() {
+        EmailSettings settings = systemEmailService.currentSettings();
+        emailEnabledBox.setSelected(settings.enabled());
+        systemEmailField.setText(settings.systemEmail());
+        senderNameField.setText(settings.fromName());
+        smtpHostField.setText(settings.smtpHost());
+        smtpPortField.setText(Integer.toString(settings.smtpPort()));
+        smtpUsernameField.setText(settings.effectiveSmtpUsername());
+        smtpPasswordField.clear();
+        visibleSmtpPasswordField.clear();
+        smtpAuthBox.setSelected(settings.smtpAuth());
+        smtpStartTlsBox.setSelected(settings.smtpStartTls());
+        replyToField.setText(settings.effectiveReplyTo());
+        emailSettingsStatusLabel.setText(settings.smtpPassword().isBlank()
+                ? "SMTP/App Password still requires configuration."
+                : "Email configuration is ready for sending.");
+    }
+
+    private EmailSettings formEmailSettings(boolean preserveBlankPassword) {
+        EmailSettings current = systemEmailService.currentSettings();
+        String enteredPassword = textValue(activeSmtpPasswordField());
+        String effectivePassword = preserveBlankPassword && enteredPassword.isBlank()
+                ? current.smtpPassword()
+                : enteredPassword;
+        return new EmailSettings(
+                emailEnabledBox.isSelected(),
+                textValue(systemEmailField),
+                textValue(senderNameField).isBlank() ? "PFMIS" : textValue(senderNameField),
+                textValue(replyToField),
+                textValue(smtpHostField),
+                parsePort(textValue(smtpPortField)),
+                textValue(smtpUsernameField),
+                effectivePassword,
+                smtpAuthBox.isSelected(),
+                smtpStartTlsBox.isSelected(),
+                current.smtpSsl(),
+                current.imapHost(),
+                current.imapPort(),
+                current.imapSsl(),
+                current.connectTimeout(),
+                current.readTimeout(),
+                current.writeTimeout()
+        );
+    }
+
+    private void configureSmtpPasswordVisibility() {
+        visibleSmtpPasswordField.textProperty().bindBidirectional(smtpPasswordField.textProperty());
+        smtpPasswordVisible = false;
+        applySmtpPasswordVisibility();
+        smtpPasswordVisibilityButton.setText("Show");
+        smtpPasswordVisibilityButton.setFocusTraversable(false);
+    }
+
+    private void applySmtpPasswordVisibility() {
+        smtpPasswordField.setVisible(!smtpPasswordVisible);
+        smtpPasswordField.setManaged(!smtpPasswordVisible);
+        smtpPasswordField.setMouseTransparent(smtpPasswordVisible);
+        smtpPasswordField.setFocusTraversable(!smtpPasswordVisible);
+
+        visibleSmtpPasswordField.setVisible(smtpPasswordVisible);
+        visibleSmtpPasswordField.setManaged(smtpPasswordVisible);
+        visibleSmtpPasswordField.setMouseTransparent(!smtpPasswordVisible);
+        visibleSmtpPasswordField.setFocusTraversable(smtpPasswordVisible);
+    }
+
+    private TextField activeSmtpPasswordField() {
+        return smtpPasswordVisible ? visibleSmtpPasswordField : smtpPasswordField;
+    }
+
+    private int parsePort(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("SMTP Port must be a number.");
+        }
+    }
+
+    private void requireSuperAdmin() {
+        if (!UserSession.isSuperAdmin()) {
+            throw new SecurityException("Only a Super Administrator can change email settings.");
+        }
     }
 
     private AiSettings defaultLocalSettings() {

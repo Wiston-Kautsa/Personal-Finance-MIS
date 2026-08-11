@@ -4,8 +4,8 @@
 
 PFMIS now starts at a sign-in screen instead of opening financial records directly.
 
-- The first registered account becomes the **Super Administrator**.
-- Public self-registration is disabled after initial setup; additional accounts must be created by a Super Administrator.
+- The first **Super Administrator** is provisioned automatically from the local ignored `.env` when no active Super Administrator exists.
+- Public self-registration is disabled; additional accounts must be created by a Super Administrator from **Manage Users**.
 - Every additional account created by a Super Administrator receives a separate private PFMIS workspace.
 - A normal user can open only his or her own workspace.
 - The Super Administrator can view the registered-user list and open any active user's workspace.
@@ -40,7 +40,7 @@ Passwords are not stored as plain text. PFMIS uses:
 
 - PBKDF2 with HMAC-SHA-256;
 - a random salt per password;
-- 210,000 iterations;
+- 600,000 iterations;
 - constant-time hash comparison;
 - a minimum password policy of eight characters, uppercase, lowercase, and a number;
 - temporary lockout after five failed login attempts;
@@ -63,7 +63,7 @@ Workspace access is recorded in the authentication log.
 
 ## Existing-data migration
 
-When PFMIS is upgraded from a single-user version and the first Super Administrator is registered, an existing `pfmis.db` is copied automatically into that administrator's new workspace. New users start with separate empty databases and their own default categories and AI settings.
+When PFMIS is upgraded from a single-user version and the first Super Administrator is provisioned, an existing `pfmis.db` is copied automatically into that administrator's new workspace. New users start with separate empty databases and their own default categories and AI settings.
 
 ## Server deployment
 

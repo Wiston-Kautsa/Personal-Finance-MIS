@@ -1068,6 +1068,12 @@
     -fx-max-width: 560;
 }
 
+.settings-field-small {
+    -fx-min-width: 120;
+    -fx-pref-width: 140;
+    -fx-max-width: 180;
+}
+
 .settings-status-box {
     -fx-background-color: #f7f9fd;
     -fx-border-color: #e2e8f2;
@@ -4333,4 +4339,207 @@
     -fx-text-fill: #93c5fd;
     -fx-background-radius: 7;
     -fx-border-radius: 7;
+}
+
+/* Final standard login screen */
+.auth-standard-login-root {
+    -fx-background-color: #07121a;
+}
+
+.auth-standard-login-root .auth-standard-shell {
+    -fx-background-color: #07121a;
+    -fx-padding: 24;
+}
+
+.auth-standard-login-root .auth-standard-card {
+    -fx-background-color: #111b28;
+    -fx-border-color: #2d3b4d;
+    -fx-border-width: 1;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-effect: dropshadow(gaussian, rgba(3, 7, 18, 0.42), 18, 0.16, 0, 6);
+}
+
+.auth-standard-login-root .auth-standard-brand {
+    -fx-font-size: 32px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #ffffff;
+}
+
+.auth-standard-login-root .auth-standard-subtitle {
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+    -fx-text-fill: #6ee7b7;
+}
+
+.auth-standard-login-root .auth-standard-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #ffffff;
+}
+
+.auth-standard-login-root .auth-standard-title-small {
+    -fx-font-size: 16px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #ffffff;
+}
+
+.auth-standard-login-root .auth-standard-copy,
+.auth-standard-login-root .auth-standard-footer {
+    -fx-font-size: 12px;
+    -fx-text-fill: #cbd5e1;
+}
+
+.auth-standard-login-root .auth-standard-footer {
+    -fx-padding: 2 0 0 0;
+}
+
+.auth-standard-login-root .auth-form-label {
+    -fx-font-size: 12px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #f8fafc;
+}
+
+.auth-standard-login-root .auth-input-shell {
+    -fx-min-height: 44;
+    -fx-pref-height: 44;
+    -fx-background-color: #0b1420;
+    -fx-border-color: #32455c;
+    -fx-border-width: 1;
+    -fx-background-radius: 7;
+    -fx-border-radius: 7;
+    -fx-padding: 0 10;
+}
+
+.auth-standard-login-root .auth-input-shell:hover,
+.auth-standard-login-root .auth-input-shell.auth-input-focused {
+    -fx-border-color: #34d399;
+    -fx-border-width: 1.5;
+    -fx-effect: dropshadow(gaussian, rgba(52, 211, 153, 0.18), 10, 0.16, 0, 0);
+}
+
+.auth-standard-login-root .auth-input-shell.field-error {
+    -fx-border-color: #ef4444;
+    -fx-border-width: 1.5;
+}
+
+.auth-standard-login-root .auth-field-flat {
+    -fx-pref-height: 42;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #f8fafc;
+    -fx-prompt-text-fill: #8798ad;
+    -fx-font-size: 13px;
+    -fx-padding: 0;
+}
+
+.auth-standard-login-root .auth-field-flat:focused {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.auth-standard-login-root .auth-field-icon {
+    -fx-fill: transparent;
+    -fx-stroke: #9caec2;
+    -fx-stroke-width: 1.8;
+}
+
+.auth-standard-login-root .auth-eye-button {
+    -fx-min-height: 32;
+    -fx-pref-height: 32;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #6ee7b7;
+    -fx-font-size: 12px;
+    -fx-font-weight: 900;
+    -fx-padding: 5 0 5 8;
+    -fx-cursor: hand;
+}
+
+.auth-standard-login-root .auth-eye-button:hover {
+    -fx-text-fill: #a7f3d0;
+}
+
+.auth-standard-login-root .auth-remember-check {
+    -fx-font-size: 12px;
+    -fx-text-fill: #d4dee7;
+}
+
+.auth-standard-login-root .auth-remember-check .box {
+    -fx-background-color: #102b35;
+    -fx-border-color: #34d399;
+    -fx-background-radius: 4;
+    -fx-border-radius: 4;
+}
+
+.auth-standard-login-root .auth-link-button,
+.auth-standard-login-root .auth-link-button:focused {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-insets: 0;
+    -fx-text-fill: #67b1ff;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+    -fx-padding: 4 0;
+    -fx-cursor: hand;
+}
+
+.auth-standard-login-root .auth-link-button:hover {
+    -fx-text-fill: #93c5fd;
+}
+
+.auth-standard-login-root .auth-back-link {
+    -fx-alignment: CENTER;
+}
+
+.auth-standard-login-root .auth-primary-button {
+    -fx-min-height: 44;
+    -fx-pref-height: 44;
+    -fx-background-color: #22b981;
+    -fx-border-color: transparent;
+    -fx-background-radius: 7;
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 13px;
+    -fx-font-weight: 900;
+    -fx-padding: 0 16;
+}
+
+.auth-standard-login-root .auth-primary-button:hover {
+    -fx-background-color: #1fa172;
+}
+
+.auth-standard-login-root .auth-primary-button:disabled {
+    -fx-opacity: 0.72;
+}
+
+.auth-standard-login-root .auth-validation-message {
+    -fx-text-fill: #fca5a5;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+}
+
+.auth-standard-login-root .auth-message-error {
+    -fx-text-fill: #fca5a5;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+}
+
+.auth-standard-login-root .auth-message-success {
+    -fx-text-fill: #86efac;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+}
+
+.auth-standard-login-root .auth-saved-login-panel {
+    -fx-background-color: #0d1724;
+    -fx-border-color: #2d3b4d;
+    -fx-background-radius: 7;
+    -fx-border-radius: 7;
+    -fx-padding: 10;
+}
+
+.auth-standard-login-root .auth-saved-login-label {
+    -fx-text-fill: #cbd5e1;
+    -fx-font-size: 12px;
 }

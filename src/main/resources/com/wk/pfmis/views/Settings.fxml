@@ -13,6 +13,7 @@
 <?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 
 <ScrollPane fitToWidth="true" hbarPolicy="NEVER" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
@@ -88,6 +89,56 @@
                         <Label fx:id="registrationStatusLabel" text="Smart Analysis is not configured." wrapText="true" styleClass="settings-status-text"/>
                         <Label fx:id="apiKeyStatusLabel" text="No API key saved" wrapText="true" styleClass="form-note"/>
                     </VBox>
+                </VBox>
+            </TitledPane>
+
+            <TitledPane text="Email Settings" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="12" styleClass="settings-section">
+                    <CheckBox fx:id="emailEnabledBox" text="Enable PFMIS email sending" wrapText="true"/>
+                    <FlowPane hgap="14" vgap="12" prefWrapLength="820">
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="System Email *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="systemEmailField" promptText="system@example.com" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="Sender Name" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="senderNameField" promptText="PFMIS" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field">
+                            <Label text="SMTP Host *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="smtpHostField" promptText="smtp.gmail.com" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-small">
+                            <Label text="SMTP Port *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="smtpPortField" promptText="587" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="SMTP Username *" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="smtpUsernameField" promptText="SMTP username" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="SMTP Password *" wrapText="true" styleClass="field-label"/>
+                            <HBox spacing="8" alignment="CENTER_LEFT">
+                                <StackPane HBox.hgrow="ALWAYS">
+                                    <PasswordField fx:id="smtpPasswordField" promptText="Leave blank to keep configured password" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                                    <TextField fx:id="visibleSmtpPasswordField" promptText="Leave blank to keep configured password" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity" visible="false" managed="false" mouseTransparent="true"/>
+                                </StackPane>
+                                <Button fx:id="smtpPasswordVisibilityButton" text="Show" onAction="#toggleSmtpPasswordVisibility" styleClass="secondary-button"/>
+                            </HBox>
+                        </VBox>
+                        <VBox spacing="6" styleClass="settings-field-wide">
+                            <Label text="Reply-To" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="replyToField" promptText="reply-to@example.com" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                    </FlowPane>
+                    <HBox spacing="16" alignment="CENTER_LEFT">
+                        <CheckBox fx:id="smtpAuthBox" text="Use authentication" wrapText="true"/>
+                        <CheckBox fx:id="smtpStartTlsBox" text="STARTTLS" wrapText="true"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Test Email Configuration" onAction="#testEmailConfiguration" minWidth="185" styleClass="secondary-button"/>
+                        <Button text="Save Changes" onAction="#saveEmailSettings" minWidth="135" styleClass="primary-button"/>
+                    </HBox>
+                    <Label fx:id="emailSettingsStatusLabel" text="" wrapText="true" styleClass="settings-status-text"/>
                 </VBox>
             </TitledPane>
 

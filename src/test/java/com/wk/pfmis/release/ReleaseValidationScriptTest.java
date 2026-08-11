@@ -27,7 +27,7 @@ class ReleaseValidationScriptTest {
         Path releaseRoot = Files.createDirectory(temporaryDirectory.resolve("release-safe"));
         Files.writeString(
                 releaseRoot.resolve(".env.example"),
-                "PFMIS_MAIL_PASSWORD=replace-with-private-app-password%nPFMIS_MAIL_FROM=sender@example.invalid%n".formatted(),
+                "PFMIS_SMTP_PASSWORD=replace-with-private-app-password%nPFMIS_SYSTEM_EMAIL=sender@example.invalid%n".formatted(),
                 StandardCharsets.UTF_8
         );
         Files.writeString(releaseRoot.resolve("README.txt"), "PFMIS release fixture", StandardCharsets.UTF_8);
@@ -44,7 +44,7 @@ class ReleaseValidationScriptTest {
         String fakeSecret = "UnitTestSecretValue123456789";
         Files.writeString(
                 releaseRoot.resolve(".env"),
-                "PFMIS_MAIL_PASSWORD=" + fakeSecret + System.lineSeparator(),
+                "PFMIS_SMTP_PASSWORD=" + fakeSecret + System.lineSeparator(),
                 StandardCharsets.UTF_8
         );
 

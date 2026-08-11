@@ -23,6 +23,7 @@ public final class LoginCredentialStore {
     private static final String STORAGE_NOTICE_KEY = "rememberedCredentialNotice";
     private static final String INSTALLATION_ID_KEY = "rememberedCredentialInstallationId";
     private static final String LEGACY_TOKEN_KEY = "rememberedLoginToken";
+    private static final String DISABLED_PROPERTY = "pfmis.login.credentials.disabled";
     private static final String WINDOWS_DPAPI_STORAGE = "windows-dpapi-v2";
     private static final String WINDOWS_DPAPI_LEGACY_STORAGE = "windows-dpapi-v1";
     private static final String ENTROPY_PREFIX = "PFMIS_LOGIN_CREDENTIALS|v1|";
@@ -54,6 +55,9 @@ public final class LoginCredentialStore {
     }
 
     public SaveResult save(String usernameOrEmail, char[] password) {
+        if (credentialsDisabled()) {
+            return new SaveResult(SaveStatus.NOT_SAVED, "");
+        }
         String account = clean(usernameOrEmail);
         if (account.isBlank() || isBlank(password)) {
             clear();
@@ -108,6 +112,9 @@ public final class LoginCredentialStore {
     }
 
     public LoadedCredentials load() {
+        if (credentialsDisabled()) {
+            return LoadedCredentials.none();
+        }
         preferences.remove(LEGACY_TOKEN_KEY);
 
         String account = clean(preferences.get(USERNAME_KEY, ""));
@@ -182,11 +189,17 @@ public final class LoginCredentialStore {
     }
 
     public boolean hasSavedCredentials() {
+        if (credentialsDisabled()) {
+            return false;
+        }
         return !clean(preferences.get(USERNAME_KEY, "")).isBlank()
                 || !clean(preferences.get(PASSWORD_BLOB_KEY, "")).isBlank();
     }
 
     public boolean hasSavedPassword() {
+        if (credentialsDisabled()) {
+            return false;
+        }
         return !clean(preferences.get(PASSWORD_BLOB_KEY, "")).isBlank();
     }
 
@@ -195,6 +208,9 @@ public final class LoginCredentialStore {
     }
 
     public void clear() {
+        if (credentialsDisabled()) {
+            return;
+        }
         preferences.remove(USERNAME_KEY);
         clearPasswordOnly();
         preferences.remove(LEGACY_TOKEN_KEY);
@@ -301,6 +317,10 @@ public final class LoginCredentialStore {
         } finally {
             plaintextPassword = "";
         }
+    }
+
+    private boolean credentialsDisabled() {
+        return Boolean.getBoolean(DISABLED_PROPERTY);
     }
 
     private void migrateLegacyPassword(String account, char[] password) {

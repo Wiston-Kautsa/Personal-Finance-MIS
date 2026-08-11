@@ -5,7 +5,6 @@ import com.wk.pfmis.auth.AuthDatabase;
 import com.wk.pfmis.mail.EmailService;
 import com.wk.pfmis.models.SystemUser;
 import com.wk.pfmis.security.LoginCredentialStore;
-import com.wk.pfmis.security.PasswordSecurity;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
@@ -21,73 +20,44 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-import java.util.regex.Pattern;
 
 public class LoginController {
     private static final System.Logger LOGGER = System.getLogger(LoginController.class.getName());
     private static final String INPUT_FOCUSED_CLASS = "auth-input-focused";
     private static final String FIELD_ERROR_CLASS = "field-error";
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
-    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-z0-9._-]{3,40}$");
+    private static final String GENERIC_AUTH_ERROR = "Invalid email/username or password.";
 
     @FXML private TextField usernameField;
     @FXML private PasswordField passwordField;
     @FXML private TextField visiblePasswordField;
     @FXML private TextField resetEmailField;
-    @FXML private TextField bootstrapFullNameField;
-    @FXML private TextField bootstrapUsernameField;
-    @FXML private TextField bootstrapEmailField;
-    @FXML private PasswordField bootstrapPasswordField;
-    @FXML private TextField bootstrapVisiblePasswordField;
-    @FXML private PasswordField bootstrapConfirmPasswordField;
-    @FXML private TextField bootstrapVisibleConfirmPasswordField;
 
-    @FXML private Label authModeTitleLabel;
     @FXML private Label messageLabel;
     @FXML private Label savedLoginStatusLabel;
-    @FXML private Label setupHintLabel;
-    @FXML private Label systemEmailLabel;
     @FXML private Label loginUsernameErrorLabel;
     @FXML private Label loginPasswordErrorLabel;
-    @FXML private Label bootstrapFullNameErrorLabel;
-    @FXML private Label bootstrapUsernameErrorLabel;
-    @FXML private Label bootstrapEmailErrorLabel;
-    @FXML private Label bootstrapPasswordErrorLabel;
-    @FXML private Label bootstrapConfirmPasswordErrorLabel;
+    @FXML private Label resetEmailErrorLabel;
 
     @FXML private CheckBox rememberMeCheckBox;
     @FXML private Button signInButton;
-    @FXML private Button createAdministratorButton;
-    @FXML private Button retryModeButton;
-    @FXML private Button forgetSavedLoginButton;
     @FXML private Button passwordVisibilityButton;
-    @FXML private Button bootstrapPasswordVisibilityButton;
     @FXML private Button forgotPasswordButton;
+    @FXML private Button forgetSavedLoginButton;
+    @FXML private Button sendResetButton;
 
-    @FXML private VBox loginForm;
-    @FXML private VBox bootstrapForm;
+    @FXML private VBox signInPanel;
     @FXML private VBox resetPanel;
     @FXML private VBox savedLoginPanel;
-    @FXML private HBox loginOptionsRow;
     @FXML private HBox loginUsernameShell;
     @FXML private HBox loginPasswordShell;
-    @FXML private HBox bootstrapFullNameShell;
-    @FXML private HBox bootstrapUsernameShell;
-    @FXML private HBox bootstrapEmailShell;
-    @FXML private HBox bootstrapPasswordShell;
-    @FXML private HBox bootstrapConfirmPasswordShell;
+    @FXML private HBox resetEmailShell;
 
     private final AuthDatabase authDatabase = AuthDatabase.getInstance();
     private final EmailService emailService = EmailService.getInstance();
     private final LoginCredentialStore credentialStore = LoginCredentialStore.getInstance();
 
-    private AuthenticationMode authenticationMode = AuthenticationMode.CHECKING;
     private boolean passwordVisible;
-    private boolean bootstrapPasswordVisible;
     private boolean restoredPasswordFromStore;
-    private boolean savedCredentialsChecked;
     private boolean suppressPasswordChangeTracking;
     private boolean suppressRememberMeListener;
     private String restoredCredentialAccount = "";
@@ -95,31 +65,30 @@ public class LoginController {
     @FXML
     public void initialize() {
         LOGGER.log(System.Logger.Level.INFO, "Authentication screen initialized");
-        systemEmailLabel.setText(emailService.isSendConfigured()
-                ? "Password reset email is configured."
-                : "Password reset email is not configured.");
-        setupHintLabel.setText("Checking workspace security...");
+        LOGGER.log(System.Logger.Level.INFO, "Authentication mode: LOGIN");
         configurePasswordVisibility();
-        configureBootstrapPasswordVisibility();
         configureInputShells();
         configureValidationClearance();
         configureCredentialMirroring();
         configureRememberMeRemoval();
         configureKeyboardActions();
-        refreshAuthenticationMode();
-    }
-
-    @FXML
-    private void retryAuthenticationMode() {
-        refreshAuthenticationMode();
+        setLoginControlsInteractive();
+        restoreSavedCredentials();
+        updateForgetSavedLoginButtonState();
+        if (!authDatabase.hasActiveSuperAdministrator()) {
+            showError("PFMIS is not fully configured. Check the local .env and restart PFMIS.");
+        }
+        Platform.runLater(() -> {
+            if (rememberMeCheckBox.isSelected() && !usernameField.getText().isBlank()) {
+                activeLoginPasswordField().requestFocus();
+            } else {
+                usernameField.requestFocus();
+            }
+        });
     }
 
     @FXML
     private void signIn() {
-        if (authenticationMode != AuthenticationMode.LOGIN) {
-            refreshAuthenticationMode();
-            return;
-        }
         if (!validateLoginForm()) {
             return;
         }
@@ -127,69 +96,52 @@ public class LoginController {
     }
 
     @FXML
-    private void createAdministrator() {
-        if (authenticationMode != AuthenticationMode.BOOTSTRAP) {
-            refreshAuthenticationMode();
-            return;
-        }
+    private void focusPasswordReset() {
         clearMessage();
-        boolean valid;
-        try {
-            valid = validateBootstrapForm();
-        } catch (RuntimeException exception) {
-            showError(rootMessage(exception));
-            return;
+        clearResetValidation();
+        setVisibleManaged(signInPanel, false);
+        setVisibleManaged(resetPanel, true);
+        resetEmailField.setDisable(false);
+        resetEmailField.setEditable(true);
+        resetEmailField.setMouseTransparent(false);
+        resetEmailField.setFocusTraversable(true);
+        if (resetEmailField.getText().isBlank()) {
+            resetEmailField.setText(usernameField.getText());
         }
-        if (!valid) {
-            return;
-        }
+        Platform.runLater(resetEmailField::requestFocus);
+    }
 
-        createAdministratorButton.setDisable(true);
-        try {
-            SystemUser user = authDatabase.registerUser(
-                    bootstrapFullNameField.getText(),
-                    bootstrapUsernameField.getText(),
-                    bootstrapEmailField.getText(),
-                    activeBootstrapPasswordText()
-            );
-            LOGGER.log(System.Logger.Level.INFO, "First Super Administrator created");
-            if (!authDatabase.hasActiveSuperAdministrator()) {
-                throw new IllegalStateException("PFMIS could not verify the new Super Administrator account.");
+    @FXML
+    private void backToSignIn() {
+        clearMessage();
+        clearResetValidation();
+        setVisibleManaged(resetPanel, false);
+        setVisibleManaged(signInPanel, true);
+        Platform.runLater(() -> {
+            if (!usernameField.getText().isBlank()) {
+                activeLoginPasswordField().requestFocus();
+            } else {
+                usernameField.requestFocus();
             }
-            clearBootstrapFields();
-            switchMode(AuthenticationMode.LOGIN, false);
-            usernameField.setText(user.getUsername());
-            resetEmailField.setText(user.getUsername());
-            clearPasswordFields();
-            showSuccess("Super Administrator created successfully. Sign in to continue.");
-            Platform.runLater(passwordField::requestFocus);
-        } catch (RuntimeException exception) {
-            showError(rootMessage(exception));
-            focusLikelyBootstrapFailure(exception);
-        } finally {
-            createAdministratorButton.setDisable(authenticationMode != AuthenticationMode.BOOTSTRAP);
-        }
+        });
     }
 
     @FXML
     private void resetPasswordByEmail() {
         clearMessage();
-        if (authenticationMode != AuthenticationMode.LOGIN) {
-            showError("Password reset is available after a Super Administrator account exists.");
+        clearResetValidation();
+        String account = text(resetEmailField);
+        if (account.isBlank()) {
+            markInvalid(resetEmailShell, resetEmailErrorLabel, "Email address is required.");
+            requestFocus(resetEmailField);
             return;
         }
         if (!emailService.isSendConfigured()) {
             showError(emailService.sendConfigurationStatus());
             return;
         }
-        String account = resetEmailField.getText().isBlank() ? usernameField.getText() : resetEmailField.getText();
-        if (account == null || account.trim().isEmpty()) {
-            showError("Enter the registered email or username to receive a reset email.");
-            setVisibleManaged(resetPanel, true);
-            resetEmailField.requestFocus();
-            return;
-        }
-        resetPanel.setDisable(true);
+
+        setResetLoading(true);
         Task<Boolean> resetTask = new Task<>() {
             @Override
             protected Boolean call() {
@@ -204,29 +156,16 @@ public class LoginController {
             }
         };
         resetTask.setOnSucceeded(event -> {
-            resetPanel.setDisable(false);
-            showSuccess("If the account can receive password resets, an email has been sent.");
+            setResetLoading(false);
+            showSuccess("If an account matches the information provided, password reset instructions have been sent.");
         });
         resetTask.setOnFailed(event -> {
-            resetPanel.setDisable(false);
+            setResetLoading(false);
             showError(rootMessage(resetTask.getException()));
         });
         Thread worker = new Thread(resetTask, "pfmis-password-reset");
         worker.setDaemon(true);
         worker.start();
-    }
-
-    @FXML
-    private void focusPasswordReset() {
-        if (authenticationMode != AuthenticationMode.LOGIN) {
-            showError("Create the first Super Administrator account before password reset is available.");
-            return;
-        }
-        setVisibleManaged(resetPanel, true);
-        if (resetEmailField.getText().isBlank()) {
-            resetEmailField.setText(usernameField.getText());
-        }
-        resetEmailField.requestFocus();
     }
 
     @FXML
@@ -238,107 +177,21 @@ public class LoginController {
 
     @FXML
     private void togglePasswordVisibility() {
+        boolean passwordHadFocus = passwordField.isFocused() || visiblePasswordField.isFocused();
         int caret = activeLoginPasswordField().getCaretPosition();
         passwordVisible = !passwordVisible;
-        applyPasswordVisibility(passwordField, visiblePasswordField, passwordVisible);
+        applyPasswordVisibility();
         passwordVisibilityButton.setText(passwordVisible ? "Hide" : "Show");
-        focusWithCaret(activeLoginPasswordField(), caret);
-    }
-
-    @FXML
-    private void toggleBootstrapPasswordVisibility() {
-        boolean passwordHadFocus = bootstrapPasswordField.isFocused() || bootstrapVisiblePasswordField.isFocused();
-        boolean confirmHadFocus = bootstrapConfirmPasswordField.isFocused() || bootstrapVisibleConfirmPasswordField.isFocused();
-        int passwordCaret = activeBootstrapPasswordField().getCaretPosition();
-        int confirmCaret = activeBootstrapConfirmPasswordField().getCaretPosition();
-        bootstrapPasswordVisible = !bootstrapPasswordVisible;
-        applyPasswordVisibility(bootstrapPasswordField, bootstrapVisiblePasswordField, bootstrapPasswordVisible);
-        applyPasswordVisibility(bootstrapConfirmPasswordField, bootstrapVisibleConfirmPasswordField, bootstrapPasswordVisible);
-        bootstrapPasswordVisibilityButton.setText(bootstrapPasswordVisible ? "Hide" : "Show");
-        if (confirmHadFocus) {
-            focusWithCaret(activeBootstrapConfirmPasswordField(), confirmCaret);
-        } else if (passwordHadFocus) {
-            focusWithCaret(activeBootstrapPasswordField(), passwordCaret);
-        } else {
-            focusWithCaret(activeBootstrapPasswordField(), passwordCaret);
+        if (passwordHadFocus) {
+            focusWithCaret(activeLoginPasswordField(), caret);
         }
-    }
-
-    private void refreshAuthenticationMode() {
-        LOGGER.log(System.Logger.Level.INFO, "Checking first administrator status");
-        authenticationMode = AuthenticationMode.CHECKING;
-        authModeTitleLabel.setText("Checking workspace security");
-        setupHintLabel.setText("Checking workspace security...");
-        clearMessage();
-        clearAllValidation();
-        setVisibleManaged(loginForm, false);
-        setVisibleManaged(bootstrapForm, false);
-        setVisibleManaged(resetPanel, false);
-        setVisibleManaged(savedLoginPanel, false);
-        setVisibleManaged(retryModeButton, false);
-        try {
-            boolean firstAdministratorExists = authDatabase.hasActiveSuperAdministrator();
-            LOGGER.log(System.Logger.Level.INFO, "First administrator exists: " + firstAdministratorExists);
-            switchMode(firstAdministratorExists ? AuthenticationMode.LOGIN : AuthenticationMode.BOOTSTRAP, true);
-        } catch (RuntimeException exception) {
-            LOGGER.log(System.Logger.Level.WARNING, "First administrator check failed", exception);
-            authenticationMode = AuthenticationMode.ERROR;
-            authModeTitleLabel.setText("Workspace security check failed");
-            setupHintLabel.setText("PFMIS could not verify the administrator account. Check the database connection and try again.");
-            setVisibleManaged(retryModeButton, true);
-            showError("PFMIS could not verify the administrator account. Check the database connection and try again.");
-        }
-    }
-
-    private void switchMode(AuthenticationMode mode, boolean restoreSavedCredentials) {
-        authenticationMode = mode;
-        LOGGER.log(System.Logger.Level.INFO, "Authentication mode: " + mode);
-        clearAllValidation();
-        setVisibleManaged(retryModeButton, false);
-        setVisibleManaged(resetPanel, false);
-        if (mode == AuthenticationMode.BOOTSTRAP) {
-            authModeTitleLabel.setText("Create First Administrator");
-            setupHintLabel.setText("Create the first Super Administrator account to secure and open this PFMIS workspace.");
-            setVisibleManaged(bootstrapForm, true);
-            setVisibleManaged(loginForm, false);
-            setVisibleManaged(savedLoginPanel, false);
-            setBootstrapControlsInteractive(true);
-            setLoginControlsInteractive(false);
-            updateForgetSavedLoginButtonState();
-            Platform.runLater(bootstrapFullNameField::requestFocus);
-            return;
-        }
-
-        authModeTitleLabel.setText("Sign in");
-        setupHintLabel.setText("Sign in to open your private PFMIS workspace. New accounts are created by the Super Administrator.");
-        setVisibleManaged(bootstrapForm, false);
-        setVisibleManaged(loginForm, true);
-        setBootstrapControlsInteractive(false);
-        setLoginControlsInteractive(true);
-        if (restoreSavedCredentials && !savedCredentialsChecked) {
-            restoreSavedCredentials();
-            savedCredentialsChecked = true;
-        }
-        if (resetEmailField.getText().isBlank()) {
-            resetEmailField.setText(usernameField.getText());
-        }
-        updateForgetSavedLoginButtonState();
-        Platform.runLater(() -> {
-            if (restoredPasswordFromStore) {
-                signInButton.requestFocus();
-            } else if (rememberMeCheckBox.isSelected() && !usernameField.getText().isBlank()) {
-                passwordField.requestFocus();
-            } else {
-                usernameField.requestFocus();
-            }
-        });
     }
 
     private boolean validateLoginForm() {
         clearLoginValidation();
         Node firstInvalid = null;
-        if (usernameField.getText() == null || usernameField.getText().isBlank()) {
-            markInvalid(loginUsernameShell, loginUsernameErrorLabel, "Username or email is required.");
+        if (text(usernameField).isBlank()) {
+            markInvalid(loginUsernameShell, loginUsernameErrorLabel, "Email or username is required.");
             firstInvalid = usernameField;
         }
         if (activePasswordText().isBlank()) {
@@ -348,68 +201,6 @@ public class LoginController {
             }
         }
         if (firstInvalid != null) {
-            showError("Complete the required fields highlighted below.");
-            requestFocus(firstInvalid);
-            return false;
-        }
-        return true;
-    }
-
-    private boolean validateBootstrapForm() {
-        clearBootstrapValidation();
-        Node firstInvalid = null;
-        String fullName = text(bootstrapFullNameField);
-        String username = text(bootstrapUsernameField).toLowerCase(Locale.ENGLISH);
-        String email = text(bootstrapEmailField).toLowerCase(Locale.ENGLISH);
-        String password = activeBootstrapPasswordText();
-        String confirmPassword = activeBootstrapConfirmPasswordText();
-
-        if (fullName.isBlank()) {
-            markInvalid(bootstrapFullNameShell, bootstrapFullNameErrorLabel, "Full name is required.");
-            firstInvalid = firstInvalid == null ? bootstrapFullNameField : firstInvalid;
-        }
-        if (username.isBlank()) {
-            markInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel, "Username is required.");
-            firstInvalid = firstInvalid == null ? bootstrapUsernameField : firstInvalid;
-        } else if (!USERNAME_PATTERN.matcher(username).matches()) {
-            markInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel,
-                    "Username must be 3-40 characters and use only letters, numbers, dot, underscore, or hyphen.");
-            firstInvalid = firstInvalid == null ? bootstrapUsernameField : firstInvalid;
-        } else if (authDatabase.usernameExists(username)) {
-            markInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel, "That username is already registered.");
-            firstInvalid = firstInvalid == null ? bootstrapUsernameField : firstInvalid;
-        }
-        if (email.isBlank()) {
-            markInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel, "Email is required.");
-            firstInvalid = firstInvalid == null ? bootstrapEmailField : firstInvalid;
-        } else if (!EMAIL_PATTERN.matcher(email).matches()) {
-            markInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel, "Enter a valid email address.");
-            firstInvalid = firstInvalid == null ? bootstrapEmailField : firstInvalid;
-        } else if (authDatabase.emailExists(email)) {
-            markInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel, "That email address is already registered.");
-            firstInvalid = firstInvalid == null ? bootstrapEmailField : firstInvalid;
-        }
-        if (password.isBlank()) {
-            markInvalid(bootstrapPasswordShell, bootstrapPasswordErrorLabel, "Password is required.");
-            firstInvalid = firstInvalid == null ? activeBootstrapPasswordField() : firstInvalid;
-        } else {
-            try {
-                PasswordSecurity.validatePassword(password);
-            } catch (IllegalArgumentException exception) {
-                markInvalid(bootstrapPasswordShell, bootstrapPasswordErrorLabel, exception.getMessage());
-                firstInvalid = firstInvalid == null ? activeBootstrapPasswordField() : firstInvalid;
-            }
-        }
-        if (confirmPassword.isBlank()) {
-            markInvalid(bootstrapConfirmPasswordShell, bootstrapConfirmPasswordErrorLabel, "Confirm password is required.");
-            firstInvalid = firstInvalid == null ? activeBootstrapConfirmPasswordField() : firstInvalid;
-        } else if (!password.equals(confirmPassword)) {
-            markInvalid(bootstrapConfirmPasswordShell, bootstrapConfirmPasswordErrorLabel, "Password and confirmation do not match.");
-            firstInvalid = firstInvalid == null ? activeBootstrapConfirmPasswordField() : firstInvalid;
-        }
-
-        if (firstInvalid != null) {
-            showError("Complete the required fields highlighted below.");
             requestFocus(firstInvalid);
             return false;
         }
@@ -418,74 +209,75 @@ public class LoginController {
 
     private void authenticateAndOpen() {
         clearMessage();
-        String login = usernameField.getText();
+        String login = text(usernameField);
         char[] passwordChars = activePasswordChars();
         String passwordText = new String(passwordChars);
-        try {
-            if (!authDatabase.hasActiveSuperAdministrator()) {
+        setSignInLoading(true);
+        Task<SystemUser> authTask = new Task<>() {
+            @Override
+            protected SystemUser call() {
+                return authDatabase.authenticate(login, passwordText);
+            }
+        };
+        authTask.setOnSucceeded(event -> {
+            try {
+                SystemUser user = authTask.getValue();
+                saveCredentialsAfterSuccessfulLogin(user, passwordChars);
                 clearPasswordFields();
-                switchMode(AuthenticationMode.BOOTSTRAP, false);
-                showError("Create the first Super Administrator account before signing in.");
-                return;
+                MainApp.completeLogin(user);
+            } finally {
+                Arrays.fill(passwordChars, '\0');
+                setSignInLoading(false);
             }
-            SystemUser user = authDatabase.authenticate(login, passwordText);
-            saveCredentialsAfterSuccessfulLogin(user, passwordChars);
-            clearPasswordFields();
-            MainApp.completeLogin(user);
-        } catch (RuntimeException exception) {
-            if (shouldClearRestoredCredentials(login)) {
-                clearRememberedCredentials(false, true);
-                showError("The saved password is no longer valid. Please enter your current password.");
-            } else {
-                showError(rootMessage(exception));
+        });
+        authTask.setOnFailed(event -> {
+            try {
+                if (shouldClearRestoredCredentials(login)) {
+                    clearRememberedCredentials(false, true);
+                    showError("The saved password is no longer valid. Please enter your current password.");
+                } else {
+                    showError(GENERIC_AUTH_ERROR);
+                }
+                markInvalid(loginPasswordShell, loginPasswordErrorLabel, GENERIC_AUTH_ERROR);
+                clearPasswordFields();
+                passwordField.requestFocus();
+            } finally {
+                Arrays.fill(passwordChars, '\0');
+                setSignInLoading(false);
             }
-            markInvalid(loginPasswordShell, loginPasswordErrorLabel, "Invalid username/email or password.");
-            clearPasswordFields();
-            passwordField.requestFocus();
-        } finally {
-            Arrays.fill(passwordChars, '\0');
-            passwordText = "";
-        }
+        });
+        Thread worker = new Thread(authTask, "pfmis-authenticate");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void configurePasswordVisibility() {
         visiblePasswordField.textProperty().bindBidirectional(passwordField.textProperty());
         passwordVisible = false;
-        applyPasswordVisibility(passwordField, visiblePasswordField, false);
+        applyPasswordVisibility();
         passwordVisibilityButton.setText("Show");
+        passwordVisibilityButton.setFocusTraversable(false);
         passwordField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!suppressPasswordChangeTracking) {
+                restoredPasswordFromStore = false;
+            }
+        });
+        visiblePasswordField.textProperty().addListener((observable, oldValue, newValue) -> {
             if (!suppressPasswordChangeTracking) {
                 restoredPasswordFromStore = false;
             }
         });
     }
 
-    private void configureBootstrapPasswordVisibility() {
-        bootstrapVisiblePasswordField.textProperty().bindBidirectional(bootstrapPasswordField.textProperty());
-        bootstrapVisibleConfirmPasswordField.textProperty().bindBidirectional(bootstrapConfirmPasswordField.textProperty());
-        bootstrapPasswordVisible = false;
-        applyPasswordVisibility(bootstrapPasswordField, bootstrapVisiblePasswordField, false);
-        applyPasswordVisibility(bootstrapConfirmPasswordField, bootstrapVisibleConfirmPasswordField, false);
-        bootstrapPasswordVisibilityButton.setText("Show");
-    }
-
     private void configureInputShells() {
-        configureInputShell(loginUsernameShell, () -> usernameField, usernameField);
-        configureInputShell(loginPasswordShell, this::activeLoginPasswordField, passwordField, visiblePasswordField);
-        configureInputShell(bootstrapFullNameShell, () -> bootstrapFullNameField, bootstrapFullNameField);
-        configureInputShell(bootstrapUsernameShell, () -> bootstrapUsernameField, bootstrapUsernameField);
-        configureInputShell(bootstrapEmailShell, () -> bootstrapEmailField, bootstrapEmailField);
-        configureInputShell(bootstrapPasswordShell, this::activeBootstrapPasswordField, bootstrapPasswordField, bootstrapVisiblePasswordField);
-        configureInputShell(bootstrapConfirmPasswordShell, this::activeBootstrapConfirmPasswordField,
-                bootstrapConfirmPasswordField, bootstrapVisibleConfirmPasswordField);
-    }
-
-    private void configureInputShell(HBox shell, java.util.function.Supplier<TextInputControl> activeField,
-                                     TextInputControl... fields) {
-        shell.setOnMouseClicked(event -> activeField.get().requestFocus());
-        for (TextInputControl field : fields) {
-            field.focusedProperty().addListener((observable, oldValue, focused) -> updateInputShellFocus(shell, fields));
-        }
+        usernameField.focusedProperty().addListener((observable, oldValue, focused) ->
+                setStyleClass(loginUsernameShell, INPUT_FOCUSED_CLASS, focused));
+        passwordField.focusedProperty().addListener((observable, oldValue, focused) ->
+                updatePasswordShellFocus());
+        visiblePasswordField.focusedProperty().addListener((observable, oldValue, focused) ->
+                updatePasswordShellFocus());
+        resetEmailField.focusedProperty().addListener((observable, oldValue, focused) ->
+                setStyleClass(resetEmailShell, INPUT_FOCUSED_CLASS, focused));
     }
 
     private void configureValidationClearance() {
@@ -499,24 +291,16 @@ public class LoginController {
                 clearInvalid(loginPasswordShell, loginPasswordErrorLabel);
             }
         });
-        bootstrapFullNameField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (!text(bootstrapFullNameField).isBlank()) {
-                clearInvalid(bootstrapFullNameShell, bootstrapFullNameErrorLabel);
+        visiblePasswordField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!activePasswordText().isBlank()) {
+                clearInvalid(loginPasswordShell, loginPasswordErrorLabel);
             }
         });
-        bootstrapUsernameField.textProperty().addListener((observable, oldValue, newValue) -> {
-            String username = text(bootstrapUsernameField).toLowerCase(Locale.ENGLISH);
-            if (USERNAME_PATTERN.matcher(username).matches()) {
-                clearInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel);
+        resetEmailField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!text(resetEmailField).isBlank()) {
+                clearInvalid(resetEmailShell, resetEmailErrorLabel);
             }
         });
-        bootstrapEmailField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (EMAIL_PATTERN.matcher(text(bootstrapEmailField).toLowerCase(Locale.ENGLISH)).matches()) {
-                clearInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel);
-            }
-        });
-        bootstrapPasswordField.textProperty().addListener((observable, oldValue, newValue) -> clearValidBootstrapPasswords());
-        bootstrapConfirmPasswordField.textProperty().addListener((observable, oldValue, newValue) -> clearValidBootstrapPasswords());
     }
 
     private void configureCredentialMirroring() {
@@ -532,7 +316,7 @@ public class LoginController {
 
     private void configureRememberMeRemoval() {
         rememberMeCheckBox.selectedProperty().addListener((observable, oldValue, selected) -> {
-            if (authenticationMode == AuthenticationMode.LOGIN && !selected && !suppressRememberMeListener) {
+            if (!selected && !suppressRememberMeListener) {
                 clearRememberedCredentials(true, false);
             }
         });
@@ -541,7 +325,7 @@ public class LoginController {
     private void configureKeyboardActions() {
         usernameField.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ENTER) {
-                signIn();
+                activeLoginPasswordField().requestFocus();
             }
         });
         passwordField.setOnKeyPressed(event -> {
@@ -554,16 +338,6 @@ public class LoginController {
                 signIn();
             }
         });
-        bootstrapConfirmPasswordField.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.ENTER) {
-                createAdministrator();
-            }
-        });
-        bootstrapVisibleConfirmPasswordField.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.ENTER) {
-                createAdministrator();
-            }
-        });
         resetEmailField.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ENTER) {
                 resetPasswordByEmail();
@@ -572,10 +346,6 @@ public class LoginController {
     }
 
     private void restoreSavedCredentials() {
-        if (rememberMeCheckBox == null || authenticationMode != AuthenticationMode.LOGIN) {
-            return;
-        }
-
         try (LoginCredentialStore.LoadedCredentials credentials = credentialStore.load()) {
             updateForgetSavedLoginButtonState();
             if (credentials.status() == LoginCredentialStore.LoadStatus.NONE) {
@@ -614,7 +384,7 @@ public class LoginController {
     }
 
     private void saveCredentialsAfterSuccessfulLogin(SystemUser user, char[] password) {
-        if (rememberMeCheckBox != null && rememberMeCheckBox.isSelected()) {
+        if (rememberMeCheckBox.isSelected()) {
             LoginCredentialStore.SaveResult result = credentialStore.save(canonicalLoginIdentifier(user), password);
             updateForgetSavedLoginButtonState();
             if (!result.userMessage().isBlank()) {
@@ -630,87 +400,65 @@ public class LoginController {
         }
     }
 
-    private void setLoginControlsInteractive(boolean active) {
-        setTextControlInteractive(usernameField, active);
-        setTextControlInteractive(passwordField, active && !passwordVisible);
-        setTextControlInteractive(visiblePasswordField, active && passwordVisible);
-        rememberMeCheckBox.setDisable(!active);
-        rememberMeCheckBox.setFocusTraversable(active);
-        forgotPasswordButton.setDisable(!active);
-        forgotPasswordButton.setFocusTraversable(active);
-        signInButton.setDisable(!active);
-        signInButton.setFocusTraversable(active);
-        passwordVisibilityButton.setDisable(!active);
-        passwordVisibilityButton.setFocusTraversable(active);
+    private String canonicalLoginIdentifier(SystemUser user) {
+        if (user == null) {
+            return usernameField.getText();
+        }
+        return user.getUsername() == null || user.getUsername().isBlank()
+                ? user.getEmail()
+                : user.getUsername();
     }
 
-    private void setBootstrapControlsInteractive(boolean active) {
-        for (TextInputControl field : List.of(
-                bootstrapFullNameField,
-                bootstrapUsernameField,
-                bootstrapEmailField,
-                bootstrapPasswordField,
-                bootstrapVisiblePasswordField,
-                bootstrapConfirmPasswordField,
-                bootstrapVisibleConfirmPasswordField
-        )) {
-            setTextControlInteractive(field, active && (field.isVisible() || !field.isManaged()));
-        }
-        applyPasswordVisibility(bootstrapPasswordField, bootstrapVisiblePasswordField, bootstrapPasswordVisible);
-        applyPasswordVisibility(bootstrapConfirmPasswordField, bootstrapVisibleConfirmPasswordField, bootstrapPasswordVisible);
-        createAdministratorButton.setDisable(!active);
-        createAdministratorButton.setFocusTraversable(active);
-        bootstrapPasswordVisibilityButton.setDisable(!active);
-        bootstrapPasswordVisibilityButton.setFocusTraversable(active);
+    private void setLoginControlsInteractive() {
+        setTextControlInteractive(usernameField, true);
+        setTextControlInteractive(passwordField, true);
+        setTextControlInteractive(visiblePasswordField, true);
+        applyPasswordVisibility();
+        rememberMeCheckBox.setDisable(false);
+        rememberMeCheckBox.setFocusTraversable(true);
+        forgotPasswordButton.setDisable(false);
+        forgotPasswordButton.setFocusTraversable(true);
+        signInButton.setDisable(false);
+        signInButton.setFocusTraversable(true);
     }
 
     private void setTextControlInteractive(TextInputControl field, boolean focusable) {
-        field.setDisable(!focusable && field.isVisible());
+        field.setDisable(false);
         field.setEditable(true);
-        field.setMouseTransparent(!focusable && field.isVisible());
-        field.setFocusTraversable(focusable && field.isVisible());
+        field.setMouseTransparent(false);
+        field.setFocusTraversable(focusable);
     }
 
-    private void applyPasswordVisibility(PasswordField hiddenField, TextField visibleField, boolean visible) {
-        hiddenField.setVisible(!visible);
-        hiddenField.setManaged(!visible);
-        hiddenField.setMouseTransparent(visible);
-        hiddenField.setFocusTraversable(!visible && parentFormVisible(hiddenField));
-        hiddenField.setDisable(false);
-        hiddenField.setEditable(true);
+    private void applyPasswordVisibility() {
+        passwordField.setVisible(!passwordVisible);
+        passwordField.setManaged(!passwordVisible);
+        passwordField.setMouseTransparent(passwordVisible);
+        passwordField.setFocusTraversable(!passwordVisible);
+        passwordField.setDisable(false);
+        passwordField.setEditable(true);
 
-        visibleField.setVisible(visible);
-        visibleField.setManaged(visible);
-        visibleField.setMouseTransparent(!visible);
-        visibleField.setFocusTraversable(visible && parentFormVisible(visibleField));
-        visibleField.setDisable(false);
-        visibleField.setEditable(true);
-        updateInputShellFocus(passwordShellFor(hiddenField), hiddenField, visibleField);
+        visiblePasswordField.setVisible(passwordVisible);
+        visiblePasswordField.setManaged(passwordVisible);
+        visiblePasswordField.setMouseTransparent(!passwordVisible);
+        visiblePasswordField.setFocusTraversable(passwordVisible);
+        visiblePasswordField.setDisable(false);
+        visiblePasswordField.setEditable(true);
+        updatePasswordShellFocus();
     }
 
-    private boolean parentFormVisible(Node field) {
-        if (field == passwordField || field == visiblePasswordField) {
-            return authenticationMode == AuthenticationMode.LOGIN;
-        }
-        return authenticationMode == AuthenticationMode.BOOTSTRAP;
+    private void updatePasswordShellFocus() {
+        setStyleClass(loginPasswordShell, INPUT_FOCUSED_CLASS,
+                passwordField.isFocused() || visiblePasswordField.isFocused());
     }
 
-    private HBox passwordShellFor(Node field) {
-        if (field == passwordField || field == visiblePasswordField) {
-            return loginPasswordShell;
-        }
-        if (field == bootstrapConfirmPasswordField || field == bootstrapVisibleConfirmPasswordField) {
-            return bootstrapConfirmPasswordShell;
-        }
-        return bootstrapPasswordShell;
+    private void setSignInLoading(boolean loading) {
+        signInButton.setDisable(loading);
+        signInButton.setText(loading ? "Signing in..." : "Sign In");
     }
 
-    private void updateInputShellFocus(HBox shell, TextInputControl... fields) {
-        if (shell == null) {
-            return;
-        }
-        boolean focused = Arrays.stream(fields).anyMatch(TextInputControl::isFocused);
-        setStyleClass(shell, INPUT_FOCUSED_CLASS, focused);
+    private void setResetLoading(boolean loading) {
+        sendResetButton.setDisable(loading);
+        sendResetButton.setText(loading ? "Sending..." : "Send Reset Instructions");
     }
 
     private void markInvalid(HBox shell, Label label, String message) {
@@ -732,47 +480,8 @@ public class LoginController {
         clearInvalid(loginPasswordShell, loginPasswordErrorLabel);
     }
 
-    private void clearBootstrapValidation() {
-        clearInvalid(bootstrapFullNameShell, bootstrapFullNameErrorLabel);
-        clearInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel);
-        clearInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel);
-        clearInvalid(bootstrapPasswordShell, bootstrapPasswordErrorLabel);
-        clearInvalid(bootstrapConfirmPasswordShell, bootstrapConfirmPasswordErrorLabel);
-    }
-
-    private void clearAllValidation() {
-        clearLoginValidation();
-        clearBootstrapValidation();
-    }
-
-    private void clearValidBootstrapPasswords() {
-        String password = activeBootstrapPasswordText();
-        String confirm = activeBootstrapConfirmPasswordText();
-        if (!password.isBlank()) {
-            try {
-                PasswordSecurity.validatePassword(password);
-                clearInvalid(bootstrapPasswordShell, bootstrapPasswordErrorLabel);
-            } catch (IllegalArgumentException ignored) {
-                // Keep the current inline validation message until the password satisfies policy.
-            }
-        }
-        if (!confirm.isBlank() && confirm.equals(password)) {
-            clearInvalid(bootstrapConfirmPasswordShell, bootstrapConfirmPasswordErrorLabel);
-        }
-    }
-
-    private void focusLikelyBootstrapFailure(RuntimeException exception) {
-        String message = rootMessage(exception).toLowerCase(Locale.ENGLISH);
-        if (message.contains("email")) {
-            markInvalid(bootstrapEmailShell, bootstrapEmailErrorLabel, rootMessage(exception));
-            bootstrapEmailField.requestFocus();
-        } else if (message.contains("username")) {
-            markInvalid(bootstrapUsernameShell, bootstrapUsernameErrorLabel, rootMessage(exception));
-            bootstrapUsernameField.requestFocus();
-        } else if (message.contains("password")) {
-            markInvalid(bootstrapPasswordShell, bootstrapPasswordErrorLabel, rootMessage(exception));
-            activeBootstrapPasswordField().requestFocus();
-        }
+    private void clearResetValidation() {
+        clearInvalid(resetEmailShell, resetEmailErrorLabel);
     }
 
     private void showError(String message) {
@@ -805,33 +514,15 @@ public class LoginController {
         return password == null ? new char[0] : password.toCharArray();
     }
 
-    private String activeBootstrapPasswordText() {
-        return bootstrapPasswordVisible ? bootstrapVisiblePasswordField.getText() : bootstrapPasswordField.getText();
-    }
-
-    private String activeBootstrapConfirmPasswordText() {
-        return bootstrapPasswordVisible ? bootstrapVisibleConfirmPasswordField.getText() : bootstrapConfirmPasswordField.getText();
-    }
-
     private TextInputControl activeLoginPasswordField() {
         return passwordVisible ? visiblePasswordField : passwordField;
     }
 
-    private TextInputControl activeBootstrapPasswordField() {
-        return bootstrapPasswordVisible ? bootstrapVisiblePasswordField : bootstrapPasswordField;
-    }
-
-    private TextInputControl activeBootstrapConfirmPasswordField() {
-        return bootstrapPasswordVisible ? bootstrapVisibleConfirmPasswordField : bootstrapConfirmPasswordField;
-    }
-
     private void setPasswordFields(char[] password) {
         suppressPasswordChangeTracking = true;
-        String passwordText = new String(password);
         try {
-            passwordField.setText(passwordText);
+            passwordField.setText(new String(password));
         } finally {
-            passwordText = "";
             suppressPasswordChangeTracking = false;
         }
     }
@@ -848,21 +539,11 @@ public class LoginController {
         }
     }
 
-    private void clearBootstrapFields() {
-        bootstrapFullNameField.clear();
-        bootstrapUsernameField.clear();
-        bootstrapEmailField.clear();
-        bootstrapPasswordField.clear();
-        bootstrapVisiblePasswordField.clear();
-        bootstrapConfirmPasswordField.clear();
-        bootstrapVisibleConfirmPasswordField.clear();
-    }
-
     private void clearRememberedCredentials(boolean showMessage, boolean updateCheckbox) {
         boolean hadSavedCredentials = credentialStore.hasSavedCredentials();
         credentialStore.clear();
         clearPasswordFields();
-        if (updateCheckbox && rememberMeCheckBox != null && rememberMeCheckBox.isSelected()) {
+        if (updateCheckbox && rememberMeCheckBox.isSelected()) {
             suppressRememberMeListener = true;
             try {
                 rememberMeCheckBox.setSelected(false);
@@ -876,19 +557,7 @@ public class LoginController {
         }
     }
 
-    private String canonicalLoginIdentifier(SystemUser user) {
-        if (user == null) {
-            return usernameField.getText();
-        }
-        return user.getUsername() == null || user.getUsername().isBlank()
-                ? user.getEmail()
-                : user.getUsername();
-    }
-
     private void setSavedLoginStatus(String message) {
-        if (savedLoginStatusLabel == null) {
-            return;
-        }
         savedLoginStatusLabel.setText(message == null || message.isBlank()
                 ? "Saved securely on this computer."
                 : message);
@@ -907,15 +576,10 @@ public class LoginController {
     }
 
     private void updateForgetSavedLoginButtonState() {
-        if (forgetSavedLoginButton == null) {
-            return;
-        }
-        boolean available = authenticationMode == AuthenticationMode.LOGIN && credentialStore.hasSavedCredentials();
-        if (savedLoginPanel != null) {
-            savedLoginPanel.setVisible(available);
-            savedLoginPanel.setManaged(available);
-        }
-        if (available && savedLoginStatusLabel != null && savedLoginStatusLabel.getText().isBlank()) {
+        boolean available = credentialStore.hasSavedCredentials();
+        savedLoginPanel.setVisible(available);
+        savedLoginPanel.setManaged(available);
+        if (available && savedLoginStatusLabel.getText().isBlank()) {
             savedLoginStatusLabel.setText("Saved securely on this computer.");
         }
         forgetSavedLoginButton.setVisible(available);
@@ -965,12 +629,5 @@ public class LoginController {
         return current.getMessage() == null || current.getMessage().isBlank()
                 ? current.getClass().getSimpleName()
                 : current.getMessage();
-    }
-
-    private enum AuthenticationMode {
-        CHECKING,
-        BOOTSTRAP,
-        LOGIN,
-        ERROR
     }
 }

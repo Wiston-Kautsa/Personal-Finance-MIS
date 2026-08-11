@@ -17,288 +17,137 @@
             xmlns:fx="http://javafx.com/fxml/1"
             fx:controller="com.wk.pfmis.controllers.LoginController"
             prefWidth="980" prefHeight="640"
-            style="-fx-background-color: #07121a;"
-            styleClass="auth-root auth-login-root">
+            styleClass="auth-login-root auth-standard-login-root">
     <center>
-        <VBox spacing="0" alignment="CENTER" style="-fx-background-color: #07121a; -fx-padding: 22 24;" styleClass="auth-screen-shell">
-            <HBox spacing="22" alignment="CENTER" styleClass="auth-login-columns">
-                <VBox prefWidth="350" minWidth="300" maxWidth="380" spacing="20" alignment="CENTER_LEFT"
-                      style="-fx-background-color: #082f2c; -fx-border-color: #155e54; -fx-border-width: 1; -fx-background-radius: 10; -fx-border-radius: 10;"
-                      styleClass="auth-rail auth-login-rail" HBox.hgrow="ALWAYS">
-                    <HBox spacing="18" alignment="CENTER_LEFT">
-                        <StackPane styleClass="auth-logo-shield">
+        <StackPane alignment="CENTER" styleClass="auth-standard-shell">
+            <VBox minWidth="420" prefWidth="460" maxWidth="500" spacing="16" alignment="CENTER"
+                  styleClass="auth-standard-card">
+                <VBox spacing="4" alignment="CENTER">
+                    <Label text="PFMIS" styleClass="auth-standard-brand"/>
+                    <Label text="Personal Finance MIS" styleClass="auth-standard-subtitle"/>
+                </VBox>
+
+                <VBox spacing="3" alignment="CENTER">
+                    <Label text="Welcome back" styleClass="auth-standard-title"/>
+                    <Label text="Sign in to continue" styleClass="auth-standard-copy"/>
+                </VBox>
+
+                <VBox fx:id="signInPanel" spacing="12" maxWidth="Infinity">
+                    <VBox spacing="5">
+                        <Label text="Email or username *" styleClass="auth-form-label"/>
+                        <HBox fx:id="loginUsernameShell" spacing="10" alignment="CENTER_LEFT" styleClass="auth-input-shell">
                             <SVGPath mouseTransparent="true"
-                                     content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z"
-                                     scaleX="1.95" scaleY="1.95" styleClass="auth-logo-shield-mark"/>
-                            <Region mouseTransparent="true" minWidth="22" prefWidth="22" maxWidth="22"
-                                    minHeight="5" prefHeight="5" maxHeight="5"
-                                    translateY="-7" styleClass="auth-logo-bar"/>
-                            <Region mouseTransparent="true" minWidth="30" prefWidth="30" maxWidth="30"
-                                    minHeight="5" prefHeight="5" maxHeight="5"
-                                    translateY="1" styleClass="auth-logo-bar"/>
-                            <Region mouseTransparent="true" minWidth="16" prefWidth="16" maxWidth="16"
-                                    minHeight="5" prefHeight="5" maxHeight="5"
-                                    translateY="9" styleClass="auth-logo-bar"/>
-                        </StackPane>
-                        <VBox spacing="3">
-                            <Label text="PFMIS" styleClass="auth-brand"/>
-                            <Label text="Private Finance Workspaces" styleClass="auth-title-light"/>
-                        </VBox>
-                    </HBox>
-
-                    <VBox spacing="11">
-                        <Label text="Secure. Private. Smart." wrapText="true" styleClass="auth-rail-title"/>
-                        <Label text="PFMIS keeps each account in its own isolated database. Super Administrators manage users and workspace access."
-                               wrapText="true" maxWidth="300" styleClass="auth-copy-light"/>
+                                     content="M12 12 C14.2 12 16 10.2 16 8 C16 5.8 14.2 4 12 4 C9.8 4 8 5.8 8 8 C8 10.2 9.8 12 12 12 Z M4 21 C4.6 17.8 7.8 15.5 12 15.5 C16.2 15.5 19.4 17.8 20 21"
+                                     styleClass="auth-field-icon"/>
+                            <TextField fx:id="usernameField"
+                                       promptText="Enter your email or username"
+                                       editable="true"
+                                       focusTraversable="true"
+                                       maxWidth="Infinity"
+                                       HBox.hgrow="ALWAYS"
+                                       styleClass="auth-field-flat"/>
+                        </HBox>
+                        <Label fx:id="loginUsernameErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
                     </VBox>
 
-                    <VBox spacing="10" style="-fx-background-color: #0a2728; -fx-border-color: #1d4d4a; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 14;" styleClass="auth-status-stack auth-feature-list">
-                        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
-                            <StackPane styleClass="auth-mini-icon">
-                                <SVGPath mouseTransparent="true" content="M5 5 H19 V19 H5 Z M8 8 H16 M8 12 H16 M8 16 H13"
-                                         styleClass="auth-line-icon"/>
+                    <VBox spacing="5">
+                        <Label text="Password *" styleClass="auth-form-label"/>
+                        <HBox fx:id="loginPasswordShell" spacing="10" alignment="CENTER_LEFT" styleClass="auth-input-shell">
+                            <SVGPath mouseTransparent="true"
+                                     content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z"
+                                     styleClass="auth-field-icon"/>
+                            <StackPane HBox.hgrow="ALWAYS">
+                                <PasswordField fx:id="passwordField"
+                                               promptText="Enter your password"
+                                               editable="true"
+                                               focusTraversable="true"
+                                               maxWidth="Infinity"
+                                               styleClass="auth-field-flat"/>
+                                <TextField fx:id="visiblePasswordField"
+                                           promptText="Enter your password"
+                                           editable="true"
+                                           focusTraversable="false"
+                                           maxWidth="Infinity"
+                                           visible="false"
+                                           managed="false"
+                                           mouseTransparent="true"
+                                           styleClass="auth-field-flat"/>
                             </StackPane>
-                            <Label text="01" styleClass="auth-step-index"/>
-                            <VBox spacing="4">
-                                <Label text="User-isolated databases" styleClass="auth-feature"/>
-                                <Label text="Every user has a separate database." wrapText="true" styleClass="auth-feature-note"/>
-                            </VBox>
+                            <Button fx:id="passwordVisibilityButton"
+                                    text="Show"
+                                    focusTraversable="false"
+                                    onAction="#togglePasswordVisibility"
+                                    styleClass="auth-eye-button"/>
                         </HBox>
-                        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
-                            <StackPane styleClass="auth-mini-icon">
-                                <SVGPath mouseTransparent="true" content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
-                                         styleClass="auth-line-icon"/>
-                            </StackPane>
-                            <Label text="02" styleClass="auth-step-index"/>
-                            <VBox spacing="4">
-                                <Label text="Email-based password resets" styleClass="auth-feature"/>
-                                <Label text="Reset securely via your registered email." wrapText="true" styleClass="auth-feature-note"/>
-                            </VBox>
-                        </HBox>
-                        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
-                            <StackPane styleClass="auth-mini-icon">
-                                <SVGPath mouseTransparent="true" content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z M9 12 L11.4 14.4 L16 9.5"
-                                         styleClass="auth-line-icon"/>
-                            </StackPane>
-                            <Label text="03" styleClass="auth-step-index"/>
-                            <VBox spacing="4">
-                                <Label text="Database-backed roles" styleClass="auth-feature"/>
-                                <Label text="Privileges come from verified credentials." wrapText="true" styleClass="auth-feature-note"/>
-                            </VBox>
-                        </HBox>
+                        <Label fx:id="loginPasswordErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
                     </VBox>
 
-                    <Region VBox.vgrow="ALWAYS"/>
-
-                    <HBox spacing="14" alignment="CENTER_LEFT" style="-fx-background-color: #0a2728; -fx-border-color: #1d4d4a; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 12 14;" styleClass="auth-mail-box">
-                        <StackPane styleClass="auth-mini-icon auth-mail-icon">
-                            <SVGPath mouseTransparent="true" content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z"
-                                     styleClass="auth-line-icon"/>
-                        </StackPane>
-                        <VBox spacing="5">
-                            <Label text="Default system email" styleClass="auth-mini-label"/>
-                            <Label fx:id="systemEmailLabel" text="Password reset email status" wrapText="true" styleClass="auth-mail-label"/>
-                        </VBox>
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <CheckBox fx:id="rememberMeCheckBox" text="Remember me" styleClass="auth-remember-check"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="forgotPasswordButton"
+                                text="Forgot password?"
+                                onAction="#focusPasswordReset"
+                                styleClass="auth-link-button"/>
                     </HBox>
-                    <padding><Insets top="32" right="28" bottom="28" left="28"/></padding>
+
+                    <Button fx:id="signInButton"
+                            text="Sign In"
+                            maxWidth="Infinity"
+                            onAction="#signIn"
+                            styleClass="primary-button auth-primary-button"/>
                 </VBox>
 
-                <VBox prefWidth="470" minWidth="390" maxWidth="500" spacing="12" alignment="CENTER_LEFT"
-                      style="-fx-background-color: #111b28; -fx-border-color: #2d3b4d; -fx-border-width: 1; -fx-background-radius: 10; -fx-border-radius: 10;"
-                      styleClass="auth-card auth-login-card" HBox.hgrow="ALWAYS">
-                    <HBox spacing="12" alignment="CENTER_LEFT">
-                        <StackPane styleClass="auth-card-icon">
-                            <SVGPath mouseTransparent="true" content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z M12 14 V17"
-                                     styleClass="auth-line-icon"/>
-                        </StackPane>
-                        <VBox spacing="8">
-                            <Label fx:id="authModeTitleLabel" text="Checking workspace security" styleClass="auth-form-title"/>
-                            <Label fx:id="setupHintLabel" wrapText="true" maxWidth="360" styleClass="auth-hint"/>
-                        </VBox>
-                    </HBox>
-
-                    <VBox fx:id="bootstrapForm" spacing="8">
-                        <VBox spacing="4">
-                            <Label text="Full Name *" styleClass="auth-form-label"/>
-                            <HBox fx:id="bootstrapFullNameShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M12 12 C14.2 12 16 10.2 16 8 C16 5.8 14.2 4 12 4 C9.8 4 8 5.8 8 8 C8 10.2 9.8 12 12 12 Z M4 21 C4.6 17.8 7.8 15.5 12 15.5 C16.2 15.5 19.4 17.8 20 21"
-                                         styleClass="auth-field-icon"/>
-                                <TextField fx:id="bootstrapFullNameField" promptText="Enter your full name"
-                                           editable="true" focusTraversable="true"
-                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field-flat"/>
-                            </HBox>
-                            <Label fx:id="bootstrapFullNameErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <VBox spacing="4">
-                            <Label text="Username *" styleClass="auth-form-label"/>
-                            <HBox fx:id="bootstrapUsernameShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M5 5 H19 V19 H5 Z M8 8 H16 M8 12 H16 M8 16 H13"
-                                         styleClass="auth-field-icon"/>
-                                <TextField fx:id="bootstrapUsernameField" promptText="Choose a username"
-                                           editable="true" focusTraversable="true"
-                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field-flat"/>
-                            </HBox>
-                            <Label fx:id="bootstrapUsernameErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <VBox spacing="4">
-                            <Label text="Email *" styleClass="auth-form-label"/>
-                            <HBox fx:id="bootstrapEmailShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
-                                         styleClass="auth-field-icon"/>
-                                <TextField fx:id="bootstrapEmailField" promptText="Enter your email address"
-                                           editable="true" focusTraversable="true"
-                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field-flat"/>
-                            </HBox>
-                            <Label fx:id="bootstrapEmailErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <VBox spacing="4">
-                            <Label text="Password *" styleClass="auth-form-label"/>
-                            <HBox fx:id="bootstrapPasswordShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z"
-                                         styleClass="auth-field-icon"/>
-                                <StackPane HBox.hgrow="ALWAYS">
-                                    <PasswordField fx:id="bootstrapPasswordField" promptText="At least 8 characters"
-                                                   editable="true" focusTraversable="true"
-                                                   maxWidth="Infinity" styleClass="auth-field-flat"/>
-                                    <TextField fx:id="bootstrapVisiblePasswordField" promptText="At least 8 characters"
-                                               editable="true" focusTraversable="false"
-                                               maxWidth="Infinity" visible="false" managed="false" mouseTransparent="true"
-                                               styleClass="auth-field-flat"/>
-                                </StackPane>
-                                <Button fx:id="bootstrapPasswordVisibilityButton" text="Show" contentDisplay="LEFT"
-                                        onAction="#toggleBootstrapPasswordVisibility" styleClass="auth-eye-button">
-                                    <graphic>
-                                        <SVGPath mouseTransparent="true" content="M2.5 12 C5 8 8 6 12 6 C16 6 19 8 21.5 12 C19 16 16 18 12 18 C8 18 5 16 2.5 12 Z M12 9 C13.7 9 15 10.3 15 12 C15 13.7 13.7 15 12 15 C10.3 15 9 13.7 9 12 C9 10.3 10.3 9 12 9 Z"
-                                                 styleClass="auth-field-icon"/>
-                                    </graphic>
-                                </Button>
-                            </HBox>
-                            <Label fx:id="bootstrapPasswordErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <VBox spacing="4">
-                            <Label text="Confirm Password *" styleClass="auth-form-label"/>
-                            <HBox fx:id="bootstrapConfirmPasswordShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M9 12 L11.4 14.4 L16 9.5 M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z"
-                                         styleClass="auth-field-icon"/>
-                                <StackPane HBox.hgrow="ALWAYS">
-                                    <PasswordField fx:id="bootstrapConfirmPasswordField" promptText="Repeat the password"
-                                                   editable="true" focusTraversable="true"
-                                                   maxWidth="Infinity" styleClass="auth-field-flat"/>
-                                    <TextField fx:id="bootstrapVisibleConfirmPasswordField" promptText="Repeat the password"
-                                               editable="true" focusTraversable="false"
-                                               maxWidth="Infinity" visible="false" managed="false" mouseTransparent="true"
-                                               styleClass="auth-field-flat"/>
-                                </StackPane>
-                            </HBox>
-                            <Label fx:id="bootstrapConfirmPasswordErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <Button fx:id="createAdministratorButton" text="Create Administrator" maxWidth="Infinity" contentDisplay="LEFT"
-                                onAction="#createAdministrator" styleClass="primary-button auth-primary-button">
-                            <graphic>
-                                <SVGPath mouseTransparent="true" content="M5 12 H18 M13 7 L18 12 L13 17" styleClass="auth-button-icon"/>
-                            </graphic>
-                        </Button>
+                <VBox fx:id="resetPanel" spacing="12" maxWidth="Infinity" visible="false" managed="false">
+                    <VBox spacing="3" alignment="CENTER">
+                        <Label text="Reset password" styleClass="auth-standard-title-small"/>
+                        <Label text="Enter your account email address." styleClass="auth-standard-copy"/>
                     </VBox>
-
-                    <VBox fx:id="loginForm" spacing="10" visible="false" managed="false">
-                        <VBox spacing="5">
-                            <Label text="Username or email *" styleClass="auth-form-label"/>
-                            <HBox fx:id="loginUsernameShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M12 12 C14.2 12 16 10.2 16 8 C16 5.8 14.2 4 12 4 C9.8 4 8 5.8 8 8 C8 10.2 9.8 12 12 12 Z M4 21 C4.6 17.8 7.8 15.5 12 15.5 C16.2 15.5 19.4 17.8 20 21"
-                                         styleClass="auth-field-icon"/>
-                                <TextField fx:id="usernameField" promptText="Enter your username or email"
-                                           editable="true" focusTraversable="true"
-                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field-flat"/>
-                            </HBox>
-                            <Label fx:id="loginUsernameErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <VBox spacing="5">
-                            <Label text="Password *" styleClass="auth-form-label"/>
-                            <HBox fx:id="loginPasswordShell" spacing="12" alignment="CENTER_LEFT" styleClass="auth-input-shell">
-                                <SVGPath mouseTransparent="true" content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z"
-                                         styleClass="auth-field-icon"/>
-                                <StackPane HBox.hgrow="ALWAYS">
-                                    <PasswordField fx:id="passwordField" promptText="Enter your password"
-                                                   editable="true" focusTraversable="true"
-                                                   maxWidth="Infinity" styleClass="auth-field-flat"/>
-                                    <TextField fx:id="visiblePasswordField" promptText="Enter your password"
-                                               editable="true" focusTraversable="false"
-                                               maxWidth="Infinity" visible="false" managed="false" mouseTransparent="true"
-                                               styleClass="auth-field-flat"/>
-                                </StackPane>
-                                <Button fx:id="passwordVisibilityButton" text="Show" contentDisplay="LEFT"
-                                        onAction="#togglePasswordVisibility" styleClass="auth-eye-button">
-                                    <graphic>
-                                        <SVGPath mouseTransparent="true" content="M2.5 12 C5 8 8 6 12 6 C16 6 19 8 21.5 12 C19 16 16 18 12 18 C8 18 5 16 2.5 12 Z M12 9 C13.7 9 15 10.3 15 12 C15 13.7 13.7 15 12 15 C10.3 15 9 13.7 9 12 C9 10.3 10.3 9 12 9 Z"
-                                                 styleClass="auth-field-icon"/>
-                                    </graphic>
-                                </Button>
-                            </HBox>
-                            <Label fx:id="loginPasswordErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
-                        </VBox>
-
-                        <HBox fx:id="loginOptionsRow" spacing="10" alignment="CENTER_LEFT">
-                            <CheckBox fx:id="rememberMeCheckBox" text="Remember this login" styleClass="auth-remember-check"/>
-                            <Region HBox.hgrow="ALWAYS"/>
-                            <Button fx:id="forgotPasswordButton" text="Forgot password?" onAction="#focusPasswordReset"
-                                    styleClass="link-button auth-link-button"/>
+                    <VBox spacing="5">
+                        <Label text="Email address *" styleClass="auth-form-label"/>
+                        <HBox fx:id="resetEmailShell" spacing="10" alignment="CENTER_LEFT" styleClass="auth-input-shell">
+                            <SVGPath mouseTransparent="true"
+                                     content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
+                                     styleClass="auth-field-icon"/>
+                            <TextField fx:id="resetEmailField"
+                                       promptText="Enter your email address"
+                                       editable="true"
+                                       focusTraversable="true"
+                                       maxWidth="Infinity"
+                                       HBox.hgrow="ALWAYS"
+                                       styleClass="auth-field-flat"/>
                         </HBox>
-
-                        <Button fx:id="signInButton" text="Sign In" maxWidth="Infinity" contentDisplay="LEFT"
-                                onAction="#signIn" styleClass="primary-button auth-primary-button">
-                            <graphic>
-                                <SVGPath mouseTransparent="true" content="M5 12 H18 M13 7 L18 12 L13 17" styleClass="auth-button-icon"/>
-                            </graphic>
-                        </Button>
+                        <Label fx:id="resetEmailErrorLabel" visible="false" managed="false" wrapText="true" styleClass="auth-validation-message"/>
                     </VBox>
-
-                    <Button fx:id="retryModeButton" text="Retry" visible="false" managed="false"
-                            onAction="#retryAuthenticationMode" styleClass="secondary-button auth-retry-button"/>
-
-                    <Label fx:id="messageLabel" minHeight="22" wrapText="true"/>
-
-                    <VBox fx:id="savedLoginPanel" spacing="7" visible="false" managed="false"
-                          styleClass="auth-saved-login-panel">
-                        <Label fx:id="savedLoginStatusLabel" text="Saved securely on this computer" wrapText="true"
-                               styleClass="auth-saved-login-label"/>
-                        <Button fx:id="forgetSavedLoginButton" text="Forget saved login"
-                                onAction="#forgetSavedLogin" styleClass="secondary-button auth-forget-button"/>
-                    </VBox>
-
-                    <VBox fx:id="resetPanel" spacing="10" visible="false" managed="false"
-                          style="-fx-background-color: #172333; -fx-border-color: #314154; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 12;" styleClass="auth-reset-panel">
-                        <HBox spacing="10" alignment="CENTER_LEFT">
-                            <StackPane styleClass="auth-mini-icon">
-                                <SVGPath mouseTransparent="true" content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
-                                         styleClass="auth-line-icon"/>
-                            </StackPane>
-                            <VBox spacing="5">
-                                <Label text="Password reset" styleClass="auth-section-title"/>
-                                <Label text="Enter your registered email or username. We will send you a temporary password."
-                                       wrapText="true" styleClass="auth-footnote"/>
-                            </VBox>
-                        </HBox>
-                        <HBox spacing="10" alignment="CENTER_LEFT">
-                            <TextField fx:id="resetEmailField" promptText="Registered email or username"
-                                       maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field"/>
-                            <Button text="Send Reset Email" contentDisplay="LEFT" onAction="#resetPasswordByEmail"
-                                    style="-fx-background-color: #101b2a; -fx-border-color: #3b82f6; -fx-text-fill: #7bb5ff; -fx-font-weight: 900; -fx-background-radius: 7; -fx-border-radius: 7;"
-                                    styleClass="secondary-button auth-reset-button">
-                                <graphic>
-                                    <SVGPath mouseTransparent="true" content="M3 11 L21 3 L14 21 L10 14 Z" styleClass="auth-button-icon-blue"/>
-                                </graphic>
-                            </Button>
-                        </HBox>
-                    </VBox>
-                    <padding><Insets top="24" right="24" bottom="24" left="24"/></padding>
+                    <Button fx:id="sendResetButton"
+                            text="Send Reset Instructions"
+                            maxWidth="Infinity"
+                            onAction="#resetPasswordByEmail"
+                            styleClass="primary-button auth-primary-button"/>
+                    <Button text="Back to Sign In"
+                            maxWidth="Infinity"
+                            onAction="#backToSignIn"
+                            styleClass="auth-link-button auth-back-link"/>
                 </VBox>
-            </HBox>
-        </VBox>
+
+                <Label fx:id="messageLabel" minHeight="22" wrapText="true" maxWidth="Infinity"/>
+
+                <VBox fx:id="savedLoginPanel" spacing="7" visible="false" managed="false"
+                      maxWidth="Infinity" styleClass="auth-saved-login-panel">
+                    <Label fx:id="savedLoginStatusLabel" text="Saved securely on this computer." wrapText="true"
+                           styleClass="auth-saved-login-label"/>
+                    <Button fx:id="forgetSavedLoginButton"
+                            text="Forget saved login"
+                            onAction="#forgetSavedLogin"
+                            styleClass="auth-link-button"/>
+                </VBox>
+
+                <Label text="PFMIS • v1.0.0" styleClass="auth-standard-footer"/>
+
+                <padding>
+                    <Insets top="30" right="30" bottom="26" left="30"/>
+                </padding>
+            </VBox>
+        </StackPane>
     </center>
 </BorderPane>

@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class AuthDatabase {
     private static final AuthDatabase INSTANCE = new AuthDatabase();
@@ -115,6 +116,13 @@ public final class AuthDatabase {
                         details TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (user_id) REFERENCES users(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS auth_settings (
+                        setting_key TEXT PRIMARY KEY,
+                        setting_value TEXT,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
             statement.execute("DROP TABLE IF EXISTS remembered_login_tokens");
@@ -325,17 +333,25 @@ public final class AuthDatabase {
         }
     }
 
-    public SystemUser registerUser(String fullName, String username, String email, String password) {
-        return registerUserInternal(fullName, username, email, password, null, null);
+    public SystemUser provisionSuperAdministrator(String fullName, String username, String email, String password) {
+        return registerUserInternal(
+                fullName,
+                username,
+                email,
+                password,
+                SystemUser.ROLE_SUPER_ADMIN,
+                null,
+                true
+        );
     }
 
     public SystemUser registerUserByAdmin(String fullName, String username, String email, String password,
                                           String requestedRole, int actingUserId) {
-        return registerUserInternal(fullName, username, email, password, requestedRole, actingUserId);
+        return registerUserInternal(fullName, username, email, password, requestedRole, actingUserId, false);
     }
 
     private SystemUser registerUserInternal(String fullName, String username, String email, String password,
-                                            String requestedRole, Integer actingUserId) {
+                                            String requestedRole, Integer actingUserId, boolean automaticBootstrap) {
         String cleanName = requireText(fullName, "Full name");
         String cleanUsername = normalizeUsername(username);
         String cleanEmail = email == null ? "" : email.trim().toLowerCase(Locale.ENGLISH);
@@ -350,8 +366,11 @@ public final class AuthDatabase {
             connection.setAutoCommit(false);
             try {
                 int existingUsers = userCount(connection);
-                boolean creatingBootstrapSuperAdmin = !hasActiveSuperAdministrator(connection) && actingUserId == null;
+                boolean creatingBootstrapSuperAdmin = automaticBootstrap && !hasActiveSuperAdministrator(connection);
                 shouldMigrateLegacyWorkspace = existingUsers == 0;
+                if (automaticBootstrap && !creatingBootstrapSuperAdmin) {
+                    throw new SecurityException("A Super Administrator already exists.");
+                }
                 if (!creatingBootstrapSuperAdmin && actingUserId == null) {
                     throw new SecurityException("New users must be created by a super administrator.");
                 }
@@ -386,9 +405,12 @@ public final class AuthDatabase {
                         createdUserId = keys.getInt(1);
                     }
                 }
+                String eventType = creatingBootstrapSuperAdmin
+                        ? "BOOTSTRAP_SUPER_ADMIN_PROVISIONED"
+                        : SystemUser.ROLE_SUPER_ADMIN.equals(role) ? "SUPER_ADMIN_CREATED" : "USER_CREATED";
                 String registrationDetail = "User account created as " + role + "."
                         + (actingUserId == null ? "" : " Created by user " + actingUserId + ".");
-                recordAuthEvent(connection, createdUserId, cleanUsername, "REGISTER", true, registrationDetail);
+                recordAuthEvent(connection, createdUserId, cleanUsername, eventType, true, registrationDetail);
                 connection.commit();
             } catch (SQLException exception) {
                 rollbackQuietly(connection);
@@ -410,6 +432,67 @@ public final class AuthDatabase {
             DatabaseHandler.migrateLegacyDatabaseToUser(createdUserId);
         }
         return findUserById(createdUserId);
+    }
+
+    public int countActiveSuperAdministrators() {
+        try (Connection connection = connect()) {
+            return countActiveSuperAdministrators(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to count active Super Administrators.", exception);
+        }
+    }
+
+    public String getSecuritySetting(String key, String fallback) {
+        try (Connection connection = connect()) {
+            return getSecuritySetting(connection, requireText(key, "Setting key"), fallback);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to read authentication setting.", exception);
+        }
+    }
+
+    public void saveSecuritySetting(String key, String value) {
+        try (Connection connection = connect()) {
+            saveSecuritySetting(connection, requireText(key, "Setting key"), value == null ? "" : value);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save authentication setting.", exception);
+        }
+    }
+
+    public void saveSecuritySettings(Map<String, String> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                for (Map.Entry<String, String> entry : values.entrySet()) {
+                    saveSecuritySetting(connection, requireText(entry.getKey(), "Setting key"), entry.getValue());
+                }
+                connection.commit();
+            } catch (RuntimeException | SQLException exception) {
+                rollbackQuietly(connection);
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save authentication settings.", exception);
+        }
+    }
+
+    public void saveSecuritySettingIfAbsent(String key, String value) {
+        try (Connection connection = connect()) {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT OR IGNORE INTO auth_settings (setting_key, setting_value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    """)) {
+                statement.setString(1, requireText(key, "Setting key"));
+                statement.setString(2, value == null ? "" : value);
+                statement.executeUpdate();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to initialize authentication setting.", exception);
+        }
     }
 
     public SystemUser authenticate(String usernameOrEmail, String password) {
@@ -664,7 +747,7 @@ public final class AuthDatabase {
                 throw new SecurityException("Only a super administrator can change a user's status.");
             }
             if (SystemUser.STATUS_INACTIVE.equals(status) && isLastActiveSuperAdmin(connection, userId)) {
-                throw new IllegalArgumentException("At least one active super administrator must remain.");
+                throw new IllegalArgumentException("PFMIS must have at least one active Super Administrator.");
             }
             try (PreparedStatement statement = connection.prepareStatement("""
                     UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
@@ -861,6 +944,18 @@ public final class AuthDatabase {
         }
     }
 
+    private int countActiveSuperAdministrators(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM users
+                WHERE role = 'SUPER_ADMIN'
+                  AND status = 'ACTIVE'
+                """);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
+        }
+    }
+
     private boolean isLastActiveSuperAdmin(Connection connection, int userId) throws SQLException {
         try (PreparedStatement selected = connection.prepareStatement("SELECT role FROM users WHERE id = ?")) {
             selected.setInt(1, userId);
@@ -874,6 +969,37 @@ public final class AuthDatabase {
                 SELECT COUNT(*) FROM users WHERE role = 'SUPER_ADMIN' AND status = 'ACTIVE'
                 """ ); ResultSet resultSet = count.executeQuery()) {
             return resultSet.next() && resultSet.getInt(1) <= 1;
+        }
+    }
+
+    private String getSecuritySetting(Connection connection, String key, String fallback) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT setting_value
+                FROM auth_settings
+                WHERE setting_key = ?
+                """)) {
+            statement.setString(1, key);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    String value = resultSet.getString("setting_value");
+                    return value == null ? fallback : value;
+                }
+            }
+        }
+        return fallback;
+    }
+
+    private void saveSecuritySetting(Connection connection, String key, String value) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO auth_settings (setting_key, setting_value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value,
+                    updated_at = CURRENT_TIMESTAMP
+                """)) {
+            statement.setString(1, key);
+            statement.setString(2, value == null ? "" : value);
+            statement.executeUpdate();
         }
     }
 

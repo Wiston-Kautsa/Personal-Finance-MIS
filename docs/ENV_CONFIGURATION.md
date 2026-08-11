@@ -12,6 +12,17 @@ PFMIS creates this file with safe defaults on first startup if it does not alrea
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `PFMIS_APP_ENV` | Selects production or development environment discovery behavior. | Optional | `production` | `production`, `development`, `dev`, `test` | `PFMIS_APP_ENV=production` | Non-sensitive | Yes |
 
+## Initial Super Administrator
+
+PFMIS automatically provisions the first active Super Administrator at startup only when no active Super Administrator exists in the authentication database. These values are read from the local `.env` and are used only for the initial account creation. PFMIS does not reset the account password on later restarts.
+
+| Variable | Purpose | Required | Default | Allowed values | Example | Security | Restart |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `PFMIS_SUPER_ADMIN_EMAIL` | Email address for the first automatically provisioned Super Administrator. | Required for first startup | blank | email address | `PFMIS_SUPER_ADMIN_EMAIL=admin@example.com` | Personal data | Yes |
+| `PFMIS_SUPER_ADMIN_PASSWORD` | Initial PFMIS login password for the first Super Administrator. Stored only as a secure hash in the authentication database. | Required for first startup | blank | password meeting PFMIS policy | `PFMIS_SUPER_ADMIN_PASSWORD=` | Secret | Yes |
+
+Do not reuse `PFMIS_SUPER_ADMIN_PASSWORD` as an SMTP password. SMTP/App Password configuration is separate.
+
 ## Foreign Exchange
 
 | Variable | Purpose | Required | Default | Allowed values | Example | Security | Restart |
@@ -76,23 +87,35 @@ PFMIS creates this file with safe defaults on first startup if it does not alrea
 
 ## Mail
 
+PFMIS uses a centralized System Email configuration for password reset and other system-generated messages. Runtime precedence is:
+
+1. Persisted email settings saved from authenticated Settings.
+2. Environment-provided defaults from `.env`.
+3. Safe application fallback values where applicable.
+
 | Variable | Purpose | Required | Default | Allowed values | Example | Security | Restart |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `PFMIS_MAIL_ENABLED` | Master switch for email features. | Optional | `false` | boolean | `PFMIS_MAIL_ENABLED=false` | Non-sensitive | Yes |
 | `PFMIS_MAIL_CONNECT_TIMEOUT_SECONDS` | Mail connection timeout. | Optional | `15` | `1` to `300` | `PFMIS_MAIL_CONNECT_TIMEOUT_SECONDS=15` | Non-sensitive | Yes |
 | `PFMIS_MAIL_READ_TIMEOUT_SECONDS` | Mail read timeout. | Optional | `30` | `1` to `600` | `PFMIS_MAIL_READ_TIMEOUT_SECONDS=30` | Non-sensitive | Yes |
 | `PFMIS_MAIL_WRITE_TIMEOUT_SECONDS` | Mail write timeout. | Optional | `30` | `1` to `600` | `PFMIS_MAIL_WRITE_TIMEOUT_SECONDS=30` | Non-sensitive | Yes |
-| `PFMIS_MAIL_FROM` | Default sender address. | Optional | blank | email address | `PFMIS_MAIL_FROM=` | Personal data | Yes |
-| `PFMIS_MAIL_REPLY_TO` | Reply-to address. | Optional | blank | email address | `PFMIS_MAIL_REPLY_TO=` | Personal data | Yes |
-| `PFMIS_MAIL_USERNAME` | SMTP/IMAP username. | Optional | blank | text | `PFMIS_MAIL_USERNAME=` | Sensitive | Yes |
-| `PFMIS_MAIL_PASSWORD` | SMTP/IMAP password or app password. | Optional | blank | secret | `PFMIS_MAIL_PASSWORD=` | Sensitive | Yes |
-| `PFMIS_SMTP_HOST` | SMTP server host. | Optional | blank | host name | `PFMIS_SMTP_HOST=` | Non-sensitive | Yes |
+| `PFMIS_SYSTEM_EMAIL` | Default official PFMIS System Email for system-generated messages. | Required for email features | blank | email address | `PFMIS_SYSTEM_EMAIL=system@example.com` | Personal data | Yes |
+| `PFMIS_EMAIL_FROM_NAME` | Sender display name used with the System Email. | Optional | `PFMIS` | text | `PFMIS_EMAIL_FROM_NAME=PFMIS` | Non-sensitive | Yes |
+| `PFMIS_EMAIL_REPLY_TO` | Reply-to address for system-generated messages. Defaults to System Email when blank. | Optional | blank | email address | `PFMIS_EMAIL_REPLY_TO=` | Personal data | Yes |
+| `PFMIS_SMTP_HOST` | SMTP server host. | Optional | `smtp.gmail.com` | host name | `PFMIS_SMTP_HOST=smtp.example.com` | Non-sensitive | Yes |
 | `PFMIS_SMTP_PORT` | SMTP server port. | Optional | `587` | integer | `PFMIS_SMTP_PORT=587` | Non-sensitive | Yes |
+| `PFMIS_SMTP_USERNAME` | SMTP username. Defaults to System Email when blank. | Required when SMTP auth is enabled | blank | text | `PFMIS_SMTP_USERNAME=` | Sensitive | Yes |
+| `PFMIS_SMTP_PASSWORD` | SMTP password or app password. Never use a PFMIS login password here. | Required when SMTP auth is enabled | blank | secret | `PFMIS_SMTP_PASSWORD=` | Secret | Yes |
+| `PFMIS_SMTP_AUTH` | Enables SMTP authentication. | Optional | `true` | boolean | `PFMIS_SMTP_AUTH=true` | Non-sensitive | Yes |
 | `PFMIS_SMTP_STARTTLS` | Enables STARTTLS. | Optional | `true` | boolean | `PFMIS_SMTP_STARTTLS=true` | Non-sensitive | Yes |
 | `PFMIS_SMTP_SSL` | Enables SMTP SSL socket mode. | Optional | `false` | boolean | `PFMIS_SMTP_SSL=false` | Non-sensitive | Yes |
-| `PFMIS_IMAP_HOST` | IMAP server host. | Optional | blank | host name | `PFMIS_IMAP_HOST=` | Non-sensitive | Yes |
+| `PFMIS_IMAP_HOST` | IMAP server host. | Optional | `imap.gmail.com` | host name | `PFMIS_IMAP_HOST=imap.example.com` | Non-sensitive | Yes |
 | `PFMIS_IMAP_PORT` | IMAP server port. | Optional | `993` | integer | `PFMIS_IMAP_PORT=993` | Non-sensitive | Yes |
 | `PFMIS_IMAP_SSL` | Enables IMAP SSL. | Optional | `true` | boolean | `PFMIS_IMAP_SSL=true` | Non-sensitive | Yes |
+| `PFMIS_MAIL_FROM` | Legacy sender-address alias. Prefer `PFMIS_SYSTEM_EMAIL`. | Optional | blank | email address | `PFMIS_MAIL_FROM=` | Personal data | Yes |
+| `PFMIS_MAIL_REPLY_TO` | Legacy reply-to alias. Prefer `PFMIS_EMAIL_REPLY_TO`. | Optional | blank | email address | `PFMIS_MAIL_REPLY_TO=` | Personal data | Yes |
+| `PFMIS_MAIL_USERNAME` | Legacy SMTP username alias. Prefer `PFMIS_SMTP_USERNAME`. | Optional | blank | text | `PFMIS_MAIL_USERNAME=` | Sensitive | Yes |
+| `PFMIS_MAIL_PASSWORD` | Legacy SMTP password alias. Prefer `PFMIS_SMTP_PASSWORD`. | Optional | blank | secret | `PFMIS_MAIL_PASSWORD=` | Secret | Yes |
 
 ## Logging
 

@@ -2,6 +2,7 @@ package com.wk.pfmis;
 
 import com.wk.pfmis.ai.BundledLocalAiManager;
 import com.wk.pfmis.auth.AuthDatabase;
+import com.wk.pfmis.auth.SuperAdminProvisioningService;
 import com.wk.pfmis.config.AppConfig;
 import com.wk.pfmis.config.FxConfig;
 import com.wk.pfmis.db.DatabaseHandler;
@@ -13,6 +14,7 @@ import com.wk.pfmis.models.BackupRecord;
 import com.wk.pfmis.models.SystemUser;
 import com.wk.pfmis.security.PrivilegedActionService;
 import com.wk.pfmis.security.UserSession;
+import com.wk.pfmis.services.SystemEmailService;
 import com.wk.pfmis.utils.ReadableTextSupport;
 import com.wk.pfmis.utils.RequiredFieldSupport;
 import com.wk.pfmis.utils.StartupDiagnostics;
@@ -77,6 +79,10 @@ public class MainApp extends Application {
 
             StartupDiagnostics.logStage("Initializing authentication database");
             AuthDatabase.getInstance().initialize();
+            StartupDiagnostics.logStage("Initializing system email defaults");
+            SystemEmailService.getInstance().initializeDefaultsFromEnvironment();
+            StartupDiagnostics.logStage("Provisioning default Super Administrator if required");
+            SuperAdminProvisioningService.getInstance().provisionConfiguredSuperAdministrator();
             stage.setMinWidth(900);
             stage.setMinHeight(600);
             StartupDiagnostics.logStage("Loading sign-in screen");
@@ -96,10 +102,6 @@ public class MainApp extends Application {
         PrivilegedActionService.getInstance().invalidate();
         UserSession.clear();
         requireInstance().loadScene("Login.fxml", "PFMIS - Sign In", 980, 640);
-    }
-
-    public static void showRegistration() {
-        requireInstance().loadScene("Register.fxml", "PFMIS - Create User", 960, 700);
     }
 
     public static void completeLogin(SystemUser user) {

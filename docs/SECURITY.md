@@ -14,7 +14,7 @@ PFMIS must not include real credentials in source control or release archives. T
 - archives nested inside the release
 - real private email addresses, passwords, API keys or access tokens
 
-`.env.example` contains placeholders only. Do not add default Super Administrator credentials to any configuration file. A clean installation creates the first Super Administrator through the registration flow.
+`.env.example` contains placeholders only. Do not add real Super Administrator passwords, SMTP/App Passwords, API keys, or tokens to committed files. A clean installation provisions the first Super Administrator automatically from the local ignored `.env`; the password is stored only as a secure hash in the authentication database.
 
 ## Rotation Required
 
@@ -38,7 +38,7 @@ The desktop client must not connect directly to remote PostgreSQL using embedded
 ## Current Security Limitations
 
 - External AI API key storage still needs operating-system credential manager integration on every supported platform.
-- Password reset still needs a one-time token or code flow with token hashing, expiry, rate limiting and remembered-login invalidation.
+- Password reset currently sends a temporary password through the configured System Email. A one-time token or code flow with token hashing, expiry, rate limiting and remembered-login invalidation is still recommended for a later hardening phase.
 - Financial databases and backups are not yet SQLCipher-encrypted by default.
 - Session timeout and screen-lock enforcement needs a full application-level implementation pass.
 
