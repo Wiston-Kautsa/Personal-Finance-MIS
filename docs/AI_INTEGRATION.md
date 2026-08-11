@@ -6,14 +6,16 @@ PFMIS supports local AI processing first. External AI providers are optional and
 
 The bundled local runtime should:
 
-- bind only to `127.0.0.1`
-- choose an available local port
+- bind only to the configured loopback host, default `127.0.0.1`
+- use the same configured port for both `llama-server` startup and the PFMIS HTTP client, default `8080`
 - use a random runtime API key
+- validate `llama-server`, required DLLs and `pfmis-model.gguf` before startup
+- wait for `/health` before marking Local AI ready or sending inference
 - stop on logout and application shutdown
 - avoid logging the API key
 - fail safely when the executable or model is unavailable
 
-The application should clearly show when local AI is being used.
+The application should distinguish Enabled, Runtime Installed, Model Installed, Starting, HTTP Server Ready, Inference Ready, Failed and Stopped. Enabled must not be displayed as Ready.
 
 ## External AI
 

@@ -50,6 +50,9 @@ public class AiRecommendationService {
         } catch (HttpTimeoutException exception) {
             throw new IllegalStateException(timeoutMessage("Smart Analysis request"), exception);
         } catch (IOException exception) {
+            if (settings.isBundledLocalProvider()) {
+                throw new IllegalStateException(BundledLocalAiManager.userMessage(exception), exception);
+            }
             throw new IllegalStateException("AI request failed. Check the endpoint and internet connection.", exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();

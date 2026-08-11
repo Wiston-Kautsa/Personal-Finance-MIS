@@ -88,6 +88,10 @@ public final class AppConfig {
         return LoggingConfig.fromConfig();
     }
 
+    public static LocalAiConfig localAiConfig() {
+        return LocalAiConfig.fromConfig();
+    }
+
     public static ApplicationEnvironment applicationEnvironment() {
         return ApplicationEnvironment.from(get("PFMIS_APP_ENV", "production"));
     }
@@ -254,6 +258,16 @@ public final class AppConfig {
         lines.add("PFMIS_FX_FALLBACK_PROVIDER=");
         lines.add("PFMIS_FX_FALLBACK_BASE_URL=");
         lines.add("PFMIS_FX_FALLBACK_API_KEY=");
+        lines.add("");
+        lines.add("# Local AI");
+        lines.add("PFMIS_LOCAL_AI_ENABLED=true");
+        lines.add("PFMIS_LOCAL_AI_HOST=127.0.0.1");
+        lines.add("PFMIS_LOCAL_AI_PORT=8080");
+        lines.add("PFMIS_LOCAL_AI_CONTEXT_SIZE=2048");
+        lines.add("PFMIS_LOCAL_AI_STARTUP_TIMEOUT_SECONDS=120");
+        lines.add("PFMIS_LOCAL_AI_HEALTH_POLL_MILLISECONDS=1000");
+        lines.add("PFMIS_LOCAL_AI_REQUEST_TIMEOUT_SECONDS=10");
+        lines.add("PFMIS_LOCAL_AI_DIR=");
         lines.add("");
         lines.add("# Mail");
         lines.add("PFMIS_MAIL_ENABLED=false");

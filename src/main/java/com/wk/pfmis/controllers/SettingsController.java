@@ -2,6 +2,7 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.ai.AiRecommendationService;
 import com.wk.pfmis.ai.BundledLocalAiManager;
+import com.wk.pfmis.ai.LocalAiStatusSnapshot;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.AiSettings;
 import com.wk.pfmis.utils.ExportPathService;
@@ -147,13 +148,28 @@ public class SettingsController {
             UiAlerts.error("Smart Analysis registration is not ready", exception);
             return;
         }
+        boolean testingSavedConfiguration = isSavedAiConfiguration(settings);
         if (settings.isBundledLocalProvider()) {
             localAiStatusLabel.setText("Status: Starting");
             registrationStatusLabel.setText("Starting and testing PFMIS Local AI...");
+            CompletableFuture.supplyAsync(BundledLocalAiManager::testInference)
+                    .whenComplete((message, throwable) -> Platform.runLater(() -> {
+                        if (throwable == null) {
+                            if (testingSavedConfiguration) {
+                                database.saveAiKeyStatus(AiSettings.KEY_STATUS_ACTIVE);
+                            }
+                            apiKeyStatusLabel.setText("No API key required for PFMIS Local AI");
+                            registrationStatusLabel.setText(message);
+                        } else {
+                            apiKeyStatusLabel.setText("No API key required for PFMIS Local AI");
+                            registrationStatusLabel.setText(BundledLocalAiManager.userMessage(throwable));
+                        }
+                        refreshLocalAiStatus();
+                    }));
+            return;
         } else {
             registrationStatusLabel.setText("Testing provider connection...");
         }
-        boolean testingSavedConfiguration = isSavedAiConfiguration(settings);
         CompletableFuture.supplyAsync(() -> aiService.testConnection(settings))
                 .whenComplete((message, throwable) -> Platform.runLater(() -> {
                     if (throwable == null) {
@@ -227,13 +243,13 @@ public class SettingsController {
     private void restartLocalAi() {
         database.saveAiSettings(defaultLocalSettings());
         localAiStatusLabel.setText("Status: Starting");
-        registrationStatusLabel.setText("Restarting PFMIS Local AI...");
+        registrationStatusLabel.setText("Restarting PFMIS Local AI. Loading the model may take a moment...");
         CompletableFuture.supplyAsync(BundledLocalAiManager::restart)
                 .whenComplete((message, throwable) -> Platform.runLater(() -> {
                     if (throwable == null) {
                         registrationStatusLabel.setText(message);
                     } else {
-                        registrationStatusLabel.setText(rootMessage(throwable));
+                        registrationStatusLabel.setText(BundledLocalAiManager.userMessage(throwable));
                     }
                     loadSettings();
                     refreshLocalAiStatus();
@@ -260,7 +276,7 @@ public class SettingsController {
         apiKeyField.clear();
         loadSettings();
         refreshLocalAiStatus();
-        UiAlerts.info("PFMIS Local AI is now active.");
+        UiAlerts.info("PFMIS Local AI is enabled. Runtime readiness is shown in the Local AI status card.");
     }
 
     @FXML
@@ -637,24 +653,13 @@ public class SettingsController {
         if (localAiStatusLabel == null) {
             return;
         }
-        CompletableFuture.supplyAsync(() -> {
-            if (!Files.isRegularFile(BundledLocalAiManager.serverExecutable())
-                    || !Files.isRegularFile(BundledLocalAiManager.modelFile())) {
-                return "Not Available";
-            }
-            String status = BundledLocalAiManager.healthStatus();
-            if ("ok".equalsIgnoreCase(status)) {
-                return "Running";
-            }
-            if ("not available".equalsIgnoreCase(status)) {
-                return "Not Available";
-            }
-            return "Starting";
-        }).whenComplete((status, throwable) -> Platform.runLater(() -> {
+        AiSettings settings = database.getAiSettings();
+        CompletableFuture.supplyAsync(() -> BundledLocalAiManager.status(settings))
+                .whenComplete((status, throwable) -> Platform.runLater(() -> {
             if (throwable == null) {
-                localAiStatusLabel.setText("Status: " + status);
+                localAiStatusLabel.setText(status.displayText());
             } else {
-                localAiStatusLabel.setText("Status: Not Available");
+                localAiStatusLabel.setText("Status: Error\nLocal AI status could not be checked.");
             }
         }));
     }
@@ -811,8 +816,9 @@ public class SettingsController {
 
     private String statusText(AiSettings settings) {
         if (settings.isBundledLocalProvider()) {
+            LocalAiStatusSnapshot status = BundledLocalAiManager.status(settings);
             return settings.isEnabled()
-                    ? "PFMIS Local AI active. PFMIS starts the packaged local runtime automatically. No API key is required."
+                    ? status.summary()
                     : "PFMIS Local AI is configured but disabled.";
         }
         if (AiSettings.KEY_STATUS_INACTIVE.equals(settings.getKeyStatus())) {

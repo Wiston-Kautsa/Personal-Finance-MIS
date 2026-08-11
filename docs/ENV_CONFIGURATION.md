@@ -61,6 +61,19 @@ PFMIS creates this file with safe defaults on first startup if it does not alrea
 | `PFMIS_FX_FALLBACK_BASE_URL` | Fallback provider base URL. | Optional | blank/provider default | HTTPS URL | `PFMIS_FX_FALLBACK_BASE_URL=` | Non-sensitive | Yes |
 | `PFMIS_FX_FALLBACK_API_KEY` | Fallback provider API key when required. | Optional | blank | provider key | `PFMIS_FX_FALLBACK_API_KEY=` | Sensitive | Yes |
 
+## Local AI
+
+| Variable | Purpose | Required | Default | Allowed values | Example | Security | Restart |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `PFMIS_LOCAL_AI_ENABLED` | Master switch for the bundled llama.cpp local AI runtime. | Optional | `true` | boolean | `PFMIS_LOCAL_AI_ENABLED=true` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_HOST` | Loopback host used by both llama-server and the PFMIS HTTP client. | Optional | `127.0.0.1` | loopback host | `PFMIS_LOCAL_AI_HOST=127.0.0.1` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_PORT` | Port used by both llama-server and the PFMIS HTTP client. | Optional | `8080` | `1` to `65535` | `PFMIS_LOCAL_AI_PORT=8080` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_CONTEXT_SIZE` | llama.cpp context window passed with `-c`. | Optional | `2048` | `512` to `131072` | `PFMIS_LOCAL_AI_CONTEXT_SIZE=2048` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_STARTUP_TIMEOUT_SECONDS` | Maximum time to wait for the health endpoint after starting llama-server. | Optional | `120` | `5` to `600` | `PFMIS_LOCAL_AI_STARTUP_TIMEOUT_SECONDS=120` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_HEALTH_POLL_MILLISECONDS` | Delay between startup health checks. | Optional | `1000` | `100` to `10000` | `PFMIS_LOCAL_AI_HEALTH_POLL_MILLISECONDS=1000` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_REQUEST_TIMEOUT_SECONDS` | HTTP timeout for Local AI health and inference checks. | Optional | `10` | `1` to `120` | `PFMIS_LOCAL_AI_REQUEST_TIMEOUT_SECONDS=10` | Non-sensitive | Yes |
+| `PFMIS_LOCAL_AI_DIR` | Optional override for the packaged `local-ai` directory. Leave blank in production unless instructed by support. | Optional | blank | absolute path | `PFMIS_LOCAL_AI_DIR=` | Local path | Yes |
+
 ## Mail
 
 | Variable | Purpose | Required | Default | Allowed values | Example | Security | Restart |

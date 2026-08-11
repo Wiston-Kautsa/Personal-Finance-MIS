@@ -25,6 +25,9 @@ class AppConfigTest {
         System.clearProperty("PFMIS_FX_PROVIDER");
         System.clearProperty("PFMIS_MAIL_ENABLED");
         System.clearProperty("PFMIS_LOG_LEVEL");
+        System.clearProperty("PFMIS_LOCAL_AI_PORT");
+        System.clearProperty("PFMIS_LOCAL_AI_HOST");
+        System.clearProperty("PFMIS_LOCAL_AI_STARTUP_TIMEOUT_SECONDS");
         AppConfig.reload();
     }
 
@@ -96,5 +99,19 @@ class AppConfigTest {
         assertTrue(AppConfig.mailConfig().enabled());
         assertEquals(Duration.ofSeconds(7), AppConfig.mailConfig().connectTimeout());
         assertEquals(LoggingConfig.LogLevel.DEBUG, AppConfig.loggingConfig().level());
+    }
+
+    @Test
+    void parsesLocalAiConfiguration() {
+        System.setProperty("PFMIS_LOCAL_AI_HOST", "127.0.0.1");
+        System.setProperty("PFMIS_LOCAL_AI_PORT", "18080");
+        System.setProperty("PFMIS_LOCAL_AI_STARTUP_TIMEOUT_SECONDS", "90");
+
+        LocalAiConfig localAiConfig = AppConfig.localAiConfig();
+
+        assertEquals("127.0.0.1", localAiConfig.host());
+        assertEquals(18080, localAiConfig.port());
+        assertEquals(Duration.ofSeconds(90), localAiConfig.startupTimeout());
+        assertEquals("http://127.0.0.1:18080", localAiConfig.endpoint().toString());
     }
 }

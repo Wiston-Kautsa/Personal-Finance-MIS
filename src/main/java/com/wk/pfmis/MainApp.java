@@ -331,7 +331,7 @@ public class MainApp extends Application {
             } catch (RuntimeException exception) {
                 StartupDiagnostics.logFailure("PFMIS Local AI startup failed", exception);
                 try {
-                    database.recordSystemLog("Smart Analysis", "PFMIS Local AI failed", "ERROR", rootMessage(exception));
+                    database.recordSystemLog("Smart Analysis", "PFMIS Local AI failed", "ERROR", BundledLocalAiManager.userMessage(exception));
                 } catch (RuntimeException ignored) {
                     // The workspace may have changed while the provider was starting.
                 }

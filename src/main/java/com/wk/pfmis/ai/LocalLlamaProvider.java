@@ -18,7 +18,7 @@ public class LocalLlamaProvider implements AiProvider {
                 true,
                 AiSettings.DEFAULT_DISPLAY_NAME,
                 AiSettings.PROVIDER_LOCAL_LLAMA,
-                BundledLocalAiManager.endpoint(),
+                BundledLocalAiManager.endpoint().toString(),
                 model,
                 BundledLocalAiManager.apiKey(),
                 AiSettings.DEFAULT_AGENTS,

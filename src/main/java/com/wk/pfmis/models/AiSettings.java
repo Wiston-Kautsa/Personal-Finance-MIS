@@ -1,5 +1,7 @@
 package com.wk.pfmis.models;
 
+import com.wk.pfmis.config.LocalAiConfig;
+
 import java.util.Locale;
 
 public class AiSettings {
@@ -18,7 +20,7 @@ public class AiSettings {
     public static final String PROVIDER_CUSTOM = "Custom OpenAI-Style HTTPS API";
     public static final String DEFAULT_PROVIDER = PROVIDER_LOCAL_LLAMA;
     public static final String DEFAULT_DISPLAY_NAME = "PFMIS Local AI";
-    public static final String DEFAULT_ENDPOINT = "http://127.0.0.1:8080";
+    public static final String DEFAULT_ENDPOINT = LocalAiConfig.DEFAULT_ENDPOINT;
     public static final String DEFAULT_MODEL = "pfmis-model";
     public static final String BUNDLED_LOCAL_ENDPOINT = DEFAULT_ENDPOINT;
     public static final String BUNDLED_LOCAL_MODEL = DEFAULT_MODEL;
@@ -192,7 +194,7 @@ public class AiSettings {
 
     public String maskedApiKey() {
         if (isLocalProvider()) {
-            return "PFMIS Local AI active";
+            return "No API key required for PFMIS Local AI";
         }
         if (apiKey.isBlank()) {
             return "API key INACTIVE - no key saved";

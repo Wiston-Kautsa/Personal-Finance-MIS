@@ -1,6 +1,7 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.ai.BundledLocalAiManager;
+import com.wk.pfmis.ai.LocalAiStatusSnapshot;
 import com.wk.pfmis.auth.AuthDatabase;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.AuthenticationEventRecord;
@@ -213,12 +214,8 @@ public class AdministrationController {
     }
 
     private String localAiStatus() {
-        if (!Files.isRegularFile(BundledLocalAiManager.serverExecutable())
-                || !Files.isRegularFile(BundledLocalAiManager.modelFile())) {
-            return "Not Available";
-        }
-        String status = BundledLocalAiManager.healthStatus();
-        return "ok".equalsIgnoreCase(status) ? "Running" : "Starting / Not Ready";
+        LocalAiStatusSnapshot status = BundledLocalAiManager.status(database.getAiSettings());
+        return status.status().displayName() + " - " + status.summary();
     }
 
     private SecuritySnapshot securitySnapshot() {
