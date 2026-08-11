@@ -15,6 +15,7 @@
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 
@@ -25,65 +26,129 @@
     <left>
         <VBox styleClass="sidebar-frame">
             <ScrollPane fitToWidth="true" hbarPolicy="NEVER" minHeight="0" styleClass="sidebar-scroll" VBox.vgrow="ALWAYS">
-                <VBox spacing="6" styleClass="sidebar">
+                <VBox fx:id="sidebarNavigation" id="sidebarNavigation" spacing="6" styleClass="sidebar">
                     <Label text="PFMIS" styleClass="app-brand"/>
                     <Label text="Personal Finance MIS" styleClass="app-subtitle"/>
 
-                    <Button text="Dashboard" maxWidth="Infinity" onAction="#showHome" styleClass="nav-button"/>
-                    <Button text="Smart Analysis" maxWidth="Infinity" onAction="#showAiCenter" styleClass="nav-button"/>
-                    <Button text="Accounts" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-button"/>
+                    <Button fx:id="dashboardButton" text="Dashboard" maxWidth="Infinity" onAction="#showHome" styleClass="nav-button"/>
+
+                    <TitledPane text="Smart Analysis" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Smart Overview" maxWidth="Infinity" onAction="#showSmartOverview" styleClass="nav-sub-button"/>
+                            <Button text="Financial Health" maxWidth="Infinity" onAction="#showFinancialHealthAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Reports and Trends" maxWidth="Infinity" onAction="#showReportsTrendAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Budget and Forecast" maxWidth="Infinity" onAction="#showBudgetForecastAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Goals and Projects" maxWidth="Infinity" onAction="#showGoalsProjectsAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Loans and Repayments" maxWidth="Infinity" onAction="#showLoansRepaymentsAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Data Quality Analysis" maxWidth="Infinity" onAction="#showDataQualityAnalysis" styleClass="nav-sub-button"/>
+                            <Button text="Ask Smart Assistant" maxWidth="Infinity" onAction="#showSmartAssistant" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
+
+                    <TitledPane text="Accounts" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button text="Account Overview" maxWidth="Infinity" onAction="#showAccounts" styleClass="nav-sub-button"/>
+                            <Button text="Add Account" maxWidth="Infinity" onAction="#showAddAccount" styleClass="nav-sub-button"/>
+                            <Button text="Account Ledger" maxWidth="Infinity" onAction="#showAccountHistory" styleClass="nav-sub-button"/>
+                            <Button text="Account Reconciliation" maxWidth="Infinity" onAction="#showAccountReconciliation" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
+
+                    <TitledPane text="Savings Groups" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button fx:id="savingsOverviewButton" text="Savings Groups Overview" maxWidth="Infinity" onAction="#showCommunitySavingsOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="addSavingsGroupButton" text="Add Savings Group" maxWidth="Infinity" onAction="#showAddSavingsGroup" styleClass="nav-sub-button"/>
+                            <Button fx:id="bankNkhondeButton" text="Bank Nkhonde" maxWidth="Infinity" onAction="#showBankNkhonde" styleClass="nav-sub-button"/>
+                            <Button fx:id="chipeleganyuButton" text="Chipeleganyu" maxWidth="Infinity" onAction="#showChipeleganyu" styleClass="nav-sub-button"/>
+                            <Button fx:id="communityContributionsButton" text="Contributions" maxWidth="Infinity" onAction="#showCommunityContributions" styleClass="nav-sub-button"/>
+                            <Button fx:id="communityPayoutsButton" text="Payouts and Share-outs" maxWidth="Infinity" onAction="#showCommunityPayouts" styleClass="nav-sub-button"/>
+                            <Button fx:id="communitySavingsReportsButton" text="Savings Ledger and History" maxWidth="Infinity" onAction="#showCommunitySavingsReports" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
 
                     <TitledPane text="Income" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Add Income" maxWidth="Infinity" onAction="#showIncome" styleClass="nav-sub-button"/>
-                            <Button text="Income Report" maxWidth="Infinity" onAction="#showIncomeReport" styleClass="nav-sub-button"/>
+                            <Button fx:id="incomeOverviewButton" text="Income Overview" maxWidth="Infinity" onAction="#showIncomeOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="addIncomeButton" text="Add Income" maxWidth="Infinity" onAction="#showIncome" styleClass="nav-sub-button"/>
+                            <Button fx:id="incomeRecordsButton" text="Income Records" maxWidth="Infinity" onAction="#showIncomeRecords" styleClass="nav-sub-button"/>
+                            <Button fx:id="expectedIncomeButton" text="Expected Income" maxWidth="Infinity" onAction="#showExpectedIncome" styleClass="nav-sub-button"/>
+                            <Button fx:id="recurringIncomeButton" text="Recurring Income" maxWidth="Infinity" onAction="#showRecurringIncome" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Expenses" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Record Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
-                            <Button text="Expense Report" maxWidth="Infinity" onAction="#showExpenseReport" styleClass="nav-sub-button"/>
+                            <Button fx:id="expenseOverviewButton" text="Expense Overview" maxWidth="Infinity" onAction="#showExpenseOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="recordExpenseButton" text="Record Expense" maxWidth="Infinity" onAction="#showExpenses" styleClass="nav-sub-button"/>
+                            <Button fx:id="expenseRecordsButton" text="Expense Records" maxWidth="Infinity" onAction="#showExpenseRecords" styleClass="nav-sub-button"/>
+                            <Button fx:id="plannedExpensesButton" text="Planned &amp; Recurring Expenses" maxWidth="Infinity" onAction="#showPlannedRecurringExpenses" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
-                    <TitledPane text="Transaction Ledger" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                    <TitledPane text="Transactions" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Transfer Money" maxWidth="Infinity" onAction="#showTransferMoney" styleClass="nav-sub-button"/>
-                            <Button text="View Ledger" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
+                            <Button fx:id="transactionsOverviewButton" text="Transactions Overview" maxWidth="Infinity" onAction="#showTransactionsOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="transactionLedgerButton" text="Transaction Ledger" maxWidth="Infinity" onAction="#showTransactions" styleClass="nav-sub-button"/>
+                            <Button fx:id="transferMoneyButton" text="Transfer Money" maxWidth="Infinity" onAction="#showTransferMoney" styleClass="nav-sub-button"/>
+                            <Button fx:id="scheduledTransfersButton" text="Scheduled Transfers" maxWidth="Infinity" onAction="#showScheduledTransfers" styleClass="nav-sub-button"/>
+                            <Button fx:id="correctionsReversalsButton" text="Corrections &amp; Reversals" maxWidth="Infinity" onAction="#showCorrectionsReversals" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Loans" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Lend Money" maxWidth="Infinity" onAction="#showLendMoney" styleClass="nav-sub-button"/>
-                            <Button text="Borrow Money" maxWidth="Infinity" onAction="#showBorrowMoney" styleClass="nav-sub-button"/>
-                            <Button text="Receive Repayment" maxWidth="Infinity" onAction="#showReceiveRepayment" styleClass="nav-sub-button"/>
-                            <Button text="Repay Borrowed Money" maxWidth="Infinity" onAction="#showRepayBorrowedMoney" styleClass="nav-sub-button"/>
-                            <Button text="Loan Ledger" maxWidth="Infinity" onAction="#showLoanLedger" styleClass="nav-sub-button"/>
+                            <Button fx:id="loanOverviewButton" text="Loan Overview" maxWidth="Infinity" onAction="#showLoanOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="newLoanButton" text="New Loan" maxWidth="Infinity" onAction="#showNewLoan" styleClass="nav-sub-button"/>
+                            <Button fx:id="loanRecordsButton" text="Loan Records" maxWidth="Infinity" onAction="#showLoanRecords" styleClass="nav-sub-button"/>
+                            <Button fx:id="recordRepaymentButton" text="Record Repayment" maxWidth="Infinity" onAction="#showRecordRepayment" styleClass="nav-sub-button"/>
+                            <Button fx:id="repaymentScheduleButton" text="Repayment Schedule" maxWidth="Infinity" onAction="#showRepaymentSchedule" styleClass="nav-sub-button"/>
+                            <Button fx:id="loanContactsButton" text="Loan Contacts" maxWidth="Infinity" onAction="#showPeople" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Goals" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Add Goal" maxWidth="Infinity" onAction="#showGoals" styleClass="nav-sub-button"/>
-                            <Button text="Turn Goal Into Project" maxWidth="Infinity" onAction="#showGoalProject" styleClass="nav-sub-button"/>
-                            <Button text="Goal Steps" maxWidth="Infinity" onAction="#showGoalSteps" styleClass="nav-sub-button"/>
+                            <Button fx:id="goalsOverviewButton" text="Goals Overview" maxWidth="Infinity" onAction="#showGoalsOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="addGoalButton" text="Add Goal" maxWidth="Infinity" onAction="#showGoals" styleClass="nav-sub-button"/>
+                            <Button fx:id="goalContributionsButton" text="Goal Contributions" maxWidth="Infinity" onAction="#showGoalContribution" styleClass="nav-sub-button"/>
+                            <Button fx:id="goalStepsButton" text="Goal Steps" maxWidth="Infinity" onAction="#showGoalSteps" styleClass="nav-sub-button"/>
+                            <Button fx:id="goalHistoryButton" text="Goal History &amp; Lifecycle" maxWidth="Infinity" onAction="#showGoalHistory" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Budgets" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Manage Budgets" maxWidth="Infinity" onAction="#showBudgets" styleClass="nav-sub-button"/>
+                            <Button fx:id="budgetOverviewButton" text="Budget Overview" maxWidth="Infinity" onAction="#showBudgetOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="createBudgetButton" text="Create Budget" maxWidth="Infinity" onAction="#showCreateBudget" styleClass="nav-sub-button"/>
+                            <Button fx:id="budgetAllocationsButton" text="Category Allocations" maxWidth="Infinity" onAction="#showBudgetAllocations" styleClass="nav-sub-button"/>
+                            <Button fx:id="budgetPerformanceButton" text="Performance &amp; Variance" maxWidth="Infinity" onAction="#showBudgetPerformance" styleClass="nav-sub-button"/>
+                            <Button fx:id="householdBudgetButton" text="Household Budget" maxWidth="Infinity" onAction="#showHouseholdBudget" styleClass="nav-sub-button"/>
+                            <Button fx:id="budgetHistoryButton" text="Budget History &amp; Lifecycle" maxWidth="Infinity" onAction="#showBudgetHistory" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
                     <TitledPane text="Projects" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
                         <VBox spacing="5">
-                            <Button text="Add Project" maxWidth="Infinity" onAction="#showProjects" styleClass="nav-sub-button"/>
-                            <Button text="Register Project Activity" maxWidth="Infinity" onAction="#showProjectActivities" styleClass="nav-sub-button"/>
-                            <Button text="Project Details" maxWidth="Infinity" onAction="#showViewProjects" styleClass="nav-sub-button"/>
-                            <Button text="Project List" maxWidth="Infinity" onAction="#showProjectList" styleClass="nav-sub-button"/>
+                            <Button fx:id="projectOverviewButton" text="Project Overview" maxWidth="Infinity" onAction="#showProjectOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="addProjectButton" text="Add Project" maxWidth="Infinity" onAction="#showProjects" styleClass="nav-sub-button"/>
+                            <Button fx:id="projectActivitiesButton" text="Project Activities" maxWidth="Infinity" onAction="#showProjectActivities" styleClass="nav-sub-button"/>
+                            <Button fx:id="projectFinancesButton" text="Project Finances" maxWidth="Infinity" onAction="#showProjectFinances" styleClass="nav-sub-button"/>
+                            <Button fx:id="projectMilestonesStatusButton" text="Milestones &amp; Status" maxWidth="Infinity" onAction="#showProjectMilestonesStatus" styleClass="nav-sub-button"/>
+                            <Button fx:id="projectHistoryButton" text="Project History &amp; Lifecycle" maxWidth="Infinity" onAction="#showProjectHistory" styleClass="nav-sub-button"/>
+                        </VBox>
+                    </TitledPane>
+
+                    <TitledPane text="Assets" expanded="false" maxWidth="Infinity" styleClass="nav-pane">
+                        <VBox spacing="5">
+                            <Button fx:id="assetOverviewButton" text="Asset Overview" maxWidth="Infinity" onAction="#showAssetOverview" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetRegisterButton" text="Asset Register" maxWidth="Infinity" onAction="#showAssetRecords" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetRecognitionButton" text="Asset Recognition" maxWidth="Infinity" onAction="#showAssetRecognition" styleClass="nav-sub-button"/>
+                            <Button fx:id="registerAssetButton" text="Register Asset" maxWidth="Infinity" onAction="#showRegisterAsset" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetMaintenanceButton" text="Maintenance &amp; Condition" maxWidth="Infinity" onAction="#showAssetMaintenance" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetValuationButton" text="Valuation &amp; Depreciation" maxWidth="Infinity" onAction="#showAssetValuation" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetTransferCustodyButton" text="Transfer &amp; Custody" maxWidth="Infinity" onAction="#showAssetTransferCustody" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetSaleDisposalButton" text="Sale &amp; Disposal" maxWidth="Infinity" onAction="#showAssetSaleDisposal" styleClass="nav-sub-button"/>
+                            <Button fx:id="assetHistoryButton" text="Asset History" maxWidth="Infinity" onAction="#showAssetHistory" styleClass="nav-sub-button"/>
                         </VBox>
                     </TitledPane>
 
@@ -139,13 +204,20 @@
                     <Button text="Sign Out" onAction="#logout" styleClass="danger-button"/>
                 </HBox>
 
-                <VBox fx:id="dashboardSummaryPane" spacing="14" maxWidth="Infinity">
-                    <TitledPane text="Financial Summary Cards" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                        <GridPane hgap="12" vgap="12">
+                <VBox fx:id="dashboardSummaryPane" spacing="18" maxWidth="Infinity" styleClass="dashboard-home">
+                    <HBox spacing="14" alignment="CENTER_LEFT" styleClass="dashboard-header-panel">
+                        <VBox spacing="4" HBox.hgrow="ALWAYS">
+                            <Label text="Current financial position and items needing attention" wrapText="true" styleClass="page-subtitle"/>
+                            <Label text="Posted transactions drive balances. Expected, draft and scheduled items are shown as planning signals only." wrapText="true" styleClass="form-note"/>
+                        </VBox>
+                        <Button text="Refresh" onAction="#refreshDashboard" styleClass="secondary-button"/>
+                    </HBox>
+
+                    <GridPane hgap="12" vgap="12">
                         <VBox styleClass="metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
-                            <Label text="Total Balance" styleClass="metric-title"/>
+                            <Label text="Available Cash and Bank" styleClass="metric-title"/>
                             <Label fx:id="totalBalanceLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="balanceDetailLabel" text="Across 0 accounts" styleClass="metric-note"/>
+                            <Label fx:id="balanceDetailLabel" text="Cash, bank and mobile money only" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
                             <Label text="Income This Month" styleClass="metric-title"/>
@@ -163,29 +235,69 @@
                             <Label fx:id="savingsDetailLabel" text="0.0% savings rate" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="0" GridPane.rowIndex="1">
-                            <Label text="Active Accounts" styleClass="metric-title"/>
-                            <Label fx:id="activeAccountsLabel" text="0" styleClass="metric-value"/>
-                            <Label text="View accounts" styleClass="metric-note"/>
+                            <Label text="Community Savings Balance" styleClass="metric-title"/>
+                            <Label fx:id="communitySavingsBalanceLabel" text="MWK 0.00" styleClass="metric-value"/>
+                            <Label fx:id="communitySavingsDetailLabel" text="Not included in available cash" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="1" GridPane.rowIndex="1">
-                            <Label text="Active Projects" styleClass="metric-title"/>
-                            <Label fx:id="activeProjectsLabel" text="0" styleClass="metric-value"/>
-                            <Label text="View projects" styleClass="metric-note"/>
+                            <Label text="Savings Contributions" styleClass="metric-title"/>
+                            <Label fx:id="savingsGroupContributionsLabel" text="MWK 0.00" styleClass="metric-value"/>
+                            <Label fx:id="savingsGroupContributionsDetailLabel" text="This year: MWK 0.00" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="2" GridPane.rowIndex="1">
-                            <Label text="Active Goals" styleClass="metric-title"/>
-                            <Label fx:id="activeGoalsLabel" text="0" styleClass="metric-value"/>
-                            <Label text="View goals" styleClass="metric-note"/>
+                            <Label text="Next Savings Due" styleClass="metric-title"/>
+                            <Label fx:id="savingsGroupNextContributionLabel" text="None scheduled" styleClass="metric-value"/>
+                            <Label fx:id="savingsGroupNextContributionDetailLabel" text="0 active Savings Group(s)" styleClass="metric-note"/>
                         </VBox>
                         <VBox styleClass="metric-card" GridPane.columnIndex="3" GridPane.rowIndex="1">
-                            <Label text="Net Loan Position" styleClass="metric-title"/>
-                            <Label fx:id="moneyGivenLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label text="View loan ledger" styleClass="metric-note"/>
+                            <Label text="Expected Savings Payout" styleClass="metric-title"/>
+                            <Label fx:id="savingsGroupExpectedPayoutLabel" text="MWK 0.00" styleClass="metric-value"/>
+                            <Label fx:id="savingsGroupExpectedPayoutDetailLabel" text="0 cycle(s) nearing completion" styleClass="metric-note"/>
                         </VBox>
-                        </GridPane>
-                    </TitledPane>
-                    <GridPane hgap="14" vgap="14">
-                    <TitledPane text="Cash Flow Line Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    </GridPane>
+
+                    <HBox spacing="14" alignment="TOP_LEFT">
+                        <TitledPane text="Today / Upcoming Attention" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+                            <VBox spacing="10">
+                                <VBox fx:id="alertsBox" spacing="8"/>
+                                <HBox spacing="8" alignment="CENTER_LEFT">
+                                    <Button text="Open Ledger" onAction="#showTransactions" styleClass="secondary-button"/>
+                                    <Button text="Record Expense" onAction="#showExpenses" styleClass="secondary-button"/>
+                                    <Button text="Expected Income" onAction="#showExpectedIncome" styleClass="secondary-button"/>
+                                </HBox>
+                            </VBox>
+                        </TitledPane>
+                        <TitledPane text="Plan / Obligation Snapshot" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+                            <VBox spacing="10">
+                                <GridPane hgap="10" vgap="10">
+                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                                        <Label text="Active Accounts" styleClass="metric-title"/>
+                                        <Label fx:id="activeAccountsLabel" text="0" styleClass="overview-value"/>
+                                    </VBox>
+                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                                        <Label text="Active Projects" styleClass="metric-title"/>
+                                        <Label fx:id="activeProjectsLabel" text="0" styleClass="overview-value"/>
+                                    </VBox>
+                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                                        <Label text="Active Goals" styleClass="metric-title"/>
+                                        <Label fx:id="activeGoalsLabel" text="0" styleClass="overview-value"/>
+                                    </VBox>
+                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                                        <Label text="Net Loan Position" styleClass="metric-title"/>
+                                        <Label fx:id="moneyGivenLabel" text="MWK 0.00" styleClass="overview-value"/>
+                                    </VBox>
+                                </GridPane>
+                                <VBox fx:id="planSnapshotBox" spacing="7"/>
+                                <HBox spacing="8" alignment="CENTER_LEFT">
+                                    <Button text="Open Budgets" onAction="#showBudgets" styleClass="secondary-button"/>
+                                    <Button text="Open Goals" onAction="#showGoalRecords" styleClass="secondary-button"/>
+                                    <Button text="Loan Ledger" onAction="#showLoanLedger" styleClass="secondary-button"/>
+                                </HBox>
+                            </VBox>
+                        </TitledPane>
+                    </HBox>
+
+                    <TitledPane text="Cash Flow Trend" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
                         <LineChart fx:id="cashFlowChart" legendVisible="true" animated="false" createSymbols="true" prefHeight="260">
                             <xAxis>
                                 <CategoryAxis label="Month"/>
@@ -195,46 +307,27 @@
                             </yAxis>
                         </LineChart>
                     </TitledPane>
-                    <TitledPane text="Expense Distribution Pie Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="1" GridPane.rowIndex="0">
-                        <PieChart fx:id="expenseDistributionChart" labelsVisible="true" legendVisible="true" prefHeight="260"/>
+
+                    <TitledPane text="Recent Posted Activity" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                        <VBox spacing="10">
+                            <TableView fx:id="dashboardTransactionsTable" prefHeight="260">
+                                <columns>
+                                    <TableColumn fx:id="dashboardDateColumn" text="Date" prefWidth="100"/>
+                                    <TableColumn fx:id="dashboardTypeColumn" text="Type" prefWidth="90"/>
+                                    <TableColumn fx:id="dashboardAccountColumn" text="Account" prefWidth="160"/>
+                                    <TableColumn fx:id="dashboardCategoryColumn" text="Category" prefWidth="150"/>
+                                    <TableColumn fx:id="dashboardAmountColumn" text="Amount" prefWidth="130"/>
+                                </columns>
+                            </TableView>
+                            <HBox alignment="CENTER_RIGHT">
+                                <Region HBox.hgrow="ALWAYS"/>
+                                <Button text="Open Full Ledger" onAction="#showTransactions" styleClass="secondary-button"/>
+                            </HBox>
+                        </VBox>
                     </TitledPane>
-                    <TitledPane text="Account Balance Pie Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="1">
-                        <PieChart fx:id="accountBalanceChart" labelsVisible="true" legendVisible="true" prefHeight="260"/>
-                    </TitledPane>
-                    <TitledPane text="Income Source Pie Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="1" GridPane.rowIndex="1">
-                        <PieChart fx:id="incomeSourceChart" labelsVisible="true" legendVisible="true" prefHeight="260"/>
-                    </TitledPane>
-                    <TitledPane text="Project Spending Bar Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="2">
-                        <BarChart fx:id="projectSpendingChart" legendVisible="true" animated="false" prefHeight="260">
-                            <xAxis>
-                                <CategoryAxis label="Project"/>
-                            </xAxis>
-                            <yAxis>
-                                <NumberAxis label="MWK"/>
-                            </yAxis>
-                        </BarChart>
-                    </TitledPane>
-                    <TitledPane text="Money Position Pie Chart" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="1" GridPane.rowIndex="2">
-                        <PieChart fx:id="moneyPositionChart" labelsVisible="true" legendVisible="true" prefHeight="260"/>
-                    </TitledPane>
-                    <TitledPane text="Recent Transactions Table" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="0" GridPane.rowIndex="3">
-                        <TableView fx:id="dashboardTransactionsTable" prefHeight="260">
-                            <columns>
-                                <TableColumn fx:id="dashboardDateColumn" text="Date" prefWidth="100"/>
-                                <TableColumn fx:id="dashboardTypeColumn" text="Type" prefWidth="90"/>
-                                <TableColumn fx:id="dashboardAccountColumn" text="Account" prefWidth="140"/>
-                                <TableColumn fx:id="dashboardCategoryColumn" text="Category" prefWidth="130"/>
-                                <TableColumn fx:id="dashboardAmountColumn" text="Amount" prefWidth="120"/>
-                            </columns>
-                        </TableView>
-                    </TitledPane>
-                    <TitledPane text="Alerts / Reminders" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" GridPane.columnIndex="1" GridPane.rowIndex="3">
-                        <VBox fx:id="alertsBox" spacing="8"/>
-                    </TitledPane>
-                    </GridPane>
                 </VBox>
 
-                <StackPane fx:id="contentPane" maxWidth="Infinity" maxHeight="Infinity" VBox.vgrow="ALWAYS"/>
+                <StackPane fx:id="contentPane" id="contentPane" maxWidth="Infinity" maxHeight="Infinity" VBox.vgrow="ALWAYS"/>
             </VBox>
         </ScrollPane>
     </center>

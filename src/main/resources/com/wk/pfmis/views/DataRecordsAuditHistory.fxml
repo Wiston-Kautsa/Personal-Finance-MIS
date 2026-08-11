@@ -13,12 +13,11 @@
     <Label fx:id="sectionTitleLabel" text="Audit and History" styleClass="view-title"/>
     <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
         <tabs>
-            <Tab fx:id="activityAuditTab" text="Activity Audit"/>
-            <Tab fx:id="financialRecordHistoryTab" text="Financial Record History"/>
-            <Tab fx:id="authenticationHistoryTab" text="Authentication History"/>
-            <Tab fx:id="administrativeActionsTab" text="Administrative Actions"/>
-            <Tab fx:id="dataDisposalHistoryTab" text="Data Disposal History"/>
-            <Tab fx:id="auditExportTab" text="Audit Export"/>
+            <Tab fx:id="activityAuditTab" text="Activity"/>
+            <Tab fx:id="financialRecordHistoryTab" text="Financial Records"/>
+            <Tab fx:id="authenticationHistoryTab" text="Authentication"/>
+            <Tab fx:id="administrativeActionsTab" text="Administration"/>
+            <Tab fx:id="dataDisposalHistoryTab" text="Data Disposal"/>
         </tabs>
     </TabPane>
     <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>

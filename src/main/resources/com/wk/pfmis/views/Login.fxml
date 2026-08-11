@@ -2,94 +2,218 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
-<?import javafx.scene.control.ScrollPane?>
-<?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
+<?import javafx.scene.shape.SVGPath?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21"
             xmlns:fx="http://javafx.com/fxml/1"
             fx:controller="com.wk.pfmis.controllers.LoginController"
-            prefWidth="980" prefHeight="690"
-            styleClass="auth-root">
-    <left>
-        <VBox prefWidth="400" spacing="22" alignment="CENTER_LEFT" styleClass="auth-hero">
-            <VBox spacing="5">
-                <Label text="PFMIS" styleClass="auth-brand"/>
-                <Label text="Private finance workspaces" styleClass="auth-title-light"/>
-            </VBox>
-            <Label text="Every account opens a separate financial database. The Super Administrator can manage users and open active workspaces when administration is required." wrapText="true" styleClass="auth-copy-light"/>
-            <VBox spacing="10" styleClass="auth-feature-box">
-                <HBox spacing="10" alignment="CENTER_LEFT">
-                    <Label text="01" styleClass="auth-step-index"/>
-                    <Label text="User-isolated databases" styleClass="auth-feature"/>
-                </HBox>
-                <HBox spacing="10" alignment="CENTER_LEFT">
-                    <Label text="02" styleClass="auth-step-index"/>
-                    <Label text="Email-based password resets" styleClass="auth-feature"/>
-                </HBox>
-                <HBox spacing="10" alignment="CENTER_LEFT">
-                    <Label text="03" styleClass="auth-step-index"/>
-                    <Label text="Super Administrator controls" styleClass="auth-feature"/>
-                </HBox>
-            </VBox>
-            <Region VBox.vgrow="ALWAYS"/>
-            <VBox spacing="4" styleClass="auth-mail-box">
-                <Label text="Default system email" styleClass="auth-mini-label"/>
-                <Label fx:id="systemEmailLabel" text="System email" wrapText="true" styleClass="auth-mail-label"/>
-            </VBox>
-            <padding><Insets top="48" right="42" bottom="42" left="42"/></padding>
-        </VBox>
-    </left>
+            prefWidth="980" prefHeight="640"
+            style="-fx-background-color: #07121a;"
+            styleClass="auth-root auth-login-root">
     <center>
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="auth-form-scroll">
-            <VBox spacing="18" alignment="CENTER" styleClass="auth-content">
-                <VBox maxWidth="460" spacing="14" alignment="CENTER_LEFT" styleClass="auth-card">
-                    <VBox spacing="4">
-                        <Label text="Sign in" styleClass="auth-form-title"/>
-                        <Label fx:id="setupHintLabel" wrapText="true" styleClass="auth-hint"/>
-                    </VBox>
+            <VBox spacing="0" alignment="CENTER" style="-fx-background-color: #07121a; -fx-padding: 22 24;" styleClass="auth-screen-shell">
+                <HBox spacing="22" alignment="CENTER" styleClass="auth-login-columns">
+                    <VBox prefWidth="350" minWidth="300" maxWidth="380" spacing="20" alignment="CENTER_LEFT"
+                          style="-fx-background-color: #082f2c; -fx-border-color: #155e54; -fx-border-width: 1; -fx-background-radius: 10; -fx-border-radius: 10;"
+                          styleClass="auth-rail auth-login-rail" HBox.hgrow="ALWAYS">
+                        <HBox spacing="18" alignment="CENTER_LEFT">
+                            <StackPane styleClass="auth-logo-shield">
+                                <SVGPath content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z"
+                                         scaleX="1.95" scaleY="1.95" styleClass="auth-logo-shield-mark"/>
+                                <Region minWidth="22" prefWidth="22" maxWidth="22"
+                                        minHeight="5" prefHeight="5" maxHeight="5"
+                                        translateY="-7" styleClass="auth-logo-bar"/>
+                                <Region minWidth="30" prefWidth="30" maxWidth="30"
+                                        minHeight="5" prefHeight="5" maxHeight="5"
+                                        translateY="1" styleClass="auth-logo-bar"/>
+                                <Region minWidth="16" prefWidth="16" maxWidth="16"
+                                        minHeight="5" prefHeight="5" maxHeight="5"
+                                        translateY="9" styleClass="auth-logo-bar"/>
+                            </StackPane>
+                            <VBox spacing="3">
+                                <Label text="PFMIS" styleClass="auth-brand"/>
+                                <Label text="Private Finance Workspaces" styleClass="auth-title-light"/>
+                            </VBox>
+                        </HBox>
 
-                    <VBox spacing="6">
-                        <Label text="Username or email" styleClass="form-label"/>
-                        <TextField fx:id="usernameField" promptText="name@example.com" styleClass="auth-field"/>
-                    </VBox>
-
-                    <VBox spacing="6">
-                        <Label text="Password" styleClass="form-label"/>
-                        <PasswordField fx:id="passwordField" promptText="Enter password" styleClass="auth-field"/>
-                    </VBox>
-
-                    <Label fx:id="messageLabel" minHeight="22" wrapText="true"/>
-
-                    <Button text="Sign In" maxWidth="Infinity" onAction="#signIn" styleClass="primary-button auth-primary-button"/>
-
-                    <HBox spacing="10" alignment="CENTER_LEFT">
-                        <Region HBox.hgrow="ALWAYS"/>
-                        <Button fx:id="registerButton" text="Create First Administrator" onAction="#createAccount" styleClass="secondary-button"/>
-                    </HBox>
-
-                    <Separator/>
-
-                    <VBox fx:id="resetPanel" spacing="10" styleClass="auth-reset-panel">
-                        <VBox spacing="3">
-                            <Label text="Password reset" styleClass="auth-section-title"/>
-                            <Label text="Enter a registered account email or username. PFMIS will email a temporary password through the configured system email account." wrapText="true" styleClass="auth-footnote"/>
+                        <VBox spacing="11">
+                            <Label text="Secure. Private. Smart." wrapText="true" styleClass="auth-rail-title"/>
+                            <Label text="PFMIS keeps each account in its own isolated database. Super Administrators manage users and workspace access."
+                                   wrapText="true" maxWidth="300" styleClass="auth-copy-light"/>
                         </VBox>
-                        <VBox spacing="6">
-                            <Label text="Reset account" styleClass="form-label"/>
-                            <TextField fx:id="resetEmailField" promptText="Registered email or username" styleClass="auth-field"/>
+
+                        <VBox spacing="10" style="-fx-background-color: #0a2728; -fx-border-color: #1d4d4a; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 14;" styleClass="auth-status-stack auth-feature-list">
+                            <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
+                                <StackPane styleClass="auth-mini-icon">
+                                    <SVGPath content="M5 5 H19 V19 H5 Z M8 8 H16 M8 12 H16 M8 16 H13"
+                                             styleClass="auth-line-icon"/>
+                                </StackPane>
+                                <Label text="01" styleClass="auth-step-index"/>
+                                <VBox spacing="4">
+                                    <Label text="User-isolated databases" styleClass="auth-feature"/>
+                                    <Label text="Every user has a separate database." wrapText="true" styleClass="auth-feature-note"/>
+                                </VBox>
+                            </HBox>
+                            <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
+                                <StackPane styleClass="auth-mini-icon">
+                                    <SVGPath content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
+                                             styleClass="auth-line-icon"/>
+                                </StackPane>
+                                <Label text="02" styleClass="auth-step-index"/>
+                                <VBox spacing="4">
+                                    <Label text="Email-based password resets" styleClass="auth-feature"/>
+                                    <Label text="Reset securely via your registered email." wrapText="true" styleClass="auth-feature-note"/>
+                                </VBox>
+                            </HBox>
+                            <HBox spacing="12" alignment="CENTER_LEFT" styleClass="auth-status-row">
+                                <StackPane styleClass="auth-mini-icon">
+                                    <SVGPath content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z M9 12 L11.4 14.4 L16 9.5"
+                                             styleClass="auth-line-icon"/>
+                                </StackPane>
+                                <Label text="03" styleClass="auth-step-index"/>
+                                <VBox spacing="4">
+                                    <Label text="Super Administrator controls" styleClass="auth-feature"/>
+                                    <Label text="Manage users and workspaces safely." wrapText="true" styleClass="auth-feature-note"/>
+                                </VBox>
+                            </HBox>
                         </VBox>
-                        <Button text="Send Reset Email" maxWidth="Infinity" onAction="#resetPasswordByEmail" styleClass="secondary-button auth-reset-button"/>
+
+                        <Region VBox.vgrow="ALWAYS"/>
+
+                        <HBox spacing="14" alignment="CENTER_LEFT" style="-fx-background-color: #0a2728; -fx-border-color: #1d4d4a; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 12 14;" styleClass="auth-mail-box">
+                            <StackPane styleClass="auth-mini-icon auth-mail-icon">
+                                <SVGPath content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z"
+                                         styleClass="auth-line-icon"/>
+                            </StackPane>
+                            <VBox spacing="5">
+                                <Label text="Default system email" styleClass="auth-mini-label"/>
+                                <Label fx:id="systemEmailLabel" text="Password reset email status" wrapText="true" styleClass="auth-mail-label"/>
+                            </VBox>
+                        </HBox>
+                        <padding><Insets top="32" right="28" bottom="28" left="28"/></padding>
                     </VBox>
-                    <padding><Insets top="28" right="32" bottom="28" left="32"/></padding>
-                </VBox>
+
+                    <VBox prefWidth="470" minWidth="390" maxWidth="500" spacing="13" alignment="CENTER_LEFT"
+                          style="-fx-background-color: #111b28; -fx-border-color: #2d3b4d; -fx-border-width: 1; -fx-background-radius: 10; -fx-border-radius: 10;"
+                          styleClass="auth-card auth-login-card" HBox.hgrow="ALWAYS">
+                        <HBox spacing="12" alignment="CENTER_LEFT">
+                            <StackPane styleClass="auth-card-icon">
+                                <SVGPath content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z M12 14 V17"
+                                         styleClass="auth-line-icon"/>
+                            </StackPane>
+                            <VBox spacing="8">
+                                <Label text="Sign in" styleClass="auth-form-title"/>
+                                <Label fx:id="setupHintLabel" wrapText="true" maxWidth="360" styleClass="auth-hint"/>
+                            </VBox>
+                        </HBox>
+
+                        <VBox spacing="5">
+                            <Label text="Username or email" styleClass="auth-form-label"/>
+                            <HBox spacing="12" alignment="CENTER_LEFT" style="-fx-background-color: #0b1420; -fx-border-color: #32455c; -fx-background-radius: 7; -fx-border-radius: 7; -fx-padding: 0 10;" styleClass="auth-input-shell">
+                                <SVGPath content="M12 12 C14.2 12 16 10.2 16 8 C16 5.8 14.2 4 12 4 C9.8 4 8 5.8 8 8 C8 10.2 9.8 12 12 12 Z M4 21 C4.6 17.8 7.8 15.5 12 15.5 C16.2 15.5 19.4 17.8 20 21"
+                                         styleClass="auth-field-icon"/>
+                                <TextField fx:id="usernameField" promptText="Enter your username or email"
+                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field-flat"/>
+                            </HBox>
+                        </VBox>
+
+                        <VBox spacing="5">
+                            <Label text="Password" styleClass="auth-form-label"/>
+                            <HBox spacing="12" alignment="CENTER_LEFT" style="-fx-background-color: #0b1420; -fx-border-color: #32455c; -fx-background-radius: 7; -fx-border-radius: 7; -fx-padding: 0 10;" styleClass="auth-input-shell">
+                                <SVGPath content="M7 10 V8 C7 5.2 9.2 3 12 3 C14.8 3 17 5.2 17 8 V10 M6 10 H18 V20 H6 Z"
+                                         styleClass="auth-field-icon"/>
+                                <StackPane HBox.hgrow="ALWAYS">
+                                    <PasswordField fx:id="passwordField" promptText="Enter your password"
+                                                   maxWidth="Infinity" styleClass="auth-field-flat"/>
+                                    <TextField fx:id="visiblePasswordField" promptText="Enter your password"
+                                               maxWidth="Infinity" visible="false" managed="false"
+                                               styleClass="auth-field-flat"/>
+                                </StackPane>
+                                <Button fx:id="passwordVisibilityButton" text="Show" contentDisplay="LEFT"
+                                        onAction="#togglePasswordVisibility" styleClass="auth-eye-button">
+                                    <graphic>
+                                        <SVGPath content="M2.5 12 C5 8 8 6 12 6 C16 6 19 8 21.5 12 C19 16 16 18 12 18 C8 18 5 16 2.5 12 Z M12 9 C13.7 9 15 10.3 15 12 C15 13.7 13.7 15 12 15 C10.3 15 9 13.7 9 12 C9 10.3 10.3 9 12 9 Z"
+                                                 styleClass="auth-field-icon"/>
+                                    </graphic>
+                                </Button>
+                            </HBox>
+                        </VBox>
+
+                        <HBox spacing="10" alignment="CENTER_LEFT">
+                            <CheckBox fx:id="rememberMeCheckBox" text="Remember this login" styleClass="auth-remember-check"/>
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button text="Forgot password?" onAction="#focusPasswordReset" styleClass="link-button auth-link-button"/>
+                        </HBox>
+
+                        <Button fx:id="signInButton" text="Sign In" maxWidth="Infinity" contentDisplay="LEFT"
+                                style="-fx-background-color: #22b981; -fx-text-fill: #ffffff; -fx-font-weight: 900; -fx-background-radius: 7; -fx-border-color: transparent;"
+                                onAction="#signIn" styleClass="primary-button auth-primary-button">
+                            <graphic>
+                                <SVGPath content="M5 12 H18 M13 7 L18 12 L13 17" styleClass="auth-button-icon"/>
+                            </graphic>
+                        </Button>
+
+                        <Label fx:id="messageLabel" minHeight="24" wrapText="true"/>
+
+                        <VBox fx:id="savedLoginPanel" spacing="7" visible="false" managed="false"
+                              styleClass="auth-saved-login-panel">
+                            <Label fx:id="savedLoginStatusLabel" text="Saved securely on this computer" wrapText="true"
+                                   styleClass="auth-saved-login-label"/>
+                            <Button fx:id="forgetSavedLoginButton" text="Forget saved login"
+                                    onAction="#forgetSavedLogin" styleClass="secondary-button auth-forget-button"/>
+                        </VBox>
+
+                        <HBox spacing="18" alignment="CENTER" styleClass="auth-or-row">
+                            <Region HBox.hgrow="ALWAYS" styleClass="auth-divider-line"/>
+                            <Label text="OR" styleClass="auth-divider-text"/>
+                            <Region HBox.hgrow="ALWAYS" styleClass="auth-divider-line"/>
+                        </HBox>
+
+                        <Button text="Sign in as Super Administrator" maxWidth="Infinity" contentDisplay="LEFT"
+                                style="-fx-background-color: #121f2f; -fx-border-color: #31936f; -fx-text-fill: #6ee7b7; -fx-font-weight: 900; -fx-background-radius: 7; -fx-border-radius: 7;"
+                                onAction="#signInAsSuperAdmin" styleClass="secondary-button auth-super-button">
+                            <graphic>
+                                <SVGPath content="M12 3 L20 6 V12 C20 17 16 20 12 22 C8 20 4 17 4 12 V6 Z M9 12 L11.4 14.4 L16 9.5"
+                                         styleClass="auth-button-icon-green"/>
+                            </graphic>
+                        </Button>
+
+                        <VBox fx:id="resetPanel" spacing="10" style="-fx-background-color: #172333; -fx-border-color: #314154; -fx-background-radius: 8; -fx-border-radius: 8; -fx-padding: 12;" styleClass="auth-reset-panel">
+                            <HBox spacing="10" alignment="CENTER_LEFT">
+                                <StackPane styleClass="auth-mini-icon">
+                                    <SVGPath content="M4 7 H20 V18 H4 Z M4 8 L12 13 L20 8"
+                                             styleClass="auth-line-icon"/>
+                                </StackPane>
+                                <VBox spacing="5">
+                                    <Label text="Password reset" styleClass="auth-section-title"/>
+                                    <Label text="Enter your registered email or username. We will send you a temporary password."
+                                           wrapText="true" styleClass="auth-footnote"/>
+                                </VBox>
+                            </HBox>
+                            <HBox spacing="10" alignment="CENTER_LEFT">
+                                <TextField fx:id="resetEmailField" promptText="Registered email or username"
+                                           maxWidth="Infinity" HBox.hgrow="ALWAYS" styleClass="auth-field"/>
+                                <Button text="Send Reset Email" contentDisplay="LEFT" onAction="#resetPasswordByEmail"
+                                        style="-fx-background-color: #101b2a; -fx-border-color: #3b82f6; -fx-text-fill: #7bb5ff; -fx-font-weight: 900; -fx-background-radius: 7; -fx-border-radius: 7;"
+                                        styleClass="secondary-button auth-reset-button">
+                                    <graphic>
+                                        <SVGPath content="M3 11 L21 3 L14 21 L10 14 Z" styleClass="auth-button-icon-blue"/>
+                                    </graphic>
+                                </Button>
+                            </HBox>
+                        </VBox>
+                        <padding><Insets top="24" right="24" bottom="24" left="24"/></padding>
+                    </VBox>
+                </HBox>
             </VBox>
-        </ScrollPane>
     </center>
 </BorderPane>

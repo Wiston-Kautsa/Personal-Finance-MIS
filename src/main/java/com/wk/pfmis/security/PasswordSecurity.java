@@ -8,7 +8,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 
 public final class PasswordSecurity {
-    public static final int DEFAULT_ITERATIONS = 210_000;
+    public static final int DEFAULT_ITERATIONS = 600_000;
     private static final int SALT_BYTES = 16;
     private static final int KEY_BITS = 256;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -39,6 +39,10 @@ public final class PasswordSecurity {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    public static boolean needsRehash(int iterations) {
+        return iterations < DEFAULT_ITERATIONS;
     }
 
     public static void validatePassword(String password) {

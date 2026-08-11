@@ -7,6 +7,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
@@ -40,12 +41,13 @@
         </VBox>
     </TitledPane>
 
-    <TitledPane text="Selected Account Transaction History" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
+    <TitledPane text="Account Ledger" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
         <VBox spacing="12">
             <HBox spacing="10" alignment="CENTER_LEFT">
                 <DatePicker fx:id="historyDatePicker" prefWidth="180"/>
                 <ComboBox fx:id="historyPeriodFilter" prefWidth="210"/>
                 <ComboBox fx:id="historyYearsFilter" prefWidth="150"/>
+                <TextField fx:id="historySearchField" promptText="Search ledger details, method, reference or status" prefWidth="320"/>
             </HBox>
             <TableView fx:id="historyTable" prefHeight="340" VBox.vgrow="ALWAYS">
                 <columns>
@@ -55,6 +57,7 @@
                     <TableColumn fx:id="amountColumn" text="Amount" prefWidth="150"/>
                     <TableColumn fx:id="paymentMethodColumn" text="Method" prefWidth="150"/>
                     <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
+                    <TableColumn fx:id="runningBalanceColumn" text="Running Balance" prefWidth="160"/>
                     <TableColumn fx:id="statusColumn" text="Status" prefWidth="130"/>
                 </columns>
             </TableView>

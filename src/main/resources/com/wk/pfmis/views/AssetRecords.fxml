@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.MenuButton?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AssetRecordsController" styleClass="project-list-page">
+    <TitledPane text="Asset Records" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <FlowPane hgap="12" vgap="10" prefWrapLength="900">
+                <VBox spacing="6" styleClass="settings-field-wide">
+                    <Label text="Search" styleClass="field-label"/>
+                    <TextField fx:id="searchField" promptText="Asset name, supplier, location, project or serial number" minHeight="34" prefHeight="34" maxWidth="Infinity"/>
+                </VBox>
+                <VBox spacing="6" styleClass="settings-field">
+                    <Label text="Status" styleClass="field-label"/>
+                    <ComboBox fx:id="statusFilterBox" minHeight="34" prefHeight="34" maxWidth="Infinity"/>
+                </VBox>
+                <VBox spacing="6" styleClass="settings-field">
+                    <Label text="Category" styleClass="field-label"/>
+                    <ComboBox fx:id="categoryFilterBox" minHeight="34" prefHeight="34" maxWidth="Infinity"/>
+                </VBox>
+            </FlowPane>
+
+            <TableView fx:id="assetsTable" prefHeight="280" VBox.vgrow="ALWAYS" styleClass="project-list-table">
+                <columns>
+                    <TableColumn fx:id="nameColumn" text="Asset" prefWidth="210"/>
+                    <TableColumn fx:id="categoryColumn" text="Category" prefWidth="125"/>
+                    <TableColumn fx:id="valueColumn" text="Current Value" prefWidth="140"/>
+                    <TableColumn fx:id="quantityColumn" text="Qty" prefWidth="80"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="130"/>
+                    <TableColumn fx:id="locationColumn" text="Location" prefWidth="130"/>
+                    <TableColumn fx:id="acquisitionColumn" text="Acquisition" prefWidth="145"/>
+                    <TableColumn fx:id="linkColumn" text="Financial Link" prefWidth="150"/>
+                </columns>
+            </TableView>
+
+            <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
+                <Button text="Open Asset" onAction="#openAsset" minWidth="120" styleClass="account-save-button"/>
+                <MenuButton text="More Actions" minWidth="145" styleClass="account-outline-button">
+                    <items>
+                        <MenuItem text="Edit Details" onAction="#editDetails"/>
+                        <MenuItem text="Update Value" onAction="#updateValue"/>
+                        <MenuItem text="Record Maintenance" onAction="#recordMaintenance"/>
+                        <MenuItem text="Link Purchase Transaction" onAction="#linkPurchaseTransaction"/>
+                        <MenuItem text="Sell Asset" onAction="#sellAsset"/>
+                        <MenuItem text="Transfer Asset" onAction="#transferAsset"/>
+                        <MenuItem text="Donate Asset" onAction="#donateAsset"/>
+                        <MenuItem text="Write Off Asset" onAction="#writeOffAsset"/>
+                        <MenuItem text="Mark as Lost" onAction="#markLost"/>
+                        <MenuItem text="Dispose Asset" onAction="#disposeAsset"/>
+                        <MenuItem text="Archive Asset" onAction="#archiveAsset"/>
+                    </items>
+                </MenuButton>
+                <Button text="Refresh" onAction="#refresh" minWidth="95" styleClass="account-outline-button"/>
+                <Region HBox.hgrow="ALWAYS"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Opened Asset" collapsible="true" expanded="true" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="section-pane">
+        <VBox spacing="10">
+            <Label fx:id="openAssetTitleLabel" text="No asset selected" wrapText="true" styleClass="settings-status-title"/>
+            <TabPane tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS">
+                <tabs>
+                    <Tab text="Overview">
+                        <VBox spacing="10" styleClass="settings-section">
+                            <TextArea fx:id="overviewArea" editable="false" wrapText="true" prefRowCount="18" maxWidth="Infinity"/>
+                        </VBox>
+                    </Tab>
+                    <Tab text="Financial Evidence">
+                        <VBox spacing="10" styleClass="settings-section">
+                            <TextArea fx:id="financeArea" editable="false" wrapText="true" prefRowCount="18" maxWidth="Infinity"/>
+                        </VBox>
+                    </Tab>
+                    <Tab text="History">
+                        <VBox spacing="10" styleClass="settings-section">
+                            <TextArea fx:id="historyArea" editable="false" wrapText="true" prefRowCount="18" maxWidth="Infinity"/>
+                        </VBox>
+                    </Tab>
+                </tabs>
+            </TabPane>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

@@ -1,11 +1,15 @@
 package com.wk.pfmis.controllers;
 
+import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.security.UserSession;
+import com.wk.pfmis.utils.ReadableTextSupport;
+import com.wk.pfmis.utils.RequiredFieldSupport;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.Parent;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
@@ -13,15 +17,22 @@ import javafx.scene.control.TabPane;
 import javafx.scene.layout.VBox;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Method;
 import java.net.URL;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 public class DataRecordsSectionController {
     private static final Map<String, String> LAST_SELECTED_TAB = new HashMap<>();
+    private static final DateTimeFormatter ERROR_DATE = DateTimeFormatter.ofPattern("yyyyMMdd", Locale.ENGLISH);
+    private static int dataIntakeErrorSequence = 1;
 
     @FXML private Label sectionTitleLabel;
     @FXML private TabPane dataRecordsTabs;
@@ -96,48 +107,45 @@ public class DataRecordsSectionController {
     }
 
     private void configureTabs() {
-        add(supplementaryInputsTab, "supplementaryInputsTab", "ReportInputs.fxml", null, false);
-        add(fileImportTab, "fileImportTab", "DataRecordsPolicy.fxml", "File Import", false);
-        add(importValidationTab, "importValidationTab", "DataRecordsPolicy.fxml", "Import Validation", false);
-        add(postingApprovalTab, "postingApprovalTab", "DataRecordsPolicy.fxml", "Posting and Approval", false);
-        add(rejectedRecordsTab, "rejectedRecordsTab", "DataRecordsPolicy.fxml", "Rejected Records", false);
-        add(importHistoryTab, "importHistoryTab", "DataRecordsPolicy.fxml", "Import History", false);
+        add(supplementaryInputsTab, "supplementaryInputsTab", "DataIntakeTask.fxml", "Manual Inputs", false);
+        add(fileImportTab, "fileImportTab", "DataIntakeTask.fxml", "Import File", false);
+        add(rejectedRecordsTab, "rejectedRecordsTab", "DataIntakeTask.fxml", "Rejected Records", false);
+        add(importHistoryTab, "importHistoryTab", "DataIntakeTask.fxml", "Import History", false);
 
-        add(activeRecordsTab, "activeRecordsTab", "DataRecordsPolicy.fxml", "Active Records", false);
-        add(draftRecordsTab, "draftRecordsTab", "DataRecordsPolicy.fxml", "Draft Records", false);
-        add(frozenRecordsTab, "frozenRecordsTab", "DataRecordsPolicy.fxml", "Frozen Records", false);
-        add(cancelledReversedTab, "cancelledReversedTab", "DataRecordsPolicy.fxml", "Cancelled and Reversed", false);
-        add(archivedRecordsTab, "archivedRecordsTab", "DataRecordsPolicy.fxml", "Archived Records", false);
-        add(correctionRequestsTab, "correctionRequestsTab", "DataRecordsPolicy.fxml", "Correction Requests", false);
+        add(activeRecordsTab, "activeRecordsTab", "RecordsControlTask.fxml", "Active Records", false);
+        add(draftRecordsTab, "draftRecordsTab", "RecordsControlTask.fxml", "Draft Records", false);
+        add(frozenRecordsTab, "frozenRecordsTab", "RecordsControlTask.fxml", "Frozen Records", false);
+        add(cancelledReversedTab, "cancelledReversedTab", "RecordsControlTask.fxml", "Cancelled and Reversed", false);
+        add(archivedRecordsTab, "archivedRecordsTab", "RecordsControlTask.fxml", "Archived Records", false);
+        add(correctionRequestsTab, "correctionRequestsTab", "RecordsControlTask.fxml", "Correction Requests", false);
 
-        add(dataHealthOverviewTab, "dataHealthOverviewTab", "DataRecordsPolicy.fxml", "Data Health Overview", false);
-        add(missingInformationTab, "missingInformationTab", "DataRecordsPolicy.fxml", "Missing Information", false);
-        add(duplicateRecordsTab, "duplicateRecordsTab", "DataRecordsPolicy.fxml", "Duplicate Records", false);
-        add(accountReconciliationTab, "accountReconciliationTab", "DataRecordsPolicy.fxml", "Account Reconciliation", false);
-        add(relationshipErrorsTab, "relationshipErrorsTab", "DataRecordsPolicy.fxml", "Relationship Errors", false);
-        add(exceptionsTab, "exceptionsTab", "DataRecordsPolicy.fxml", "Exceptions", false);
+        add(dataHealthOverviewTab, "dataHealthOverviewTab", "QualityReconciliationTask.fxml", "Data Health Overview", false);
+        add(missingInformationTab, "missingInformationTab", "QualityReconciliationTask.fxml", "Missing Information", false);
+        add(duplicateRecordsTab, "duplicateRecordsTab", "QualityReconciliationTask.fxml", "Duplicate Records", false);
+        add(accountReconciliationTab, "accountReconciliationTab", "QualityReconciliationTask.fxml", "Account Reconciliation", false);
+        add(relationshipErrorsTab, "relationshipErrorsTab", "QualityReconciliationTask.fxml", "Relationship Errors", false);
+        add(exceptionsTab, "exceptionsTab", "QualityReconciliationTask.fxml", "Exceptions", false);
 
-        add(activityAuditTab, "activityAuditTab", "AuditLogs.fxml", null, false);
-        add(financialRecordHistoryTab, "financialRecordHistoryTab", "DataRecordsPolicy.fxml", "Financial Record History", false);
-        add(authenticationHistoryTab, "authenticationHistoryTab", "SecurityHistory.fxml", null, false);
-        add(administrativeActionsTab, "administrativeActionsTab", "DataRecordsPolicy.fxml", "Administrative Actions", false);
-        add(dataDisposalHistoryTab, "dataDisposalHistoryTab", "DataRecordsPolicy.fxml", "Data Disposal History", false);
-        add(auditExportTab, "auditExportTab", "DataRecordsPolicy.fxml", "Audit Export", false);
+        add(activityAuditTab, "activityAuditTab", "AuditHistoryTask.fxml", "Activity Audit", false);
+        add(financialRecordHistoryTab, "financialRecordHistoryTab", "AuditHistoryTask.fxml", "Financial Record History", false);
+        add(authenticationHistoryTab, "authenticationHistoryTab", "AuditHistoryTask.fxml", "Authentication History", false);
+        add(administrativeActionsTab, "administrativeActionsTab", "AuditHistoryTask.fxml", "Administrative Actions", false);
+        add(dataDisposalHistoryTab, "dataDisposalHistoryTab", "AuditHistoryTask.fxml", "Data Disposal History", false);
 
-        add(syncStatusTab, "syncStatusTab", "SyncCenter.fxml", null, false);
-        add(pendingQueueTab, "pendingQueueTab", "DataRecordsPolicy.fxml", "Pending Queue", false);
-        add(failedRecordsTab, "failedRecordsTab", "DataRecordsPolicy.fxml", "Failed Records", false);
-        add(conflictsTab, "conflictsTab", "DataRecordsPolicy.fxml", "Conflicts", false);
-        add(quarantineTab, "quarantineTab", "DataRecordsPolicy.fxml", "Quarantine", false);
-        add(syncHistoryTab, "syncHistoryTab", "DataRecordsPolicy.fxml", "Sync History", false);
-        add(recoveryTab, "recoveryTab", "BackupRestore.fxml", null, false);
+        add(syncStatusTab, "syncStatusTab", "SyncRecoveryTask.fxml", "Sync Status", false);
+        add(pendingQueueTab, "pendingQueueTab", "SyncRecoveryTask.fxml", "Pending Queue", false);
+        add(failedRecordsTab, "failedRecordsTab", "SyncRecoveryTask.fxml", "Failed Records", false);
+        add(conflictsTab, "conflictsTab", "SyncRecoveryTask.fxml", "Conflicts", false);
+        add(quarantineTab, "quarantineTab", "SyncRecoveryTask.fxml", "Quarantine", false);
+        add(syncHistoryTab, "syncHistoryTab", "SyncRecoveryTask.fxml", "Sync History", false);
+        add(recoveryTab, "recoveryTab", "SyncRecoveryTask.fxml", "Recovery", false);
 
-        add(recordDisposalTab, "recordDisposalTab", "DataRecordsPolicy.fxml", "Record Disposal", true);
-        add(clearTestDataTab, "clearTestDataTab", "DataRecordsPolicy.fxml", "Clear Test or Demo Data", true);
-        add(purgeArchivedTab, "purgeArchivedTab", "DataRecordsPolicy.fxml", "Purge Archived Records", true);
-        add(resetWorkspaceTab, "resetWorkspaceTab", "DataRecordsPolicy.fxml", "Reset Workspace", true);
-        add(deleteWorkspaceTab, "deleteWorkspaceTab", "DataRecordsPolicy.fxml", "Delete Workspace", true);
-        add(maintenanceHistoryTab, "maintenanceHistoryTab", "DataRecordsPolicy.fxml", "Maintenance History", true);
+        add(recordDisposalTab, "recordDisposalTab", "RecordDisposal.fxml", null, true);
+        add(clearTestDataTab, "clearTestDataTab", "DataMaintenanceWorkflow.fxml", "Clear Test or Demo Data", true);
+        add(purgeArchivedTab, "purgeArchivedTab", "DataMaintenanceWorkflow.fxml", "Purge Archived Records", true);
+        add(resetWorkspaceTab, "resetWorkspaceTab", "DataMaintenanceWorkflow.fxml", "Reset Workspace", true);
+        add(deleteWorkspaceTab, "deleteWorkspaceTab", "DataMaintenanceWorkflow.fxml", "Delete Workspace", true);
+        add(maintenanceHistoryTab, "maintenanceHistoryTab", "DataMaintenanceWorkflow.fxml", "Maintenance History", true);
     }
 
     private void add(Tab tab, String tabKey, String fxmlFile, String dataArea, boolean superAdminOnly) {
@@ -186,14 +194,24 @@ public class DataRecordsSectionController {
             FXMLLoader loader = new FXMLLoader(resource);
             Parent view = loader.load();
             Object controller = loader.getController();
-            if (spec.dataArea() != null && controller instanceof DataRecordsPolicyController dataPolicyController) {
-                dataPolicyController.selectArea(spec.dataArea());
+            if (spec.dataArea() != null && controller != null) {
+                if (controller instanceof DataRecordsPolicyController dataPolicyController) {
+                    dataPolicyController.selectArea(spec.dataArea());
+                } else {
+                    invokeStringArg(controller, "selectArea", spec.dataArea());
+                }
             }
+            RequiredFieldSupport.apply(view);
+            ReadableTextSupport.apply(view);
             tab.setContent(unwrapScrollPane(view));
             if (controller != null) {
                 loadedControllers.put(tab, controller);
             }
         } catch (IOException | RuntimeException exception) {
+            if (isDataIntakeTab(spec)) {
+                tab.setContent(dataIntakeLoadErrorContent(tab, spec, exception));
+                return;
+            }
             tab.setContent(messageContent("Unable to load this section", rootMessage(exception)));
         }
     }
@@ -218,6 +236,63 @@ public class DataRecordsSectionController {
         body.getStyleClass().add("muted-label");
         box.getChildren().setAll(heading, body);
         return box;
+    }
+
+    private Node dataIntakeLoadErrorContent(Tab tab, TabSpec spec, Throwable exception) {
+        String area = spec.dataArea() == null || spec.dataArea().isBlank() ? tab.getText() : spec.dataArea();
+        String reference = nextDataIntakeErrorReference();
+        recordDataIntakeLoadFailure(reference, spec, exception);
+
+        VBox box = new VBox(10);
+        box.getStyleClass().addAll("panel", "setup-tab-message");
+        box.setPadding(new Insets(18));
+        Label heading = new Label(area + " could not be opened.");
+        heading.getStyleClass().add("section-heading");
+        Label body = new Label("No data was changed.\nReference: " + reference);
+        body.setWrapText(true);
+        body.getStyleClass().add("muted-label");
+        Button retry = new Button("Retry");
+        retry.getStyleClass().add("secondary-button");
+        retry.setOnAction(event -> {
+            tab.setContent(null);
+            loadTab(tab);
+        });
+        box.getChildren().setAll(heading, body, retry);
+        return box;
+    }
+
+    private boolean isDataIntakeTab(TabSpec spec) {
+        return spec != null && "DataIntakeTask.fxml".equals(spec.fxmlFile());
+    }
+
+    private static synchronized String nextDataIntakeErrorReference() {
+        return "ERR-DI-" + LocalDateTime.now().format(ERROR_DATE) + "-"
+                + String.format(Locale.ENGLISH, "%03d", dataIntakeErrorSequence++);
+    }
+
+    private void recordDataIntakeLoadFailure(String reference, TabSpec spec, Throwable exception) {
+        StringWriter stackTrace = new StringWriter();
+        exception.printStackTrace(new PrintWriter(stackTrace));
+        try {
+            DatabaseHandler.getInstance().recordSystemLog(
+                    "Data Intake",
+                    "Section Load Failed",
+                    "ERROR",
+                    String.join(System.lineSeparator(),
+                            "Reference: " + reference,
+                            "FXML resource: /com/wk/pfmis/views/" + spec.fxmlFile(),
+                            "Controller: DataIntakeTaskController",
+                            "Exception type: " + exception.getClass().getName(),
+                            "Message: " + rootMessage(exception),
+                            "Workspace: " + workspaceText(),
+                            "User: " + userText(),
+                            "Timestamp: " + LocalDateTime.now(),
+                            "Stack trace:",
+                            stackTrace.toString())
+            );
+        } catch (RuntimeException ignored) {
+            // The visible retry message is still shown if the technical log cannot be written.
+        }
     }
 
     private void refreshLoadedTabs() {
@@ -246,9 +321,38 @@ public class DataRecordsSectionController {
         }
     }
 
+    private boolean invokeStringArg(Object controller, String methodName, String argument) {
+        try {
+            Method method = controller.getClass().getDeclaredMethod(methodName, String.class);
+            method.setAccessible(true);
+            method.invoke(controller, argument);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
     private String sectionName() {
         String title = sectionTitleLabel == null ? "" : sectionTitleLabel.getText();
         return title == null || title.isBlank() ? "Data and Records" : title.trim();
+    }
+
+    private String workspaceText() {
+        try {
+            return UserSession.getWorkspaceUser().getDisplayName()
+                    + " (" + UserSession.getWorkspaceUser().getUsername() + ")";
+        } catch (RuntimeException exception) {
+            return "No active workspace";
+        }
+    }
+
+    private String userText() {
+        try {
+            return UserSession.getAuthenticatedUser().getDisplayName()
+                    + " (" + UserSession.getAuthenticatedUser().getUsername() + ")";
+        } catch (RuntimeException exception) {
+            return "No signed-in user";
+        }
     }
 
     private String rootMessage(Throwable throwable) {

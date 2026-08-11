@@ -13,12 +13,12 @@
     <Label fx:id="sectionTitleLabel" text="Records Control" styleClass="view-title"/>
     <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
         <tabs>
-            <Tab fx:id="activeRecordsTab" text="Active Records"/>
-            <Tab fx:id="draftRecordsTab" text="Draft Records"/>
-            <Tab fx:id="frozenRecordsTab" text="Frozen Records"/>
-            <Tab fx:id="cancelledReversedTab" text="Cancelled and Reversed"/>
-            <Tab fx:id="archivedRecordsTab" text="Archived Records"/>
-            <Tab fx:id="correctionRequestsTab" text="Correction Requests"/>
+            <Tab fx:id="activeRecordsTab" text="Active"/>
+            <Tab fx:id="draftRecordsTab" text="Drafts"/>
+            <Tab fx:id="frozenRecordsTab" text="Frozen"/>
+            <Tab fx:id="cancelledReversedTab" text="Cancelled/Reversed"/>
+            <Tab fx:id="archivedRecordsTab" text="Archived"/>
+            <Tab fx:id="correctionRequestsTab" text="Corrections"/>
         </tabs>
     </TabPane>
     <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>

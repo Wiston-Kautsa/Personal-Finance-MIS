@@ -5,8 +5,6 @@
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.DatePicker?>
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.control.TableColumn?>
-<?import javafx.scene.control.TableView?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
@@ -16,6 +14,9 @@
 
 <VBox spacing="16" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.IncomeController">
+    <Label text="Add Income" styleClass="section-heading"/>
+    <Label text="Record money received, then save it as a draft or post it to the account." wrapText="true" styleClass="form-note"/>
+
     <HBox alignment="CENTER_LEFT" spacing="18">
         <HBox spacing="18" styleClass="income-summary-card">
             <VBox spacing="4">
@@ -30,59 +31,68 @@
                 <Label text="Selected Account" styleClass="metric-title"/>
                 <Label fx:id="selectedAccountLabel" text="None" styleClass="overview-value"/>
             </VBox>
+            <VBox spacing="4">
+                <Label text="Currency" styleClass="metric-title"/>
+                <Label fx:id="selectedCurrencyLabel" text="MWK" styleClass="overview-value"/>
+            </VBox>
         </HBox>
     </HBox>
 
     <TitledPane text="Income Details" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
         <VBox spacing="14">
             <GridPane hgap="24" vgap="12">
-                <Label text="Account *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <Label text="Receiving Account *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
                 <ComboBox fx:id="accountBox" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
 
                 <Label text="Income Source / Category *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
-                <ComboBox fx:id="categoryBox" editable="true" promptText="Select or type category" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="categoryBox" editable="true" promptText="Select or type income source" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
 
                 <Label text="Amount *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-                <TextField fx:id="amountField" promptText="30000.00" prefWidth="430" styleClass="income-amount-field" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextField fx:id="amountField" promptText="650000.00" prefWidth="430" styleClass="income-amount-field" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
 
-                <Label text="Date Received *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <Label text="Income Date *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
                 <DatePicker fx:id="datePicker" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
 
-                <Label text="Payment Method *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
-                <ComboBox fx:id="paymentMethodBox" editable="true" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+                <Label text="Currency" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+                <TextField fx:id="currencyField" editable="false" promptText="Account currency" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
 
-                <Label text="Reference No. (optional)" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
-                <TextField fx:id="referenceField" promptText="Reference number" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+                <Label text="Payment Method *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="paymentMethodBox" editable="true" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
 
-                <Label text="Description / Notes (optional)" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
-                <TextArea fx:id="descriptionArea" prefRowCount="3" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+                <Label text="Reference Number" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                <TextField fx:id="referenceField" promptText="Receipt, deposit or transfer reference" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
 
-                <Label text="Status" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
-                <ComboBox fx:id="statusBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
+                <Label text="Person or Organisation" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
+                <ComboBox fx:id="personBox" editable="true" promptText="Optional payer" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
+
+                <Label text="Expected-Income Link" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="8"/>
+                <ComboBox fx:id="expectedIncomeBox" promptText="Optional expectation" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="9"/>
+
+                <Label text="Project Link" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="8"/>
+                <ComboBox fx:id="projectBox" promptText="Optional project" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="9"/>
+
+                <Label text="Attachment or Receipt" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="10"/>
+                <HBox spacing="8" GridPane.columnIndex="0" GridPane.rowIndex="11">
+                    <TextField fx:id="attachmentField" promptText="Optional file reference" prefWidth="320"/>
+                    <Button text="Browse" onAction="#browseAttachment" styleClass="account-outline-button"/>
+                </HBox>
+
+                <Label text="Status" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="10"/>
+                <ComboBox fx:id="statusBox" prefWidth="430" GridPane.columnIndex="1" GridPane.rowIndex="11"/>
+
+                <Label text="Description" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="12"/>
+                <TextArea fx:id="descriptionArea" prefRowCount="3" prefWidth="430" GridPane.columnIndex="0" GridPane.rowIndex="13" GridPane.columnSpan="2"/>
             </GridPane>
             <HBox spacing="10">
-                <Button text="Save Income" onAction="#saveIncome" styleClass="income-save-button"/>
+                <Button text="Save Draft" onAction="#saveDraft" styleClass="account-outline-button"/>
+                <Button text="Post Income" onAction="#postIncome" styleClass="income-save-button"/>
                 <Button text="Clear" onAction="#clearForm" styleClass="account-outline-button"/>
-                <Button text="Refresh" onAction="#refresh" styleClass="account-outline-button"/>
             </HBox>
         </VBox>
     </TitledPane>
 
-    <TitledPane text="Recent Income Transactions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-        <VBox spacing="10">
-            <TableView fx:id="recentIncomeTable" prefHeight="320" VBox.vgrow="ALWAYS">
-                <columns>
-                    <TableColumn fx:id="dateColumn" text="Date" prefWidth="115"/>
-                    <TableColumn fx:id="sourceColumn" text="Source" prefWidth="170"/>
-                    <TableColumn fx:id="amountColumn" text="Amount" prefWidth="170"/>
-                    <TableColumn fx:id="accountColumn" text="Account" prefWidth="210"/>
-                    <TableColumn fx:id="paymentMethodColumn" text="Method" prefWidth="160"/>
-                    <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
-                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="125"/>
-                </columns>
-            </TableView>
-        </VBox>
-    </TitledPane>
+    <TextArea fx:id="resultArea" editable="false" prefRowCount="6" wrapText="true" styleClass="maintenance-result-area"/>
+
     <padding>
         <Insets top="0" right="0" bottom="0" left="0"/>
     </padding>

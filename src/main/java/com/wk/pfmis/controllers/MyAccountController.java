@@ -2,6 +2,8 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.auth.AuthDatabase;
 import com.wk.pfmis.models.SystemUser;
+import com.wk.pfmis.security.LoginCredentialStore;
+import com.wk.pfmis.security.PrivilegedActionService;
 import com.wk.pfmis.security.UserSession;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -52,11 +54,13 @@ public class MyAccountController {
             );
             SystemUser refreshedUser = authDatabase.findUserById(UserSession.getAuthenticatedUser().getId());
             UserSession.refreshAuthenticatedUser(refreshedUser);
+            LoginCredentialStore.getInstance().clear();
+            PrivilegedActionService.getInstance().invalidate();
             currentPasswordField.clear();
             newPasswordField.clear();
             confirmPasswordField.clear();
             passwordStatusLabel.setText("Password status: current.");
-            messageLabel.setText("Password changed successfully.");
+            messageLabel.setText("Password changed successfully. Saved login credentials were cleared.");
         } catch (RuntimeException exception) {
             messageLabel.setText(rootMessage(exception));
         }

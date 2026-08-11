@@ -1,6 +1,9 @@
 package com.wk.pfmis.ai;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.db.DatabaseHandler.SavingsGroupOverview;
+import com.wk.pfmis.db.DatabaseHandler.SavingsGroupProfileRecord;
+import com.wk.pfmis.db.DatabaseHandler.SavingsGroupTransactionRecord;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AiInteractionRecord;
 import com.wk.pfmis.models.AiSettings;
@@ -165,6 +168,21 @@ public class PfmisIntelligenceService {
             }
         }
 
+        SavingsGroupOverview savingsGroups = database.getSavingsGroupOverview();
+        if (savingsGroups.activeSavingsAccounts() > 0) {
+            if (savingsGroups.nextContributionDueDate() != null && !savingsGroups.nextContributionDueDate().isBlank()) {
+                nudges.add("Next personal Savings Group contribution is due around "
+                        + savingsGroups.nextContributionDueDate() + ".");
+            }
+            if (savingsGroups.cyclesNearingCompletion() > 0) {
+                nudges.add(savingsGroups.cyclesNearingCompletion()
+                        + " personal Savings Group cycle(s) are nearing completion. Confirm expected payout and reconciliation.");
+            }
+            if (savingsGroups.totalCommunitySavings() > stats.getTotalBalance() * 0.5 && stats.getTotalBalance() > 0) {
+                nudges.add("A large share of recorded assets is committed to Savings Groups. Treat it separately from immediately available cash.");
+            }
+        }
+
         Set<String> currencies = database.listAccounts().stream()
                 .map(Account::getCurrency)
                 .filter(value -> value != null && !value.isBlank())
@@ -217,6 +235,9 @@ public class PfmisIntelligenceService {
         if (containsAny(normalized, "income", "expense", "transaction", "ledger", "transfer", "dashboard", "report", "ai", "assist", "analysis")) {
             appendRecentTransactions(context);
         }
+        if (containsAny(normalized, "community", "savings", "nkhonde", "chipeleganyu", "zipeleganyu", "dashboard", "report", "ai", "assist", "analysis")) {
+            appendCommunitySavings(context);
+        }
         if (containsAny(normalized, "analysis", "log", "audit", "system")) {
             appendLogs(context);
         }
@@ -230,6 +251,7 @@ public class PfmisIntelligenceService {
         context.append("- Planning: monthly budgets, household members, goals, goal steps, goal-to-project conversion.\n");
         context.append("- Project management: projects, project activities, project status, planned cost, actual spending.\n");
         context.append("- Reporting: monthly summary, income, expense, project, account, loan reports.\n");
+        context.append("- Savings Groups: personal Bank Nkhonde, Chipeleganyu, Village Savings and other informal savings contributions, payouts, expected dates and backdated entries.\n");
         context.append("- Controls: data quality, cancelled transaction filters, mixed currency warnings, backup age, system logs, analysis logs.\n");
     }
 
@@ -255,6 +277,54 @@ public class PfmisIntelligenceService {
                 .append(" | status=").append(account.getStatus()).append('\n'));
         if (accounts.isEmpty()) {
             context.append("- None registered.\n");
+        }
+    }
+
+    private void appendCommunitySavings(StringBuilder context) {
+        SavingsGroupOverview overview = database.getSavingsGroupOverview();
+        context.append("Savings Groups personal position:\n");
+        context.append("- Active Savings Groups: ").append(overview.activeSavingsAccounts())
+                .append(" | total Community Savings balance=").append(overview.totalCommunitySavings())
+                .append(" | contributions this month=").append(overview.contributionsThisMonth())
+                .append(" | contributions this year=").append(overview.contributionsThisYear())
+                .append(" | next contribution due=").append(blank(overview.nextContributionDueDate(), "not scheduled"))
+                .append(" | expected payout=").append(overview.expectedPayout())
+                .append(" | cycles nearing completion=").append(overview.cyclesNearingCompletion())
+                .append('\n');
+        List<SavingsGroupProfileRecord> profiles = database.listSavingsGroupProfiles();
+        profiles.stream().limit(MAX_LIST_ITEMS).forEach(profile -> context.append("- ")
+                .append(profile.accountName())
+                .append(" | type=").append(profile.groupType())
+                .append(" | status=").append(profile.status())
+                .append(" | actual start=").append(blank(profile.actualStartDate(), "not set"))
+                .append(" | expected end=").append(blank(profile.expectedCycleEndDate(), "not set"))
+                .append(" | expected payout date=").append(blank(profile.expectedPayoutDate(), "not set"))
+                .append(" | expected payout amount=").append(profile.expectedPayoutAmount())
+                .append(" | contribution frequency=").append(profile.contributionFrequency())
+                .append(" | expected contribution=").append(profile.expectedContributionAmount())
+                .append(" | total contributed=").append(profile.totalContributed())
+                .append(" | amount received back=").append(profile.amountReceivedBack())
+                .append(" | profit or bonus received=").append(profile.profitOrBonusReceived())
+                .append(" | current contribution balance=").append(profile.currentContributionBalance())
+                .append('\n'));
+        List<SavingsGroupTransactionRecord> history = database.listSavingsGroupTransactions(null, MAX_LIST_ITEMS);
+        if (!history.isEmpty()) {
+            context.append("Recent Savings Group personal entries:\n");
+            history.forEach(row -> context.append("- ")
+                    .append(row.accountName())
+                    .append(" | type=").append(row.groupType())
+                    .append(" | classification=").append(row.transactionClassification())
+                    .append(" | transaction date=").append(blank(row.transactionDate(), "not set"))
+                    .append(" | contribution period=").append(blank(row.contributionPeriod(), "not applicable"))
+                    .append(" | amount=").append(row.amount())
+                    .append(" | counter account=").append(blank(row.counterAccountName(), "not set"))
+                    .append(" | entered=").append(blank(row.entryDate(), "not recorded"))
+                    .append(" | backdated=").append(row.backdated())
+                    .append(" | status=").append(blank(row.status(), "not set"))
+                    .append('\n'));
+        }
+        if (profiles.isEmpty()) {
+            context.append("- No personal Savings Groups registered.\n");
         }
     }
 

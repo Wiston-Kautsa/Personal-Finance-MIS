@@ -8,8 +8,37 @@ public class Goal {
     private final double monthlyContribution;
     private final String targetDate;
     private final String status;
+    private final String goalType;
+    private final String currency;
+    private final String startDate;
+    private final String priority;
+    private final Integer fundingAccountId;
+    private final String fundingAccountName;
+    private final String contributionFrequency;
+    private final String description;
 
     public Goal(int id, String goalName, double targetAmount, double currentAmount, double monthlyContribution, String targetDate, String status) {
+        this(id, goalName, targetAmount, currentAmount, monthlyContribution, targetDate, status,
+                "Savings", "MWK", "", "Medium", null, "", "Monthly", "");
+    }
+
+    public Goal(
+            int id,
+            String goalName,
+            double targetAmount,
+            double currentAmount,
+            double monthlyContribution,
+            String targetDate,
+            String status,
+            String goalType,
+            String currency,
+            String startDate,
+            String priority,
+            Integer fundingAccountId,
+            String fundingAccountName,
+            String contributionFrequency,
+            String description
+    ) {
         this.id = id;
         this.goalName = goalName;
         this.targetAmount = targetAmount;
@@ -17,6 +46,14 @@ public class Goal {
         this.monthlyContribution = monthlyContribution;
         this.targetDate = targetDate;
         this.status = status;
+        this.goalType = goalType;
+        this.currency = currency;
+        this.startDate = startDate;
+        this.priority = priority;
+        this.fundingAccountId = fundingAccountId;
+        this.fundingAccountName = fundingAccountName;
+        this.contributionFrequency = contributionFrequency;
+        this.description = description;
     }
 
     public int getId() {
@@ -56,6 +93,38 @@ public class Goal {
 
     public String getStatus() {
         return status;
+    }
+
+    public String getGoalType() {
+        return goalType;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public String getStartDate() {
+        return startDate;
+    }
+
+    public String getPriority() {
+        return priority;
+    }
+
+    public Integer getFundingAccountId() {
+        return fundingAccountId;
+    }
+
+    public String getFundingAccountName() {
+        return fundingAccountName;
+    }
+
+    public String getContributionFrequency() {
+        return contributionFrequency;
+    }
+
+    public String getDescription() {
+        return description;
     }
 
     @Override

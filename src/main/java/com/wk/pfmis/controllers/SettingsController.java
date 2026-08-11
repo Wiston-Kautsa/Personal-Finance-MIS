@@ -4,6 +4,7 @@ import com.wk.pfmis.ai.AiRecommendationService;
 import com.wk.pfmis.ai.BundledLocalAiManager;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.AiSettings;
+import com.wk.pfmis.utils.ExportPathService;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -270,13 +271,17 @@ public class SettingsController {
                 UiAlerts.info("Select at least one profile or extension.");
                 return;
             }
-            Path directory = Path.of("ai-starter-pack").toAbsolutePath();
-            Files.createDirectories(directory);
+            Path directory = ExportPathService.resolveExportDirectory(
+                    ExportPathService.defaultDirectoryName("AI Starter Pack")
+            );
             Files.writeString(directory.resolve("README.txt"), starterReadme(selectedItems), StandardCharsets.UTF_8);
             for (StarterItem item : selectedItems) {
                 Files.writeString(directory.resolve(item.fileName()), item.content(), StandardCharsets.UTF_8);
             }
-            downloadStatusLabel.setText("Downloaded " + selectedItems.size() + " item(s) to " + directory);
+            downloadStatusLabel.setText("Downloaded " + selectedItems.size() + " item(s)." + System.lineSeparator()
+                    + System.lineSeparator()
+                    + "Saved to:" + System.lineSeparator()
+                    + directory);
         } catch (Exception exception) {
             UiAlerts.error("Failed to download Smart Analysis starter pack", exception);
         }

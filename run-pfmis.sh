@@ -11,4 +11,4 @@ if ! command -v mvn >/dev/null 2>&1; then
   exit 1
 fi
 
-mvn javafx:run
+mvn compile javafx:run

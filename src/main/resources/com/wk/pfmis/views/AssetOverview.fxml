@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="18" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AssetOverviewController" styleClass="module-overview-page asset-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Asset Overview" styleClass="section-heading"/>
+            <Label text="Asset register health, recognition candidates and lifecycle events." wrapText="true" styleClass="form-note"/>
+            <Label fx:id="emptyStateLabel" text="Loading asset overview..." wrapText="true" styleClass="overview-empty-state"/>
+        </VBox>
+        <Button text="+ Register Asset" onAction="#openRegisterAsset" styleClass="primary-button"/>
+        <Button text="Asset Register" onAction="#openAssetRegister" styleClass="secondary-button"/>
+        <Button text="Recognition" onAction="#openAssetRecognition" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <GridPane hgap="12" vgap="12">
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+            <Label text="Active Assets" styleClass="metric-title"/>
+            <Label fx:id="activeValueLabel" text="0" styleClass="metric-value"/>
+            <Label text="Assets not sold, transferred or archived" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+            <Label text="Current Value" styleClass="metric-title"/>
+            <Label fx:id="valueValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Registered current asset value" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+            <Label text="Maintenance Attention" styleClass="metric-title"/>
+            <Label fx:id="maintenanceValueLabel" text="0" styleClass="metric-value"/>
+            <Label text="Condition or status needs review" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+            <Label text="Recognition Queue" styleClass="metric-title"/>
+            <Label fx:id="recognitionValueLabel" text="0" styleClass="metric-value"/>
+            <Label text="Possible purchase-to-asset candidates" styleClass="metric-note"/>
+        </VBox>
+    </GridPane>
+
+    <TitledPane text="Assets Needing Attention" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <Label fx:id="attentionStateLabel" text="No assets require attention." styleClass="form-note"/>
+            <TableView fx:id="attentionTable" prefHeight="220" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="attentionAssetColumn" text="Asset" prefWidth="230"/>
+                    <TableColumn fx:id="attentionConditionColumn" text="Condition" prefWidth="150"/>
+                    <TableColumn fx:id="attentionLocationColumn" text="Location" prefWidth="170"/>
+                    <TableColumn fx:id="attentionValueColumn" text="Current Value" prefWidth="150"/>
+                    <TableColumn fx:id="attentionDateColumn" text="Purchase Date" prefWidth="125"/>
+                    <TableColumn fx:id="attentionStatusColumn" text="Status" prefWidth="140"/>
+                </columns>
+            </TableView>
+            <HBox alignment="CENTER_RIGHT">
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button text="Maintenance" onAction="#openMaintenance" styleClass="secondary-button"/>
+                <Button text="Valuation" onAction="#openValuation" styleClass="secondary-button"/>
+                <Button text="Sale / Disposal" onAction="#openSaleDisposal" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Recognition Candidates" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="recognitionStateLabel" text="No obvious recognition candidates." styleClass="form-note"/>
+                <TableView fx:id="recognitionTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="recognitionDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="recognitionDescriptionColumn" text="Description" prefWidth="240"/>
+                        <TableColumn fx:id="recognitionAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="recognitionAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="recognitionCategoryColumn" text="Category" prefWidth="170"/>
+                        <TableColumn fx:id="recognitionStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+        <TitledPane text="Recent Asset Events" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="eventsStateLabel" text="No asset events yet." styleClass="form-note"/>
+                <TableView fx:id="eventsTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="eventDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="eventAssetColumn" text="Asset" prefWidth="210"/>
+                        <TableColumn fx:id="eventTypeColumn" text="Event" prefWidth="160"/>
+                        <TableColumn fx:id="eventAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="eventCounterpartyColumn" text="Counterparty" prefWidth="180"/>
+                        <TableColumn fx:id="eventStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+                <HBox alignment="CENTER_RIGHT">
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button text="Transfer &amp; Custody" onAction="#openTransferCustody" styleClass="secondary-button"/>
+                    <Button text="Asset History" onAction="#openAssetHistory" styleClass="secondary-button"/>
+                </HBox>
+            </VBox>
+        </TitledPane>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

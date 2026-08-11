@@ -1,5 +1,6 @@
 package com.wk.pfmis.controllers;
 
+import com.wk.pfmis.utils.ExportPathService;
 import javafx.scene.Node;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
@@ -13,20 +14,21 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.transform.Scale;
-import javafx.stage.FileChooser;
 import javafx.stage.Window;
 import javafx.print.PrinterJob;
 
 import java.io.BufferedWriter;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,6 +39,10 @@ final class TableActions {
     }
 
     static <S> void installRowContextMenu(TableView<S> table, Function<S, List<MenuItem>> menuFactory) {
+        installRowContextMenu(table, menuFactory, null);
+    }
+
+    static <S> void installRowContextMenu(TableView<S> table, Function<S, List<MenuItem>> menuFactory, Consumer<S> doubleClickAction) {
         if (table == null || menuFactory == null) {
             return;
         }
@@ -46,6 +52,16 @@ final class TableActions {
             row.setOnMousePressed(event -> {
                 if (!row.isEmpty() && event.getButton() == MouseButton.SECONDARY) {
                     table.getSelectionModel().clearAndSelect(row.getIndex());
+                }
+            });
+            row.setOnMouseClicked(event -> {
+                if (!row.isEmpty()
+                        && event.getButton() == MouseButton.PRIMARY
+                        && event.getClickCount() == 2
+                        && doubleClickAction != null) {
+                    table.getSelectionModel().clearAndSelect(row.getIndex());
+                    doubleClickAction.accept(row.getItem());
+                    event.consume();
                 }
             });
             row.setOnContextMenuRequested(event -> {
@@ -183,19 +199,13 @@ final class TableActions {
             return;
         }
 
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Export Excel");
-        fileChooser.setInitialFileName(defaultFileName(baseFileName));
-        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Excel CSV (*.csv)", "*.csv"));
-        File file = fileChooser.showSaveDialog(owner(table));
-        if (file == null) {
-            return;
-        }
-        file = csvFile(file);
-
         try {
+            Path file = ExportPathService.resolveExportFile(defaultFileName(baseFileName));
             writeCsv(table, columns, file);
-            UiAlerts.info("Exported " + table.getItems().size() + " records to " + file.getName() + ".");
+            UiAlerts.info("Exported " + table.getItems().size() + " record(s)." + System.lineSeparator()
+                    + System.lineSeparator()
+                    + "Saved to:" + System.lineSeparator()
+                    + file.toAbsolutePath().normalize());
         } catch (IOException exception) {
             UiAlerts.error("Failed to export records", exception);
         }
@@ -233,8 +243,10 @@ final class TableActions {
         UiAlerts.info("Row copied to clipboard.");
     }
 
-    private static <S> void writeCsv(TableView<S> table, List<TableColumn<S, ?>> columns, File file) throws IOException {
-        try (BufferedWriter writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
+    private static <S> void writeCsv(TableView<S> table, List<TableColumn<S, ?>> columns, Path file) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE)) {
             writer.write(columns.stream()
                     .map(column -> csvCell(column.getText()))
                     .collect(Collectors.joining(",")));
@@ -254,9 +266,23 @@ final class TableActions {
     }
 
     private static String csvCell(String value) {
-        String text = value == null ? "" : value;
+        String text = neutralizeSpreadsheetFormula(value == null ? "" : value);
         if (text.contains("\"") || text.contains(",") || text.contains("\n") || text.contains("\r")) {
             return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
+    }
+
+    private static String neutralizeSpreadsheetFormula(String text) {
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character == ' ') {
+                continue;
+            }
+            return switch (character) {
+                case '=', '+', '-', '@', '\t', '\r', '\n' -> "'" + text;
+                default -> text;
+            };
         }
         return text;
     }
@@ -320,23 +346,15 @@ final class TableActions {
         return new Scale(scale, scale);
     }
 
-    private static File csvFile(File file) {
-        if (file.getName().toLowerCase().endsWith(".csv")) {
-            return file;
-        }
-        return new File(file.getParentFile(), file.getName() + ".csv");
-    }
-
     private static String defaultFileName(String baseFileName) {
         String base = baseFileName == null || baseFileName.isBlank() ? "records" : baseFileName;
         String safeBase = base.trim()
-                .replaceAll("[^A-Za-z0-9]+", "-")
-                .replaceAll("^-|-$", "")
-                .toLowerCase();
+                .replaceAll("[^A-Za-z0-9]+", "_")
+                .replaceAll("^_|_$", "");
         if (safeBase.isBlank()) {
-            safeBase = "records";
+            safeBase = "Records";
         }
-        return safeBase + "-" + LocalDateTime.now().format(FILE_TIMESTAMP) + ".csv";
+        return "PFMIS_" + safeBase + "_" + LocalDateTime.now().format(FILE_TIMESTAMP) + ".csv";
     }
 
     private static String nullToBlank(String value) {

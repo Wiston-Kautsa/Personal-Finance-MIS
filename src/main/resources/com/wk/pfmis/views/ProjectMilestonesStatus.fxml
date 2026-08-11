@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ProjectMilestonesStatusController" styleClass="core-workspace-page project-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Milestones &amp; Status" styleClass="section-heading"/>
+            <Label text="Manage delivery checkpoints and project lifecycle state without mixing in finance entry." wrapText="true" styleClass="form-note"/>
+        </VBox>
+        <Button text="Project History" onAction="#openHistory" styleClass="primary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <TitledPane text="Project Status" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label text="Project" styleClass="field-label"/>
+            <ComboBox fx:id="projectBox" promptText="Choose project" minWidth="300"/>
+            <Label text="Current" styleClass="field-label"/>
+            <Label fx:id="currentStatusLabel" text="-" styleClass="overview-value"/>
+            <Label text="New Status" styleClass="field-label"/>
+            <ComboBox fx:id="projectStatusBox" minWidth="180"/>
+            <Button text="Save Status" onAction="#saveProjectStatus" styleClass="primary-button"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="resultLabel" text="Select a project to manage status and milestones." wrapText="true" styleClass="form-note"/>
+        </HBox>
+    </TitledPane>
+
+    <TitledPane text="Milestone Details" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <GridPane hgap="18" vgap="10">
+                <Label text="Milestone Name *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <TextField fx:id="milestoneNameField" promptText="Foundation complete, first harvest, launch" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <Label text="Target Date *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <DatePicker fx:id="milestoneTargetDatePicker" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label text="Completion Date" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+                <DatePicker fx:id="milestoneCompletionDatePicker" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+                <Label text="Status" styleClass="field-label" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="milestoneStatusBox" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+                <Label text="Notes" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <TextArea fx:id="milestoneNotesArea" prefRowCount="3" wrapText="true" GridPane.columnIndex="0" GridPane.rowIndex="3" GridPane.columnSpan="4"/>
+            </GridPane>
+            <HBox spacing="10">
+                <Button text="Save Milestone" onAction="#saveMilestone" styleClass="primary-button"/>
+                <Button text="Clear Milestone" onAction="#clearMilestone" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Milestone Register" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+        <VBox spacing="10">
+            <Label fx:id="milestoneStateLabel" text="No milestones recorded." styleClass="form-note"/>
+            <TableView fx:id="milestonesTable" prefHeight="360" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="milestoneNameColumn" text="Milestone" prefWidth="240"/>
+                    <TableColumn fx:id="milestoneTargetColumn" text="Target Date" prefWidth="125"/>
+                    <TableColumn fx:id="milestoneCompletionColumn" text="Completion Date" prefWidth="145"/>
+                    <TableColumn fx:id="milestoneStatusColumn" text="Status" prefWidth="140"/>
+                    <TableColumn fx:id="milestoneNotesColumn" text="Notes" prefWidth="320"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

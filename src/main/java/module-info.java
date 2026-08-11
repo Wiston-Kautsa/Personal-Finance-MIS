@@ -3,6 +3,8 @@ module com.wk.pfmis {
     requires java.net.http;
     requires java.prefs;
     requires java.sql;
+    requires com.sun.jna;
+    requires com.sun.jna.platform;
     requires javafx.controls;
     requires javafx.fxml;
 
@@ -10,4 +12,5 @@ module com.wk.pfmis {
     opens com.wk.pfmis.models to javafx.base;
 
     exports com.wk.pfmis;
+    exports com.wk.pfmis.domain;
 }

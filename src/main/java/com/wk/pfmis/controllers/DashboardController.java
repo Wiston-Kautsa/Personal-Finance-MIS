@@ -2,6 +2,7 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.MainApp;
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.db.DatabaseHandler.SavingsGroupOverview;
 import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Project;
@@ -9,7 +10,10 @@ import com.wk.pfmis.models.ReportRow;
 import com.wk.pfmis.models.SystemUser;
 import com.wk.pfmis.security.UserSession;
 import com.wk.pfmis.utils.MoneyUtil;
+import com.wk.pfmis.utils.ReadableTextSupport;
+import com.wk.pfmis.utils.RequiredFieldSupport;
 import javafx.collections.FXCollections;
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -25,6 +29,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -62,9 +67,19 @@ public class DashboardController {
     @FXML private Label activeProjectsLabel;
     @FXML private Label activeGoalsLabel;
     @FXML private Label moneyGivenLabel;
+    @FXML private Label communitySavingsBalanceLabel;
+    @FXML private Label communitySavingsDetailLabel;
+    @FXML private Label savingsGroupContributionsLabel;
+    @FXML private Label savingsGroupContributionsDetailLabel;
+    @FXML private Label savingsGroupNextContributionLabel;
+    @FXML private Label savingsGroupNextContributionDetailLabel;
+    @FXML private Label savingsGroupExpectedPayoutLabel;
+    @FXML private Label savingsGroupExpectedPayoutDetailLabel;
     @FXML private Label sectionTitleLabel;
     @FXML private Label signedInUserLabel;
     @FXML private Label activeWorkspaceLabel;
+    @FXML private VBox sidebarNavigation;
+    @FXML private Button dashboardButton;
     @FXML private VBox setupNavigation;
     @FXML private Button setupAdministrationButton;
     @FXML private Button setupSecurityUsersButton;
@@ -86,8 +101,62 @@ public class DashboardController {
     @FXML private Button auditHistoryButton;
     @FXML private Button syncRecoveryButton;
     @FXML private Button dataMaintenanceButton;
+    @FXML private Button savingsOverviewButton;
+    @FXML private Button addSavingsGroupButton;
+    @FXML private Button bankNkhondeButton;
+    @FXML private Button chipeleganyuButton;
+    @FXML private Button communityContributionsButton;
+    @FXML private Button communityPayoutsButton;
+    @FXML private Button communitySavingsReportsButton;
+    @FXML private Button budgetOverviewButton;
+    @FXML private Button createBudgetButton;
+    @FXML private Button budgetAllocationsButton;
+    @FXML private Button budgetPerformanceButton;
+    @FXML private Button householdBudgetButton;
+    @FXML private Button budgetHistoryButton;
+    @FXML private Button incomeOverviewButton;
+    @FXML private Button addIncomeButton;
+    @FXML private Button incomeRecordsButton;
+    @FXML private Button expectedIncomeButton;
+    @FXML private Button recurringIncomeButton;
+    @FXML private Button expenseOverviewButton;
+    @FXML private Button recordExpenseButton;
+    @FXML private Button expenseRecordsButton;
+    @FXML private Button plannedExpensesButton;
+    @FXML private Button transactionsOverviewButton;
+    @FXML private Button transactionLedgerButton;
+    @FXML private Button transferMoneyButton;
+    @FXML private Button scheduledTransfersButton;
+    @FXML private Button correctionsReversalsButton;
+    @FXML private Button loanOverviewButton;
+    @FXML private Button newLoanButton;
+    @FXML private Button loanRecordsButton;
+    @FXML private Button recordRepaymentButton;
+    @FXML private Button repaymentScheduleButton;
+    @FXML private Button loanContactsButton;
+    @FXML private Button goalsOverviewButton;
+    @FXML private Button addGoalButton;
+    @FXML private Button goalContributionsButton;
+    @FXML private Button goalStepsButton;
+    @FXML private Button goalHistoryButton;
+    @FXML private Button projectOverviewButton;
+    @FXML private Button addProjectButton;
+    @FXML private Button projectActivitiesButton;
+    @FXML private Button projectFinancesButton;
+    @FXML private Button projectMilestonesStatusButton;
+    @FXML private Button projectHistoryButton;
+    @FXML private Button assetOverviewButton;
+    @FXML private Button assetRegisterButton;
+    @FXML private Button assetRecognitionButton;
+    @FXML private Button registerAssetButton;
+    @FXML private Button assetMaintenanceButton;
+    @FXML private Button assetValuationButton;
+    @FXML private Button assetTransferCustodyButton;
+    @FXML private Button assetSaleDisposalButton;
+    @FXML private Button assetHistoryButton;
     @FXML private Button returnWorkspaceButton;
     @FXML private VBox dashboardSummaryPane;
+    @FXML private VBox planSnapshotBox;
     @FXML private StackPane contentPane;
     @FXML private LineChart<String, Number> cashFlowChart;
     @FXML private PieChart expenseDistributionChart;
@@ -128,15 +197,26 @@ public class DashboardController {
     private boolean openingSetupSection;
     private boolean openingReportGroup;
     private boolean openingDataRecordsSection;
+    private Button pendingNavigationButton;
 
     @FXML
     public void initialize() {
         configureUserSecurityHeader();
         DataRefreshBus.addListener(this::refreshDashboard);
         NavigationBus.onAccountHistoryRequested(this::showAccountHistory);
+        NavigationBus.onAccountReconciliationRequested(this::showAccountReconciliation);
         NavigationBus.onBackRequested(this::goBack);
         NavigationBus.onReportTitleChanged(reportType -> sectionTitleLabel.setText(reportTitle(reportType)));
         NavigationBus.onTransactionEntryRequested(title -> loadView("Expenses.fxml", title));
+        NavigationBus.onLoanRepaymentRequested(this::showRecordRepayment);
+        NavigationBus.onLoanLedgerRequested(this::showLoanRecords);
+        NavigationBus.onGoalContributionRequested(this::showGoalContribution);
+        NavigationBus.onGoalProjectRequested(() -> loadView("GoalProject.fxml", "Turn Goal Into Project"));
+        NavigationBus.onGoalStepsRequested(this::showGoalSteps);
+        NavigationBus.onAssetRegistrationRequested(this::showRegisterAsset);
+        NavigationBus.onCoreWorkspaceRequested(this::openCoreWorkspaceRoute);
+        NavigationBus.onSmartNavigationRequested(this::openSmartNavigationTarget);
+        configureSidebarNavigationState();
         configureDashboardTable();
         showHome();
     }
@@ -146,9 +226,8 @@ public class DashboardController {
         if (redirectToPasswordChangeIfRequired("Dashboard.fxml")) {
             return;
         }
-        clearSetupSectionSelection();
-        clearReportGroupSelection();
-        clearDataRecordsSelection();
+        Button navigationButton = consumePendingNavigationButton();
+        markNavigationButton(navigationButton == null ? dashboardButton : navigationButton);
         rememberCurrentView();
         sectionTitleLabel.setText("Dashboard");
         setDashboardSummaryVisible(true);
@@ -171,7 +250,66 @@ public class DashboardController {
 
     @FXML
     private void showAiCenter() {
-        loadView("AiCenter.fxml", "Smart Analysis");
+        showSmartOverview();
+    }
+
+    @FXML
+    private void showSmartOverview() {
+        openSmartAnalysis(SmartAnalysisMode.OVERVIEW, "Smart Analysis Overview");
+    }
+
+    @FXML
+    private void showFinancialHealthAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.FINANCIAL_HEALTH, "Financial Health Analysis");
+    }
+
+    @FXML
+    private void showReportsTrendAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.REPORTS_TRENDS, "Reports and Trends Analysis");
+    }
+
+    @FXML
+    private void showBudgetForecastAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.BUDGET_FORECAST, "Budget and Cash Forecast");
+    }
+
+    @FXML
+    private void showGoalsProjectsAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.GOALS_PROJECTS, "Goals and Projects Analysis");
+    }
+
+    @FXML
+    private void showLoansRepaymentsAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.LOANS_REPAYMENTS, "Loans and Repayments Analysis");
+    }
+
+    @FXML
+    private void showDataQualityAnalysis() {
+        openSmartAnalysis(SmartAnalysisMode.DATA_QUALITY, "Data Quality Analysis");
+    }
+
+    @FXML
+    private void showSmartAssistant() {
+        openSmartAnalysis(SmartAnalysisMode.SMART_ASSISTANT, "Ask Smart Assistant");
+    }
+
+    private void openSmartAnalysis(SmartAnalysisMode mode, String pageTitle) {
+        NavigationBus.requestSmartAnalysisMode(mode);
+        loadView("AiCenter.fxml", pageTitle);
+    }
+
+    private void openSmartNavigationTarget(SmartNavigationTarget target) {
+        switch (target) {
+            case ACCOUNT_OVERVIEW -> showAccounts();
+            case BUDGETS -> showBudgetOverview();
+            case SMART_ANALYSIS_REPORTS -> openSmartAnalysisReports();
+            case GOALS -> showGoalsOverview();
+            case PROJECTS -> showProjectOverview();
+            case LOAN_LEDGER -> showLoanRecords();
+            case REPAYMENT_SCHEDULE -> showRepaymentSchedule();
+            case DATA_QUALITY_RECORDS -> openDataQualityRecords();
+            case TRANSACTION_LEDGER -> showTransactions();
+        }
     }
 
     @FXML
@@ -210,7 +348,7 @@ public class DashboardController {
 
     @FXML
     private void showCashFlowChart() {
-        loadPlaceholder("Cash Flow Chart", "Cash flow chart visualization is part of the wireframe and can be added on top of transaction totals.");
+        showReport("Cash Flow Report", "Cash Flow Report");
     }
 
     @FXML
@@ -220,22 +358,160 @@ public class DashboardController {
 
     @FXML
     private void showAlerts() {
-        loadPlaceholder("Alerts", "Alerts can highlight overdue goals, open repayments, low balances, and projects over budget.");
-    }
-
-    @FXML
-    private void showAccounts() {
-        loadView("Accounts.fxml", "Accounts");
+        showHome();
     }
 
     @FXML
     private void showAccountHistory() {
-        loadView("AccountHistory.fxml", "Account History");
+        Integer selectedAccountId = NavigationBus.selectedAccountId();
+        if (selectedAccountId != null) {
+            NavigationBus.requestAccountHistory(selectedAccountId);
+        }
+        loadView("AccountHistory.fxml", "Account Ledger");
+    }
+
+    @FXML
+    private void showAccounts() {
+        NavigationBus.requestAccountsMode("OVERVIEW");
+        loadView("Accounts.fxml", "Account Overview");
+    }
+
+    @FXML
+    private void showAddAccount() {
+        NavigationBus.requestAccountsMode("ADD");
+        loadView("Accounts.fxml", "Add Account");
+    }
+
+    @FXML
+    private void showAccountReconciliation() {
+        NavigationBus.requestAccountReconciliation(NavigationBus.selectedAccountId());
+        loadView("AccountReconciliation.fxml", "Account Reconciliation");
+    }
+
+    @FXML
+    private void showSavingsGroups() {
+        openCommunitySavings(CommunitySavingsMode.OVERVIEW, "Savings Groups");
+    }
+
+    @FXML
+    private void showCommunitySavingsOverview() {
+        openCommunitySavings(CommunitySavingsMode.OVERVIEW, "Savings Groups Overview");
+    }
+
+    @FXML
+    private void showAddSavingsGroup() {
+        openCommunitySavings(CommunitySavingsMode.ADD_GROUP, "Add Savings Group");
+    }
+
+    @FXML
+    private void showBankNkhonde() {
+        openCommunitySavings(CommunitySavingsMode.BANK_NKHONDE, "Bank Nkhonde");
+    }
+
+    @FXML
+    private void showZipeleganyu() {
+        showChipeleganyu();
+    }
+
+    @FXML
+    private void showChipeleganyu() {
+        openCommunitySavings(CommunitySavingsMode.CHIPELEGANYU, "Chipeleganyu");
+    }
+
+    @FXML
+    private void showCommunityContributions() {
+        openCommunitySavings(CommunitySavingsMode.CONTRIBUTIONS, "Savings Group Contributions");
+    }
+
+    @FXML
+    private void showCommunityLoans() {
+        openCommunitySavings(CommunitySavingsMode.LOANS_REPAYMENTS, "Bank Nkhonde Borrowing");
+    }
+
+    @FXML
+    private void showCommunityPayouts() {
+        openCommunitySavings(CommunitySavingsMode.PAYOUTS_SHARE_OUTS, "Savings Group Payouts and Share-outs");
+    }
+
+    @FXML
+    private void showCommunitySavingsReports() {
+        openCommunitySavings(CommunitySavingsMode.HISTORY, "Savings Group Ledger and History");
+    }
+
+    private void openCommunitySavings(CommunitySavingsMode mode, String pageTitle) {
+        NavigationBus.requestCommunitySavingsMode(mode);
+        pendingNavigationButton = communitySavingsButtonFor(mode);
+        loadView("CommunitySavings.fxml", pageTitle);
+    }
+
+    private void openCoreWorkspaceRoute(CoreWorkspaceRoute route) {
+        switch (route) {
+            case INCOME_OVERVIEW -> showIncomeOverview();
+            case ADD_INCOME -> showIncome();
+            case INCOME_RECORDS -> showIncomeRecords();
+            case EXPECTED_INCOME -> showExpectedIncome();
+            case RECURRING_INCOME -> showRecurringIncome();
+            case EXPENSE_OVERVIEW -> showExpenseOverview();
+            case RECORD_EXPENSE -> showExpenses();
+            case EXPENSE_RECORDS -> showExpenseRecords();
+            case PLANNED_RECURRING_EXPENSES -> showPlannedRecurringExpenses();
+            case TRANSACTIONS_OVERVIEW -> showTransactionsOverview();
+            case TRANSACTION_LEDGER -> showTransactions();
+            case TRANSFER_MONEY -> showTransferMoney();
+            case SCHEDULED_TRANSFERS -> showScheduledTransfers();
+            case CORRECTIONS_REVERSALS -> showCorrectionsReversals();
+            case LOAN_OVERVIEW -> showLoanOverview();
+            case NEW_LOAN -> showNewLoan();
+            case LOAN_RECORDS -> showLoanRecords();
+            case RECORD_REPAYMENT -> showRecordRepayment();
+            case REPAYMENT_SCHEDULE -> showRepaymentSchedule();
+            case LOAN_CONTACTS -> showPeople();
+            case GOALS_OVERVIEW -> showGoalsOverview();
+            case ADD_GOAL -> showGoals();
+            case GOAL_CONTRIBUTIONS -> showGoalContribution();
+            case GOAL_STEPS -> showGoalSteps();
+            case GOAL_HISTORY -> showGoalHistory();
+            case PROJECT_OVERVIEW -> showProjectOverview();
+            case ADD_PROJECT -> showProjects();
+            case PROJECT_ACTIVITIES -> showProjectActivities();
+            case PROJECT_FINANCES -> showProjectFinances();
+            case PROJECT_MILESTONES_STATUS -> showProjectMilestonesStatus();
+            case PROJECT_HISTORY -> showProjectHistory();
+            case ASSET_OVERVIEW -> showAssetOverview();
+            case ASSET_REGISTER -> showAssetRecords();
+            case ASSET_RECOGNITION -> showAssetRecognition();
+            case REGISTER_ASSET -> showRegisterAsset();
+            case ASSET_MAINTENANCE -> showAssetMaintenance();
+            case ASSET_VALUATION -> showAssetValuation();
+            case ASSET_TRANSFER_CUSTODY -> showAssetTransferCustody();
+            case ASSET_SALE_DISPOSAL -> showAssetSaleDisposal();
+            case ASSET_HISTORY -> showAssetHistory();
+        }
+    }
+
+    @FXML
+    private void showIncomeOverview() {
+        openCoreView("IncomeOverview.fxml", "Income Overview", incomeOverviewButton);
     }
 
     @FXML
     private void showIncome() {
-        loadView("Income.fxml", "Add Income");
+        openCoreView("Income.fxml", "Add Income", addIncomeButton);
+    }
+
+    @FXML
+    private void showIncomeRecords() {
+        openCoreView("IncomeRecords.fxml", "Income Records", incomeRecordsButton);
+    }
+
+    @FXML
+    private void showExpectedIncome() {
+        openCoreView("ExpectedIncome.fxml", "Expected Income", expectedIncomeButton);
+    }
+
+    @FXML
+    private void showRecurringIncome() {
+        openCoreView("RecurringIncome.fxml", "Recurring Income", recurringIncomeButton);
     }
 
     @FXML
@@ -250,78 +526,190 @@ public class DashboardController {
 
     @FXML
     private void showTransactions() {
-        loadView("Transactions.fxml", "Transaction Ledger");
+        NavigationBus.requestTransactionLedgerFilter(null);
+        openCoreView("Transactions.fxml", "Transaction Ledger", transactionLedgerButton);
     }
 
     @FXML
     private void showExpenses() {
         NavigationBus.requestTransactionType("EXPENSE");
-        loadView("Expenses.fxml", "Record Expense");
+        openCoreView("Expenses.fxml", "Record Expense", recordExpenseButton);
+    }
+
+    @FXML
+    private void showExpenseOverview() {
+        openCoreView("ExpenseOverview.fxml", "Expense Overview", expenseOverviewButton);
     }
 
     @FXML
     private void showExpenseReport() {
-        showReport("Expense Report", "Expense Report");
+        showExpenseRecords();
+    }
+
+    @FXML
+    private void showExpenseRecords() {
+        NavigationBus.requestTransactionLedgerFilter("Expense");
+        openCoreView("Transactions.fxml", "Expense Records", expenseRecordsButton);
+    }
+
+    @FXML
+    private void showPlannedRecurringExpenses() {
+        openCoreView("PlannedRecurringExpenses.fxml", "Planned & Recurring Expenses", plannedExpensesButton);
     }
 
     @FXML
     private void showTransferMoney() {
-        loadView("TransferMoney.fxml", "Transfer Money");
+        openCoreView("TransferMoney.fxml", "Transfer Money", transferMoneyButton);
+    }
+
+    @FXML
+    private void showScheduledTransfers() {
+        openCoreView("ScheduledTransfers.fxml", "Scheduled Transfers", scheduledTransfersButton);
+    }
+
+    @FXML
+    private void showTransactionsOverview() {
+        openCoreView("TransactionsOverview.fxml", "Transactions Overview", transactionsOverviewButton);
+    }
+
+    @FXML
+    private void showCorrectionsReversals() {
+        openCoreView("CorrectionsReversals.fxml", "Corrections & Reversals", correctionsReversalsButton);
     }
 
     @FXML
     private void showProjects() {
-        loadView("Projects.fxml", "Add Project");
+        openCoreView("Projects.fxml", "Add Project", addProjectButton);
     }
 
     @FXML
     private void showViewProjects() {
-        loadView("ViewProjects.fxml", "View Projects");
+        loadView("ProjectList.fxml", "Project Records");
     }
 
     @FXML
     private void showProjectList() {
-        loadView("ProjectList.fxml", "Project List");
+        loadView("ProjectList.fxml", "Project Records");
     }
 
     @FXML
     private void showProjectActivities() {
-        loadView("ProjectActivities.fxml", "Register Project Activity");
+        openCoreView("ProjectActivities.fxml", "Project Activities", projectActivitiesButton);
+    }
+
+    @FXML
+    private void showProjectOverview() {
+        openCoreView("ProjectOverview.fxml", "Project Overview", projectOverviewButton);
+    }
+
+    @FXML
+    private void showProjectFinances() {
+        openCoreView("ProjectFinances.fxml", "Project Finances", projectFinancesButton);
+    }
+
+    @FXML
+    private void showProjectMilestonesStatus() {
+        openCoreView("ProjectMilestonesStatus.fxml", "Milestones & Status", projectMilestonesStatusButton);
+    }
+
+    @FXML
+    private void showProjectHistory() {
+        openCoreView("ProjectHistoryLifecycle.fxml", "Project History & Lifecycle", projectHistoryButton);
+    }
+
+    @FXML
+    private void showRegisterAsset() {
+        openCoreView("RegisterAsset.fxml", "Register Asset", registerAssetButton);
+    }
+
+    @FXML
+    private void showAssetRecords() {
+        openCoreView("AssetRecords.fxml", "Asset Register", assetRegisterButton);
+    }
+
+    @FXML
+    private void showAssetOverview() {
+        openCoreView("AssetOverview.fxml", "Asset Overview", assetOverviewButton);
+    }
+
+    @FXML
+    private void showAssetRecognition() {
+        openCoreView("AssetRecognition.fxml", "Asset Recognition", assetRecognitionButton);
+    }
+
+    @FXML
+    private void showAssetMaintenance() {
+        openCoreView("AssetMaintenance.fxml", "Maintenance & Condition", assetMaintenanceButton);
+    }
+
+    @FXML
+    private void showAssetValuation() {
+        openCoreView("AssetValuation.fxml", "Valuation & Depreciation", assetValuationButton);
+    }
+
+    @FXML
+    private void showAssetTransferCustody() {
+        openCoreView("AssetTransferCustody.fxml", "Transfer & Custody", assetTransferCustodyButton);
+    }
+
+    @FXML
+    private void showAssetSaleDisposal() {
+        openCoreView("AssetSaleDisposal.fxml", "Sale & Disposal", assetSaleDisposalButton);
+    }
+
+    @FXML
+    private void showAssetHistory() {
+        openCoreView("AssetHistory.fxml", "Asset History", assetHistoryButton);
     }
 
     @FXML
     private void showPeople() {
-        loadView("People.fxml", "Loan Contacts");
+        openCoreView("People.fxml", "Loan Contacts", loanContactsButton);
     }
 
     @FXML
-    private void showLendMoney() {
-        showLoanTransaction("Lend Money", "EXPENSE", "MONEY_LENT");
+    private void showNewLoan() {
+        openCoreView("NewLoan.fxml", "New Loan", newLoanButton);
     }
 
     @FXML
-    private void showBorrowMoney() {
-        showLoanTransaction("Borrow Money", "INCOME", "MONEY_BORROWED");
-    }
-
-    @FXML
-    private void showReceiveRepayment() {
-        showLoanTransaction("Receive Repayment", "INCOME", "LENT_REPAID");
-    }
-
-    @FXML
-    private void showRepayBorrowedMoney() {
-        showLoanTransaction("Repay Borrowed Money", "EXPENSE", "BORROWED_REPAID");
+    private void showRecordRepayment() {
+        openCoreView("LoanRepayment.fxml", "Record Repayment", recordRepaymentButton);
     }
 
     @FXML
     private void showLoanLedger() {
-        showReport("Loan Report", "Loan Ledger");
+        showLoanRecords();
+    }
+
+    @FXML
+    private void showLoanOverview() {
+        openCoreView("LoanOverview.fxml", "Loan Overview", loanOverviewButton);
+    }
+
+    @FXML
+    private void showLoanRecords() {
+        openCoreView("LoanLedger.fxml", "Loan Records", loanRecordsButton);
+    }
+
+    @FXML
+    private void showRepaymentSchedule() {
+        openCoreView("LoanRepaymentSchedule.fxml", "Repayment Schedule", repaymentScheduleButton);
     }
 
     @FXML
     private void showGoals() {
-        loadView("Goals.fxml", "Add Goal");
+        openCoreView("Goals.fxml", "Add Goal", addGoalButton);
+    }
+
+    @FXML
+    private void showGoalRecords() {
+        loadView("GoalRecords.fxml", "Goal Records");
+    }
+
+    @FXML
+    private void showGoalContribution() {
+        openCoreView("GoalContribution.fxml", "Goal Contributions", goalContributionsButton);
     }
 
     @FXML
@@ -341,12 +729,58 @@ public class DashboardController {
 
     @FXML
     private void showGoalSteps() {
-        loadView("GoalSteps.fxml", "Goal Steps");
+        openCoreView("GoalSteps.fxml", "Goal Steps", goalStepsButton);
+    }
+
+    @FXML
+    private void showGoalsOverview() {
+        openCoreView("GoalsOverview.fxml", "Goals Overview", goalsOverviewButton);
+    }
+
+    @FXML
+    private void showGoalHistory() {
+        openCoreView("GoalHistoryLifecycle.fxml", "Goal History & Lifecycle", goalHistoryButton);
     }
 
     @FXML
     private void showBudgets() {
-        loadView("Budgets.fxml", "Budgets");
+        showBudgetOverview();
+    }
+
+    @FXML
+    private void showBudgetOverview() {
+        openBudgetMode(BudgetMode.OVERVIEW, "Budget Overview");
+    }
+
+    @FXML
+    private void showCreateBudget() {
+        openBudgetMode(BudgetMode.CREATE, "Create Budget");
+    }
+
+    @FXML
+    private void showBudgetAllocations() {
+        openBudgetMode(BudgetMode.ALLOCATIONS, "Category Allocations");
+    }
+
+    @FXML
+    private void showBudgetPerformance() {
+        openBudgetMode(BudgetMode.PERFORMANCE, "Performance & Variance");
+    }
+
+    @FXML
+    private void showHouseholdBudget() {
+        openBudgetMode(BudgetMode.HOUSEHOLD, "Household Budget");
+    }
+
+    @FXML
+    private void showBudgetHistory() {
+        openBudgetMode(BudgetMode.HISTORY, "Budget History & Lifecycle");
+    }
+
+    private void openBudgetMode(BudgetMode mode, String pageTitle) {
+        NavigationBus.requestBudgetMode(mode);
+        pendingNavigationButton = budgetButtonFor(mode);
+        loadView("Budgets.fxml", pageTitle);
     }
 
     @FXML
@@ -793,24 +1227,40 @@ public class DashboardController {
                 .filter(transaction -> "EXPENSE".equals(transaction.getTransactionType()))
                 .count();
         double savingsRate = stats.getMonthlyIncome() == 0 ? 0 : (stats.getMonthlySavings() / stats.getMonthlyIncome()) * 100;
-        totalBalanceLabel.setText(MoneyUtil.mwk(stats.getTotalBalance()));
-        incomeLabel.setText(MoneyUtil.mwk(stats.getMonthlyIncome()));
-        expensesLabel.setText(MoneyUtil.mwk(stats.getMonthlyExpenses()));
-        savingsLabel.setText(MoneyUtil.mwk(stats.getMonthlySavings()));
-        balanceDetailLabel.setText("Across " + stats.getActiveAccounts() + " accounts");
+        String baseCurrency = database.getBaseCurrencyCode();
+        SavingsGroupOverview savingsGroups = database.getSavingsGroupOverview();
+        double availableCashAndBank = database.getAvailableCashAndBankBalance();
+        double communitySavingsBalance = database.getCommunitySavingsBalance();
+        totalBalanceLabel.setText(MoneyUtil.format(baseCurrency, availableCashAndBank));
+        incomeLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyIncome()));
+        expensesLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyExpenses()));
+        savingsLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlySavings()));
+        balanceDetailLabel.setText("Cash, bank and mobile money only");
         incomeDetailLabel.setText(incomeRecords + " income records");
         expensesDetailLabel.setText(expenseRecords + " expense records");
         savingsDetailLabel.setText(String.format("%.1f%% savings rate", savingsRate));
         activeAccountsLabel.setText(String.valueOf(stats.getActiveAccounts()));
         activeProjectsLabel.setText(String.valueOf(stats.getActiveProjects()));
         activeGoalsLabel.setText(String.valueOf(stats.getActiveGoals()));
-        moneyGivenLabel.setText(MoneyUtil.mwk(stats.getMoneyGivenOut()));
+        moneyGivenLabel.setText(MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut()));
+        communitySavingsBalanceLabel.setText(MoneyUtil.format(baseCurrency, communitySavingsBalance));
+        communitySavingsDetailLabel.setText("Not included in available cash");
+        savingsGroupContributionsLabel.setText(MoneyUtil.format(baseCurrency, savingsGroups.contributionsThisMonth()));
+        savingsGroupContributionsDetailLabel.setText("This year: " + MoneyUtil.format(baseCurrency, savingsGroups.contributionsThisYear()));
+        savingsGroupNextContributionLabel.setText(blankToDashboard(savingsGroups.nextContributionDueDate()));
+        savingsGroupNextContributionDetailLabel.setText(savingsGroups.activeSavingsAccounts() + " active Savings Group(s)");
+        savingsGroupExpectedPayoutLabel.setText(MoneyUtil.format(baseCurrency, savingsGroups.expectedPayout()));
+        savingsGroupExpectedPayoutDetailLabel.setText(savingsGroups.cyclesNearingCompletion() + " cycle(s) nearing completion");
         refreshDashboardCharts(stats, transactions);
         refreshDashboardTable(transactions);
-        refreshAlerts(stats);
+        refreshPlanSnapshot(stats, savingsGroups, baseCurrency);
+        refreshAlerts(stats, baseCurrency);
     }
 
     private void configureDashboardTable() {
+        if (dashboardTransactionsTable == null || dashboardDateColumn == null) {
+            return;
+        }
         dashboardDateColumn.setCellValueFactory(new PropertyValueFactory<>("transactionDate"));
         dashboardTypeColumn.setCellValueFactory(new PropertyValueFactory<>("transactionType"));
         dashboardAccountColumn.setCellValueFactory(new PropertyValueFactory<>("accountName"));
@@ -848,12 +1298,24 @@ public class DashboardController {
     }
 
     private void refreshDashboardCharts(DashboardStats stats, List<FinanceTransaction> transactions) {
-        setPieData(expenseDistributionChart, database.categorySpendingReport(), "No expenses");
-        setPieData(accountBalanceChart, database.accountBalanceReport(), "No balances");
-        setPieData(incomeSourceChart, incomeSourceRows(transactions), "No income");
-        setPieData(moneyPositionChart, moneyPositionRows(stats), "No money position");
-        refreshCashFlowChart(transactions);
-        refreshProjectSpendingChart();
+        if (expenseDistributionChart != null) {
+            setPieData(expenseDistributionChart, database.categorySpendingReport(), "No expenses");
+        }
+        if (accountBalanceChart != null) {
+            setPieData(accountBalanceChart, database.accountBalanceReport(), "No balances");
+        }
+        if (incomeSourceChart != null) {
+            setPieData(incomeSourceChart, incomeSourceRows(transactions), "No income");
+        }
+        if (moneyPositionChart != null) {
+            setPieData(moneyPositionChart, moneyPositionRows(stats), "No money position");
+        }
+        if (cashFlowChart != null) {
+            refreshCashFlowChart(transactions);
+        }
+        if (projectSpendingChart != null) {
+            refreshProjectSpendingChart();
+        }
     }
 
     private void setPieData(PieChart chart, List<ReportRow> rows, String emptyLabel) {
@@ -883,14 +1345,22 @@ public class DashboardController {
 
     private List<ReportRow> moneyPositionRows(DashboardStats stats) {
         List<ReportRow> rows = new ArrayList<>();
-        rows.add(new ReportRow("Available Balance", Math.max(stats.getTotalBalance(), 0)));
+        rows.add(new ReportRow("Available Cash and Bank", Math.max(database.getAvailableCashAndBankBalance(), 0)));
+        rows.add(new ReportRow("Community Savings", Math.max(database.getCommunitySavingsBalance(), 0)));
         rows.add(new ReportRow("Expenses", Math.max(stats.getMonthlyExpenses(), 0)));
         rows.add(new ReportRow("Savings", Math.max(stats.getMonthlySavings(), 0)));
         rows.add(new ReportRow("Loans Receivable", Math.max(stats.getMoneyGivenOut(), 0)));
         return rows;
     }
 
+    private String blankToDashboard(String value) {
+        return value == null || value.isBlank() ? "None scheduled" : value;
+    }
+
     private void refreshCashFlowChart(List<FinanceTransaction> transactions) {
+        if (cashFlowChart == null) {
+            return;
+        }
         cashFlowChart.getData().clear();
         XYChart.Series<String, Number> incomeSeries = new XYChart.Series<>();
         incomeSeries.setName("Income");
@@ -922,6 +1392,9 @@ public class DashboardController {
     }
 
     private void refreshProjectSpendingChart() {
+        if (projectSpendingChart == null) {
+            return;
+        }
         projectSpendingChart.getData().clear();
         XYChart.Series<String, Number> budgetSeries = new XYChart.Series<>();
         budgetSeries.setName("Budget");
@@ -935,10 +1408,29 @@ public class DashboardController {
     }
 
     private void refreshDashboardTable(List<FinanceTransaction> transactions) {
+        if (dashboardTransactionsTable == null) {
+            return;
+        }
         dashboardTransactionsTable.setItems(FXCollections.observableArrayList(transactions.stream().limit(10).toList()));
     }
 
-    private void refreshAlerts(DashboardStats stats) {
+    private void refreshPlanSnapshot(DashboardStats stats, SavingsGroupOverview savingsGroups, String baseCurrency) {
+        if (planSnapshotBox == null) {
+            return;
+        }
+        planSnapshotBox.getChildren().clear();
+        planSnapshotBox.getChildren().add(snapshotLine("Accounts", stats.getActiveAccounts() + " active accounts"));
+        planSnapshotBox.getChildren().add(snapshotLine("Goals", stats.getActiveGoals() + " active goals"));
+        planSnapshotBox.getChildren().add(snapshotLine("Projects", stats.getActiveProjects() + " active projects"));
+        planSnapshotBox.getChildren().add(snapshotLine("Savings Groups", savingsGroups.activeSavingsAccounts()
+                + " active groups, next due " + blankToDashboard(savingsGroups.nextContributionDueDate())));
+        planSnapshotBox.getChildren().add(snapshotLine("Loan Position", MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut())));
+    }
+
+    private void refreshAlerts(DashboardStats stats, String baseCurrency) {
+        if (alertsBox == null) {
+            return;
+        }
         alertsBox.getChildren().clear();
         if (stats.getActiveGoals() > 0 && stats.getMonthlySavings() <= 0) {
             alertsBox.getChildren().add(alertLabel("No positive savings recorded this month."));
@@ -949,9 +1441,9 @@ public class DashboardController {
             }
         }
         if (stats.getMoneyGivenOut() > 0) {
-            alertsBox.getChildren().add(alertLabel(MoneyUtil.mwk(stats.getMoneyGivenOut()) + " is still owed to you."));
+            alertsBox.getChildren().add(alertLabel(MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut()) + " is still owed to you."));
         } else if (stats.getMoneyGivenOut() < 0) {
-            alertsBox.getChildren().add(alertLabel(MoneyUtil.mwk(Math.abs(stats.getMoneyGivenOut())) + " is still owed by you."));
+            alertsBox.getChildren().add(alertLabel(MoneyUtil.format(baseCurrency, Math.abs(stats.getMoneyGivenOut())) + " is still owed by you."));
         }
         if (alertsBox.getChildren().isEmpty()) {
             alertsBox.getChildren().add(alertLabel("No urgent reminders."));
@@ -963,6 +1455,18 @@ public class DashboardController {
         label.setWrapText(true);
         label.getStyleClass().add("alert-line");
         return label;
+    }
+
+    private HBox snapshotLine(String title, String detail) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("field-label");
+        Label detailLabel = new Label(detail);
+        detailLabel.setWrapText(true);
+        detailLabel.getStyleClass().add("form-note");
+        HBox line = new HBox(10, titleLabel, detailLabel);
+        line.getStyleClass().add("dashboard-snapshot-line");
+        HBox.setHgrow(detailLabel, Priority.ALWAYS);
+        return line;
     }
 
     private boolean isCurrentMonth(FinanceTransaction transaction) {
@@ -1019,7 +1523,8 @@ public class DashboardController {
                  "Category Spending", "Budget vs Actual", "Recurring Transactions",
                  "Expense Trend Report" -> REPORT_GROUP_INCOME_EXPENSES;
             case "Account Balance Report", "Net Worth Report", "Financial Position",
-                 "Account Reconciliation", "Transfer Report" -> REPORT_GROUP_ACCOUNTS_POSITION;
+                 "Account Reconciliation", "Transfer Report", "Asset Register",
+                 "Asset Valuation", "Asset Disposal" -> REPORT_GROUP_ACCOUNTS_POSITION;
             case "Project Report", "Project Performance", "Savings and Goals Progress" -> REPORT_GROUP_PROJECTS_GOALS;
             case "Loan Report", "Lending Report", "Money Borrowed Report", "Money Lent Report",
                  "Debt Aging Report", "Upcoming Obligations" -> REPORT_GROUP_LOANS_OBLIGATIONS;
@@ -1081,6 +1586,11 @@ public class DashboardController {
         }
     }
 
+    private void openCoreView(String fileName, String title, Button selectedButton) {
+        pendingNavigationButton = selectedButton;
+        loadView(fileName, title);
+    }
+
     private void loadView(String fileName, String title) {
         loadView(fileName, title, null);
     }
@@ -1088,6 +1598,19 @@ public class DashboardController {
     private void loadView(String fileName, String title, String setupArea) {
         if (redirectToPasswordChangeIfRequired(fileName)) {
             return;
+        }
+        Button navigationButton = consumePendingNavigationButton();
+        if (navigationButton != null) {
+            markNavigationButton(navigationButton);
+        } else if (!openingSetupSection
+                && !openingReportGroup
+                && !openingDataRecordsSection
+                && setupButtonFor(fileName) == null
+                && dataRecordsButtonFor(fileName) == null
+                && !"Reports.fxml".equals(fileName)
+                && !"CommunitySavings.fxml".equals(fileName)
+                && !"Budgets.fxml".equals(fileName)) {
+            clearNavigationSelection();
         }
         if (!openingSetupSection) {
             Button setupButton = setupButtonFor(fileName);
@@ -1110,15 +1633,30 @@ public class DashboardController {
                 markDataRecordsButton(dataRecordsButton);
             }
         }
+        if (!"CommunitySavings.fxml".equals(fileName)) {
+            clearCommunitySavingsSelection();
+        }
+        if ("Budgets.fxml".equals(fileName)) {
+            boolean hasActiveBudgetButton = budgetButtons().stream()
+                    .anyMatch(button -> button != null && button.getStyleClass().contains("active"));
+            if (!hasActiveBudgetButton) {
+                markBudgetButton(budgetOverviewButton);
+            }
+        } else {
+            clearBudgetSelection();
+        }
         try {
             rememberCurrentView();
             sectionTitleLabel.setText(title);
             setDashboardSummaryVisible(false);
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/wk/pfmis/views/" + fileName));
             Parent view = loader.load();
+            RequiredFieldSupport.apply(view);
             if (setupArea != null && loader.getController() instanceof SetupPolicyController controller) {
                 controller.selectArea(setupArea);
             }
+            RequiredFieldSupport.apply(view);
+            ReadableTextSupport.apply(view);
             Node displayView = unwrapScrollPane(view);
             makeDynamic(displayView);
             contentPane.getChildren().setAll(displayView);
@@ -1126,9 +1664,77 @@ public class DashboardController {
             currentViewTitle = title;
             currentViewIsDashboard = false;
             refreshDashboard();
-        } catch (IOException exception) {
-            UiAlerts.error("Failed to open " + title, exception);
+        } catch (IOException | RuntimeException exception) {
+            showViewLoadFailure(fileName, title, setupArea, exception);
         }
+    }
+
+    private void showViewLoadFailure(String fileName, String title, String setupArea, Exception exception) {
+        sectionTitleLabel.setText(title);
+        setDashboardSummaryVisible(false);
+        Throwable root = rootCause(exception);
+        String rootMessage = blankFailureMessage(root);
+        database.recordSystemLog(
+                "Navigation",
+                "View Load Failure",
+                "ERROR",
+                title + " failed while loading " + fileName + ". Root cause: "
+                        + root.getClass().getName() + ": " + rootMessage
+        );
+
+        Label heading = new Label(title + " could not be opened.");
+        heading.getStyleClass().add("section-heading");
+
+        Label message = new Label("A problem occurred while preparing this screen."
+                + System.lineSeparator() + System.lineSeparator()
+                + "Reason: " + rootMessage);
+        message.setWrapText(true);
+        message.getStyleClass().add("form-note");
+
+        TextArea details = new TextArea(failureDetails(exception));
+        details.setEditable(false);
+        details.setWrapText(true);
+        details.setPrefRowCount(8);
+        details.setMaxWidth(Double.MAX_VALUE);
+        VBox.setVgrow(details, Priority.ALWAYS);
+        TitledPane technicalDetails = new TitledPane("Technical details", details);
+        technicalDetails.setExpanded(false);
+        technicalDetails.setMaxWidth(Double.MAX_VALUE);
+
+        Button retryButton = new Button("Retry");
+        retryButton.getStyleClass().add("secondary-button");
+        retryButton.setOnAction(event -> loadView(fileName, title, setupArea));
+
+        VBox failurePane = new VBox(10, heading, message, technicalDetails, retryButton);
+        failurePane.getStyleClass().add("panel");
+        failurePane.setMaxWidth(Double.MAX_VALUE);
+        contentPane.getChildren().setAll(failurePane);
+        currentViewFileName = fileName;
+        currentViewTitle = title;
+        currentViewIsDashboard = false;
+    }
+
+    private String failureDetails(Exception exception) {
+        Throwable root = rootCause(exception);
+        String summary = "Failure: " + exception.getClass().getName() + ": " + blankFailureMessage(exception);
+        String rootSummary = root == exception
+                ? ""
+                : System.lineSeparator() + System.lineSeparator()
+                + "Underlying failure: " + root.getClass().getName() + ": " + blankFailureMessage(root);
+        return summary + rootSummary;
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable root = throwable;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root;
+    }
+
+    private String blankFailureMessage(Throwable throwable) {
+        String message = throwable == null ? null : throwable.getMessage();
+        return message == null || message.isBlank() ? "No detailed message was provided." : message;
     }
 
     private void rememberCurrentView() {
@@ -1160,26 +1766,6 @@ public class DashboardController {
             return content;
         }
         return view;
-    }
-
-    private void loadPlaceholder(String title, String message) {
-        if (redirectToPasswordChangeIfRequired("Dashboard.fxml")) {
-            return;
-        }
-        clearSetupSectionSelection();
-        clearReportGroupSelection();
-        clearDataRecordsSelection();
-        sectionTitleLabel.setText(title);
-        setDashboardSummaryVisible(false);
-        VBox placeholder = new VBox(12);
-        placeholder.getStyleClass().add("panel");
-        Label heading = new Label(title);
-        heading.getStyleClass().add("section-heading");
-        Label body = new Label(message);
-        body.setWrapText(true);
-        body.getStyleClass().add("form-note");
-        placeholder.getChildren().setAll(heading, body);
-        contentPane.getChildren().setAll(placeholder);
     }
 
     private boolean redirectToPasswordChangeIfRequired(String requestedFileName) {
@@ -1218,16 +1804,81 @@ public class DashboardController {
         };
     }
 
-    private void markSetupSectionButton(Button selectedButton) {
-        for (Button button : setupSectionButtons()) {
-            if (button == null) {
-                continue;
+    private Button communitySavingsButtonFor(CommunitySavingsMode mode) {
+        return switch (mode == null ? CommunitySavingsMode.OVERVIEW : mode) {
+            case OVERVIEW -> savingsOverviewButton;
+            case ADD_GROUP -> addSavingsGroupButton;
+            case BANK_NKHONDE -> bankNkhondeButton;
+            case CHIPELEGANYU -> chipeleganyuButton;
+            case CONTRIBUTIONS -> communityContributionsButton;
+            case PAYOUTS_SHARE_OUTS -> communityPayoutsButton;
+            case HISTORY -> communitySavingsReportsButton;
+            case LOANS_REPAYMENTS -> bankNkhondeButton;
+        };
+    }
+
+    private void markCommunitySavingsButton(Button selectedButton) {
+        markNavigationButton(selectedButton);
+    }
+
+    private void clearCommunitySavingsSelection() {
+        for (Button button : communitySavingsButtons()) {
+            if (button != null) {
+                button.getStyleClass().remove("active");
             }
-            button.getStyleClass().remove("active");
         }
-        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
-            selectedButton.getStyleClass().add("active");
+        updateNavigationParentState();
+    }
+
+    private List<Button> communitySavingsButtons() {
+        return List.of(
+                savingsOverviewButton,
+                addSavingsGroupButton,
+                bankNkhondeButton,
+                chipeleganyuButton,
+                communityContributionsButton,
+                communityPayoutsButton,
+                communitySavingsReportsButton
+        );
+    }
+
+    private Button budgetButtonFor(BudgetMode mode) {
+        return switch (mode == null ? BudgetMode.OVERVIEW : mode) {
+            case OVERVIEW -> budgetOverviewButton;
+            case CREATE -> createBudgetButton;
+            case ALLOCATIONS -> budgetAllocationsButton;
+            case PERFORMANCE -> budgetPerformanceButton;
+            case HOUSEHOLD -> householdBudgetButton;
+            case HISTORY -> budgetHistoryButton;
+        };
+    }
+
+    private void markBudgetButton(Button selectedButton) {
+        markNavigationButton(selectedButton);
+    }
+
+    private void clearBudgetSelection() {
+        for (Button button : budgetButtons()) {
+            if (button != null) {
+                button.getStyleClass().remove("active");
+            }
         }
+        updateNavigationParentState();
+    }
+
+    private List<Button> budgetButtons() {
+        return List.of(
+                budgetOverviewButton,
+                createBudgetButton,
+                budgetAllocationsButton,
+                budgetPerformanceButton,
+                householdBudgetButton,
+                budgetHistoryButton
+        );
+    }
+
+    private void markSetupSectionButton(Button selectedButton) {
+        markNavigationButton(selectedButton);
     }
 
     private void clearSetupSectionSelection() {
@@ -1236,6 +1887,7 @@ public class DashboardController {
                 button.getStyleClass().remove("active");
             }
         }
+        updateNavigationParentState();
     }
 
     private List<Button> setupSectionButtons() {
@@ -1249,15 +1901,7 @@ public class DashboardController {
     }
 
     private void markDataRecordsButton(Button selectedButton) {
-        for (Button button : dataRecordsButtons()) {
-            if (button == null) {
-                continue;
-            }
-            button.getStyleClass().remove("active");
-        }
-        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
-            selectedButton.getStyleClass().add("active");
-        }
+        markNavigationButton(selectedButton);
     }
 
     private void clearDataRecordsSelection() {
@@ -1266,6 +1910,7 @@ public class DashboardController {
                 button.getStyleClass().remove("active");
             }
         }
+        updateNavigationParentState();
     }
 
     private List<Button> dataRecordsButtons() {
@@ -1283,15 +1928,7 @@ public class DashboardController {
     }
 
     private void markReportGroupButton(Button selectedButton) {
-        for (Button button : reportGroupButtons()) {
-            if (button == null) {
-                continue;
-            }
-            button.getStyleClass().remove("active");
-        }
-        if (selectedButton != null && !selectedButton.getStyleClass().contains("active")) {
-            selectedButton.getStyleClass().add("active");
-        }
+        markNavigationButton(selectedButton);
     }
 
     private void clearReportGroupSelection() {
@@ -1300,6 +1937,7 @@ public class DashboardController {
                 button.getStyleClass().remove("active");
             }
         }
+        updateNavigationParentState();
     }
 
     private List<Button> reportGroupButtons() {
@@ -1312,6 +1950,117 @@ public class DashboardController {
                 reportSmartAnalysisButton,
                 reportSystemReportsButton
         );
+    }
+
+    private void configureSidebarNavigationState() {
+        if (sidebarNavigation == null) {
+            return;
+        }
+        attachSidebarNavigationState(sidebarNavigation);
+    }
+
+    private void attachSidebarNavigationState(Node node) {
+        if (node instanceof Button button && isSidebarNavigationButton(button)) {
+            button.addEventFilter(ActionEvent.ACTION, event -> pendingNavigationButton = button);
+        }
+        if (node instanceof TitledPane titledPane && titledPane.getContent() != null) {
+            attachSidebarNavigationState(titledPane.getContent());
+        }
+        if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                attachSidebarNavigationState(child);
+            }
+        }
+    }
+
+    private boolean isSidebarNavigationButton(Button button) {
+        return button.getStyleClass().contains("nav-button")
+                || button.getStyleClass().contains("nav-sub-button")
+                || button.getStyleClass().contains("setup-section-button");
+    }
+
+    private Button consumePendingNavigationButton() {
+        Button button = pendingNavigationButton;
+        pendingNavigationButton = null;
+        return button;
+    }
+
+    private void markNavigationButton(Button selectedButton) {
+        clearNavigationSelection();
+        if (selectedButton == null) {
+            return;
+        }
+        if (!selectedButton.getStyleClass().contains("active")) {
+            selectedButton.getStyleClass().add("active");
+        }
+        TitledPane parentPane = parentNavigationPane(selectedButton);
+        if (parentPane != null) {
+            if (!parentPane.getStyleClass().contains("active-parent")) {
+                parentPane.getStyleClass().add("active-parent");
+            }
+            parentPane.setExpanded(true);
+        }
+    }
+
+    private void clearNavigationSelection() {
+        if (sidebarNavigation == null) {
+            return;
+        }
+        clearNavigationSelection(sidebarNavigation);
+    }
+
+    private void clearNavigationSelection(Node node) {
+        if (node instanceof Button button) {
+            button.getStyleClass().remove("active");
+        }
+        if (node instanceof TitledPane titledPane) {
+            titledPane.getStyleClass().remove("active-parent");
+            if (titledPane.getContent() != null) {
+                clearNavigationSelection(titledPane.getContent());
+            }
+        }
+        if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                clearNavigationSelection(child);
+            }
+        }
+    }
+
+    private void updateNavigationParentState() {
+        if (sidebarNavigation == null) {
+            return;
+        }
+        updateNavigationParentState(sidebarNavigation);
+    }
+
+    private boolean updateNavigationParentState(Node node) {
+        boolean activeChild = node instanceof Button button && button.getStyleClass().contains("active");
+        if (node instanceof TitledPane titledPane) {
+            boolean contentHasActiveChild = titledPane.getContent() != null
+                    && updateNavigationParentState(titledPane.getContent());
+            titledPane.getStyleClass().remove("active-parent");
+            if (contentHasActiveChild) {
+                titledPane.getStyleClass().add("active-parent");
+            }
+            return contentHasActiveChild;
+        }
+        if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                activeChild = updateNavigationParentState(child) || activeChild;
+            }
+        }
+        return activeChild;
+    }
+
+    private TitledPane parentNavigationPane(Node node) {
+        Parent parent = node == null ? null : node.getParent();
+        while (parent != null) {
+            if (parent instanceof TitledPane titledPane) {
+                return titledPane;
+            }
+            parent = parent.getParent();
+        }
+        return null;
     }
 
     private void setDashboardSummaryVisible(boolean visible) {

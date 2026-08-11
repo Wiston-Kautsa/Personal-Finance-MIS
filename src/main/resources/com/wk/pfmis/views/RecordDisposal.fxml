@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.RecordDisposalController"
+      spacing="14" maxWidth="Infinity" styleClass="settings-page record-disposal-page maintenance-simple-page">
+    <children>
+        <VBox spacing="7" styleClass="maintenance-simple-header">
+            <Label text="Deleted Records and Permanent Purge" styleClass="section-heading"/>
+            <Label text="Soft-delete eligible records, restore deleted records, or permanently purge only after strict Super Administrator checks." wrapText="true" styleClass="settings-status-text"/>
+            <Label fx:id="statusLabel" text="Normal Delete hides records from active views but keeps them for audit and restoration. Permanent purge is separate and requires DELETE PERMANENTLY." wrapText="true" styleClass="data-preview-banner"/>
+        </VBox>
+
+        <FlowPane hgap="10" vgap="10" prefWrapLength="1120" styleClass="maintenance-simple-form">
+            <VBox spacing="5" styleClass="maintenance-simple-field">
+                <Label text="Record type" styleClass="field-label"/>
+                <ComboBox fx:id="recordTypeBox" prefWidth="220" maxWidth="Infinity"/>
+            </VBox>
+            <VBox spacing="5" styleClass="maintenance-simple-field">
+                <Label text="Workspace" styleClass="field-label"/>
+                <ComboBox fx:id="workspaceBox" prefWidth="260" maxWidth="Infinity"/>
+            </VBox>
+            <VBox spacing="5" styleClass="maintenance-simple-field-wide">
+                <Label text="Search" styleClass="field-label"/>
+                <TextField fx:id="searchField" promptText="Record ID, description or reference" prefWidth="330"/>
+            </VBox>
+            <VBox spacing="5" styleClass="maintenance-simple-field">
+                <Label text="Status" styleClass="field-label"/>
+                <ComboBox fx:id="statusBox" prefWidth="210"/>
+            </VBox>
+            <VBox spacing="5" styleClass="maintenance-simple-field">
+                <Label text=" " styleClass="field-label"/>
+                <Button text="Search Records" onAction="#searchRecords" minWidth="150" styleClass="secondary-button"/>
+            </VBox>
+        </FlowPane>
+
+        <TableView fx:id="recordsTable" editable="true" prefHeight="360" maxWidth="Infinity" styleClass="record-disposal-table">
+            <columns>
+                <TableColumn fx:id="selectColumn" text="" prefWidth="46"/>
+                <TableColumn fx:id="recordIdColumn" text="ID" prefWidth="80"/>
+                <TableColumn fx:id="dateColumn" text="Date" prefWidth="110"/>
+                <TableColumn fx:id="descriptionColumn" text="Description" prefWidth="360"/>
+                <TableColumn fx:id="statusColumn" text="Status" prefWidth="125"/>
+                <TableColumn fx:id="amountColumn" text="Amount" prefWidth="130"/>
+                <TableColumn fx:id="eligibilityColumn" text="Removal status" prefWidth="190"/>
+            </columns>
+        </TableView>
+
+        <TextArea fx:id="resultArea" editable="false" wrapText="true" prefRowCount="7" styleClass="ai-answer-area disposal-result-area"/>
+
+        <VBox fx:id="inlineActionPane" spacing="10" visible="false" managed="false"
+              maxWidth="Infinity" styleClass="record-disposal-inline-action"/>
+
+        <HBox spacing="8" alignment="CENTER_LEFT" maxWidth="Infinity" styleClass="maintenance-simple-actions">
+            <Button text="Cancel" onAction="#cancel" minWidth="110" styleClass="secondary-button"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="removeButton" text="Delete Selected Records" onAction="#removeSelectedRecords" minWidth="210" styleClass="maintenance-danger-button"/>
+            <Button fx:id="restoreButton" text="Restore Selected" onAction="#restoreSelectedRecords" minWidth="170" styleClass="secondary-button"/>
+            <Button fx:id="purgeButton" text="Permanently Purge" onAction="#permanentlyPurgeSelectedRecords" minWidth="190" styleClass="maintenance-danger-button"/>
+        </HBox>
+    </children>
+    <padding>
+        <Insets top="4" right="4" bottom="12" left="4"/>
+    </padding>
+</VBox>

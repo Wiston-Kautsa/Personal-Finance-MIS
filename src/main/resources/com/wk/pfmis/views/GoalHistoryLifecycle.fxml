@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.GoalHistoryLifecycleController" styleClass="core-workspace-page goals-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Goal History &amp; Lifecycle" styleClass="section-heading"/>
+            <Label text="Read-focused lifecycle view for selected goals, with status actions separated from contribution entry." wrapText="true" styleClass="form-note"/>
+        </VBox>
+        <Button text="Goal Contributions" onAction="#openContributions" styleClass="primary-button"/>
+        <Button text="Goal Steps" onAction="#openSteps" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <TitledPane text="Selected Goal" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label text="Goal" styleClass="field-label"/>
+                <ComboBox fx:id="goalBox" promptText="Choose goal" minWidth="280"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button text="Mark Active" onAction="#markActive" styleClass="secondary-button"/>
+                <Button text="Pause" onAction="#pauseGoal" styleClass="secondary-button"/>
+                <Button text="Mark Achieved" onAction="#markAchieved" styleClass="primary-button"/>
+                <Button text="Archive" onAction="#archiveGoal" styleClass="danger-button"/>
+            </HBox>
+            <GridPane hgap="12" vgap="12">
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Target" styleClass="metric-title"/>
+                    <Label fx:id="targetLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Allocated" styleClass="metric-title"/>
+                    <Label fx:id="allocatedLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Remaining" styleClass="metric-title"/>
+                    <Label fx:id="remainingLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                    <Label text="Status" styleClass="metric-title"/>
+                    <Label fx:id="statusLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+            </GridPane>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Lifecycle Timeline" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="historyStateLabel" text="No selected goal." styleClass="form-note"/>
+                <TextArea fx:id="lifecycleArea" editable="false" wrapText="true" prefRowCount="18" VBox.vgrow="ALWAYS"/>
+            </VBox>
+        </TitledPane>
+        <VBox spacing="14" HBox.hgrow="ALWAYS">
+            <TitledPane text="Contribution Ledger" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+                <VBox spacing="10">
+                    <Label fx:id="contributionStateLabel" text="No contributions." styleClass="form-note"/>
+                    <TableView fx:id="contributionTable" prefHeight="210" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="contributionDateColumn" text="Date" prefWidth="120"/>
+                            <TableColumn fx:id="contributionAmountColumn" text="Amount" prefWidth="140"/>
+                            <TableColumn fx:id="contributionTypeColumn" text="Type" prefWidth="150"/>
+                            <TableColumn fx:id="contributionSourceColumn" text="Source" prefWidth="170"/>
+                            <TableColumn fx:id="contributionDestinationColumn" text="Destination" prefWidth="170"/>
+                            <TableColumn fx:id="contributionStatusColumn" text="Status" prefWidth="120"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+            <TitledPane text="Step History" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+                <VBox spacing="10">
+                    <Label fx:id="stepsStateLabel" text="No steps." styleClass="form-note"/>
+                    <TableView fx:id="stepsTable" prefHeight="210" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="stepNameColumn" text="Step" prefWidth="190"/>
+                            <TableColumn fx:id="stepCostColumn" text="Estimated" prefWidth="140"/>
+                            <TableColumn fx:id="stepReachedColumn" text="Reached" prefWidth="140"/>
+                            <TableColumn fx:id="stepMissingColumn" text="Missing" prefWidth="140"/>
+                            <TableColumn fx:id="stepTargetColumn" text="Target Date" prefWidth="125"/>
+                            <TableColumn fx:id="stepStatusColumn" text="Status" prefWidth="120"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+        </VBox>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

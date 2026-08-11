@@ -61,6 +61,14 @@ public final class UserSession {
         return authenticatedUser != null && authenticatedUser.isSuperAdmin();
     }
 
+    public static synchronized boolean isAdmin() {
+        return authenticatedUser != null && authenticatedUser.isAdmin();
+    }
+
+    public static synchronized boolean isAdminOrSuperAdmin() {
+        return authenticatedUser != null && authenticatedUser.isAdminOrSuperAdmin();
+    }
+
     public static synchronized boolean isViewingOwnWorkspace() {
         return authenticatedUser != null && workspaceUser != null && authenticatedUser.getId() == workspaceUser.getId();
     }

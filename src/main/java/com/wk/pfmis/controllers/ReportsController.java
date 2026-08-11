@@ -4,6 +4,8 @@ import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AccountReconciliationRecord;
 import com.wk.pfmis.models.AiInteractionRecord;
+import com.wk.pfmis.models.Asset;
+import com.wk.pfmis.models.AssetEvent;
 import com.wk.pfmis.models.BackupRecord;
 import com.wk.pfmis.models.BudgetProgress;
 import com.wk.pfmis.models.Category;
@@ -156,7 +158,7 @@ public class ReportsController {
         reportGroupTitleLabel.setText(group.title());
         reportGroupDescriptionLabel.setText(group.description());
         reportTypeBox.setItems(FXCollections.observableArrayList(group.reportTypes()));
-        String selectedReport = group.reportTypes().contains(requestedReportType)
+        String selectedReport = requestedReportType != null && group.reportTypes().contains(requestedReportType)
                 ? requestedReportType
                 : group.defaultReport();
         reportTypeBox.getSelectionModel().select(selectedReport);
@@ -196,6 +198,9 @@ public class ReportsController {
             case "Category Spending" -> "Category Spending";
             case "Account Balance Report" -> "Balances";
             case "Net Worth Report" -> "Net Worth";
+            case "Asset Register" -> "Assets";
+            case "Asset Valuation" -> "Valuation";
+            case "Asset Disposal" -> "Disposals";
             case "Project Report" -> "Projects";
             case "Savings and Goals Progress" -> "Goals";
             case "Money Borrowed Report" -> "Borrowed";
@@ -260,15 +265,18 @@ public class ReportsController {
                 ),
                 new ReportGroup(
                         "Accounts and Position",
-                        "Review account balances, transfers, reconciliation, net worth and financial position reports.",
+                        "Review account balances, transfers, reconciliation, asset records, net worth and financial position reports.",
                         List.of(
                                 "Account Balance Report",
                                 "Account Reconciliation",
                                 "Transfer Report",
+                                "Asset Register",
+                                "Asset Valuation",
+                                "Asset Disposal",
                                 "Net Worth Report",
                                 "Financial Position"
                         ),
-                        List.of("Account Balance Report", "Account Reconciliation", "Net Worth Report")
+                        List.of("Account Balance Report", "Asset Register", "Asset Valuation", "Net Worth Report")
                 ),
                 new ReportGroup(
                         "Projects and Goals",
@@ -350,6 +358,9 @@ public class ReportsController {
             case "Project Performance" -> refreshAnalyticalOnly(projectPerformanceReport());
             case "Account Reconciliation" -> refreshAnalyticalOnly(accountReconciliationReport());
             case "Transfer Report" -> refreshAnalyticalOnly(transferReport(selectedMonthRange()));
+            case "Asset Register" -> refreshAnalyticalOnly(assetRegisterReport());
+            case "Asset Valuation" -> refreshAnalyticalOnly(assetValuationReport());
+            case "Asset Disposal" -> refreshAnalyticalOnly(assetDisposalReport());
             case "Trends and Forecast" -> refreshAnalyticalOnly(forecastReport());
             case "Financial Health" -> refreshAnalyticalOnly(financialHealthReport());
             case "Unusual Transactions" -> refreshAnalyticalOnly(unusualTransactionsReport());
@@ -641,11 +652,15 @@ public class ReportsController {
                 .filter(account -> !"INACTIVE".equalsIgnoreCase(account.getStatus()))
                 .mapToDouble(Account::getCurrentBalance)
                 .sum();
+        double savingsGroupAssets = database.getCommunitySavingsBalance();
         LoanTotals loans = loanTotalsThrough(range.end());
         List<ReportPositionItem> positionItems = activePositionItems();
         double additionalAssets = positionItems.stream()
                 .filter(item -> "ASSET".equalsIgnoreCase(item.getPositionType()))
                 .mapToDouble(ReportPositionItem::getCurrentValue)
+                .sum();
+        double registeredAssets = activeAssetRecords().stream()
+                .mapToDouble(Asset::getCurrentValue)
                 .sum();
         double additionalLiabilities = positionItems.stream()
                 .filter(item -> "LIABILITY".equalsIgnoreCase(item.getPositionType()))
@@ -659,13 +674,15 @@ public class ReportsController {
                 .filter(schedule -> "LENT".equalsIgnoreCase(schedule.getLoanDirection()))
                 .mapToDouble(LoanScheduleRecord::getOutstandingAmount)
                 .sum();
-        double totalAssets = accountAssets + loans.receivable() + additionalAssets + scheduledLent;
+        double totalAssets = accountAssets + savingsGroupAssets + loans.receivable() + registeredAssets + additionalAssets + scheduledLent;
         double totalLiabilities = loans.liability() + additionalLiabilities + scheduledBorrowed;
         double netWorth = totalAssets - totalLiabilities;
         List<ReportInsightRow> rows = new ArrayList<>();
-        rows.add(row("Assets", "Cash, bank, mobile money and savings balances", accountAssets, 0, accountAssets, 0, accountAssets < 0 ? "Negative" : "Asset", "Reconcile accounts and separate committed funds."));
+        rows.add(row("Assets", "Available account balances", accountAssets, 0, accountAssets, 0, accountAssets < 0 ? "Negative" : "Asset", "Reconcile real accounts and keep committed funds separate."));
+        rows.add(row("Assets", "Savings Groups", savingsGroupAssets, 0, savingsGroupAssets, 0, savingsGroupAssets > 0 ? "Committed savings" : "None", "Savings Group money is part of net worth but not ordinary available cash."));
         rows.add(row("Assets", "Money owed to you from transactions", loans.receivable(), 0, loans.receivable(), 0, loans.receivable() > 0 ? "Receivable" : "None", "Follow up recoveries and record repayments."));
         rows.add(row("Assets", "Scheduled money lent", scheduledLent, 0, scheduledLent, 0, scheduledLent > 0 ? "Receivable" : "None", "Use loan schedules to track due dates and recoveries."));
+        rows.add(row("Assets", "Registered assets from Asset Records", registeredAssets, 0, registeredAssets, 0, registeredAssets > 0 ? "Asset" : "None", "Update valuations and record disposals from Asset Records."));
         rows.add(row("Assets", "Additional assets", additionalAssets, 0, additionalAssets, 0, additionalAssets > 0 ? "Asset" : "None", "Keep valuations current in Report Data Inputs."));
         rows.add(row("Liabilities", "Money you owe from transactions", loans.liability(), 0, -loans.liability(), 0, loans.liability() > 0 ? "Liability" : "None", "Plan repayment from free cash flow."));
         rows.add(row("Liabilities", "Scheduled borrowed money", scheduledBorrowed, 0, -scheduledBorrowed, 0, scheduledBorrowed > 0 ? "Liability" : "None", "Use due dates to prioritize repayment."));
@@ -677,15 +694,13 @@ public class ReportsController {
                 "Estimated net worth is " + MoneyUtil.mwk(netWorth) + ".",
                 netWorth < 0 ? "Liabilities exceed recorded assets." : "Recorded assets exceed liabilities.",
                 netWorth < 0 ? "Prioritize debt reduction and reconcile account balances." : "Track whether net worth is increasing over time.",
-                "Assets and liabilities use account balances, transactions, report position items and loan schedules."
+                "Assets and liabilities use real account balances, Savings Groups, transactions, Asset Records, report position items and loan schedules."
         );
     }
 
     private ReportPackage financialPositionReport(DateRange range) {
-        double availableCash = database.listAccounts().stream()
-                .filter(account -> !"INACTIVE".equalsIgnoreCase(account.getStatus()))
-                .mapToDouble(Account::getCurrentBalance)
-                .sum();
+        double availableCash = database.getAvailableCashAndBankBalance();
+        double savingsGroupAssets = database.getCommunitySavingsBalance();
         double committed = database.listBudgetProgress(selectedMonthKey()).stream()
                 .mapToDouble(progress -> Math.max(0, progress.getRemaining()))
                 .sum();
@@ -693,6 +708,9 @@ public class ReportsController {
         double explicitAssets = activePositionItems().stream()
                 .filter(item -> "ASSET".equalsIgnoreCase(item.getPositionType()))
                 .mapToDouble(ReportPositionItem::getCurrentValue)
+                .sum();
+        double registeredAssets = activeAssetRecords().stream()
+                .mapToDouble(Asset::getCurrentValue)
                 .sum();
         double explicitLiabilities = activePositionItems().stream()
                 .filter(item -> "LIABILITY".equalsIgnoreCase(item.getPositionType()))
@@ -703,9 +721,11 @@ public class ReportsController {
                 .filter(schedule -> "BORROWED".equalsIgnoreCase(schedule.getLoanDirection()))
                 .mapToDouble(LoanScheduleRecord::getOutstandingAmount)
                 .sum();
-        double freePosition = availableCash + explicitAssets - committed - obligations - loans.liability() - scheduledBorrowed - explicitLiabilities;
+        double freePosition = availableCash + registeredAssets + explicitAssets - committed - obligations - loans.liability() - scheduledBorrowed - explicitLiabilities;
         List<ReportInsightRow> rows = new ArrayList<>();
         rows.add(row("Position", "Available cash", availableCash, 0, availableCash, 0, availableCash < 0 ? "Negative" : "Available", "Reconcile account balances."));
+        rows.add(row("Position", "Savings Groups", savingsGroupAssets, 0, savingsGroupAssets, 0, savingsGroupAssets > 0 ? "Committed savings" : "None", "Track separately from available cash to avoid double counting."));
+        rows.add(row("Position", "Registered assets", registeredAssets, 0, registeredAssets, 0, registeredAssets > 0 ? "Recorded" : "None", "Keep Asset Records valuations and disposal statuses current."));
         rows.add(row("Position", "Additional report assets", explicitAssets, 0, explicitAssets, 0, explicitAssets > 0 ? "Available/recorded" : "None", "Keep non-account asset valuations current."));
         rows.add(row("Position", "Restricted or committed money", committed, availableCash, availableCash - committed, percentOf(committed, availableCash), "Committed", "Do not treat committed budget money as free cash."));
         rows.add(row("Position", "Upcoming obligations", obligations, availableCash, availableCash - obligations, percentOf(obligations, availableCash), obligations > availableCash ? "Shortfall risk" : "Covered", "Prepare funds before due dates."));
@@ -720,6 +740,123 @@ public class ReportsController {
                 freePosition < 0 ? "PFMIS should not treat all balances as freely spendable." : "Current free position is positive after known commitments.",
                 freePosition < 0 ? "Cut discretionary spending and reschedule non-essential obligations." : "Maintain this buffer for near-term obligations.",
                 "Committed money uses budgets, scheduled obligations, recurring plans, report position items and loan schedules."
+        );
+    }
+
+    private ReportPackage assetRegisterReport() {
+        List<Asset> assets = database.listAssets();
+        List<ReportInsightRow> rows = assets.stream()
+                .map(asset -> row(
+                        blankAs(asset.getAssetCategory(), "Other"),
+                        assetRegisterItem(asset),
+                        asset.getCurrentValue(),
+                        asset.getTotalCost(),
+                        asset.getCurrentValue() - asset.getTotalCost(),
+                        percentOf(asset.getCurrentValue(), asset.getTotalCost()),
+                        assetStatusLabel(asset.getStatus()),
+                        assetRecommendation(asset)
+                ))
+                .toList();
+        double activeValue = activeAssetRecords().stream().mapToDouble(Asset::getCurrentValue).sum();
+        long activeCount = activeAssetRecords().size();
+        long closedCount = assets.stream().filter(asset -> isTerminalAssetStatus(asset.getStatus())).count();
+        return packageFor(
+                "Asset Register",
+                rows,
+                assets.isEmpty()
+                        ? "No assets have been registered yet."
+                        : assets.size() + " asset record(s) exist. Active asset value is " + MoneyUtil.mwk(activeValue) + ".",
+                closedCount > 0
+                        ? closedCount + " asset record(s) are closed, sold, transferred or disposed and retained for history."
+                        : "No closed asset records were found.",
+                activeCount > 0
+                        ? "Review active asset valuations and record maintenance or disposal from Asset Records when needed."
+                        : "Register assets or reopen valid active records before relying on asset totals.",
+                "Asset Register uses Asset Records. Purchase links, project links, sale events and disposal history remain traceable from the asset record."
+        );
+    }
+
+    private ReportPackage assetValuationReport() {
+        List<Asset> activeAssets = activeAssetRecords();
+        Map<String, List<Asset>> byCategory = activeAssets.stream()
+                .collect(Collectors.groupingBy(asset -> blankAs(asset.getAssetCategory(), "Other"), TreeMap::new, Collectors.toList()));
+        List<ReportInsightRow> rows = new ArrayList<>();
+        for (Map.Entry<String, List<Asset>> entry : byCategory.entrySet()) {
+            double cost = entry.getValue().stream().mapToDouble(Asset::getTotalCost).sum();
+            double currentValue = entry.getValue().stream().mapToDouble(Asset::getCurrentValue).sum();
+            rows.add(row(
+                    "Asset category",
+                    entry.getKey() + " / " + entry.getValue().size() + " active record(s)",
+                    currentValue,
+                    cost,
+                    currentValue - cost,
+                    percentOf(currentValue, cost),
+                    valuationStatus(currentValue, cost),
+                    currentValue < cost
+                            ? "Review depreciation, condition and replacement planning."
+                            : "Keep valuation evidence current and avoid double-counting manual report-input assets."
+            ));
+        }
+        double totalCost = activeAssets.stream().mapToDouble(Asset::getTotalCost).sum();
+        double totalValue = activeAssets.stream().mapToDouble(Asset::getCurrentValue).sum();
+        return packageFor(
+                "Asset Valuation",
+                rows,
+                activeAssets.isEmpty()
+                        ? "No active assets are available for valuation."
+                        : "Active assets are valued at " + MoneyUtil.mwk(totalValue) + " against recorded cost of " + MoneyUtil.mwk(totalCost) + ".",
+                totalValue < totalCost
+                        ? "Recorded asset value is below cost. This may be normal depreciation, damage or disposal preparation."
+                        : "Recorded asset value is at or above cost.",
+                "Update asset values from Asset Records and attach valuation evidence for important assets.",
+                "Valuation excludes assets with Sold, Donated, Transferred, Lost, Written Off, Disposed or Archived status."
+        );
+    }
+
+    private ReportPackage assetDisposalReport() {
+        List<Asset> assets = database.listAssets();
+        List<ReportInsightRow> rows = new ArrayList<>();
+        for (Asset asset : assets) {
+            List<AssetEvent> disposalEvents = database.listAssetEvents(asset.getId()).stream()
+                    .filter(event -> isAssetDisposalEvent(event.getEventType()))
+                    .toList();
+            for (AssetEvent event : disposalEvents) {
+                rows.add(row(
+                        assetStatusLabel(event.getEventType()),
+                        asset.getAssetName() + " / " + blankAs(event.getEventDate(), "no date"),
+                        event.getAmount(),
+                        asset.getTotalCost(),
+                        event.getAmount() - asset.getTotalCost(),
+                        percentOf(event.getAmount(), asset.getTotalCost()),
+                        assetStatusLabel(asset.getStatus()),
+                        disposalRecommendation(event)
+                ));
+            }
+            if (disposalEvents.isEmpty() && isTerminalAssetStatus(asset.getStatus())) {
+                rows.add(row(
+                        assetStatusLabel(asset.getStatus()),
+                        asset.getAssetName() + " / " + blankAs(asset.getPurchaseDate(), "no date"),
+                        asset.getCurrentValue(),
+                        asset.getTotalCost(),
+                        asset.getCurrentValue() - asset.getTotalCost(),
+                        percentOf(asset.getCurrentValue(), asset.getTotalCost()),
+                        assetStatusLabel(asset.getStatus()),
+                        "Closed asset has no matching disposal event. Review Asset Records history."
+                ));
+            }
+        }
+        double disposalProceeds = rows.stream().mapToDouble(ReportInsightRow::getAmount).sum();
+        return packageFor(
+                "Asset Disposal",
+                rows,
+                rows.isEmpty()
+                        ? "No asset sale, transfer, donation, write-off, loss or disposal history was found."
+                        : rows.size() + " disposal or closure event(s) were found. Recorded disposal value is " + MoneyUtil.mwk(disposalProceeds) + ".",
+                rows.stream().anyMatch(row -> row.getRecommendation().contains("no matching disposal event"))
+                        ? "Some closed assets do not have complete disposal history."
+                        : "Disposal history is linked to Asset Records events.",
+                "Use Asset Records -> Open Asset -> More Actions for every sale, transfer, donation, write-off, loss or disposal.",
+                "The full sale price is not treated as ordinary income. Sale proceeds, selling costs and gain or loss are preserved as asset evidence."
         );
     }
 
@@ -1571,8 +1708,12 @@ public class ReportsController {
         return "TRANSFER".equalsIgnoreCase(blankAs(tx.getTransactionType(), ""));
     }
 
+    private boolean isLoanCashMovement(FinanceTransaction tx) {
+        return "LOAN".equalsIgnoreCase(blankAs(tx.getTransactionType(), ""));
+    }
+
     private boolean isCashAffecting(FinanceTransaction tx) {
-        return isIncome(tx) || isExpense(tx) || isTransfer(tx);
+        return isIncome(tx) || isExpense(tx) || isTransfer(tx) || isLoanCashMovement(tx);
     }
 
     private double transferSignedAmount(FinanceTransaction tx) {
@@ -1580,6 +1721,17 @@ public class ReportsController {
             return tx.getAmount();
         }
         if ("TRANSFER_OUT".equalsIgnoreCase(blankAs(tx.getTransactionPurpose(), ""))) {
+            return -tx.getAmount();
+        }
+        return 0;
+    }
+
+    private double loanSignedAmount(FinanceTransaction tx) {
+        String purpose = blankAs(tx.getTransactionPurpose(), "").toUpperCase(Locale.ENGLISH);
+        if ("MONEY_BORROWED".equals(purpose) || "LENT_REPAID".equals(purpose)) {
+            return tx.getAmount();
+        }
+        if ("MONEY_LENT".equals(purpose) || "BORROWED_REPAID".equals(purpose)) {
             return -tx.getAmount();
         }
         return 0;
@@ -1625,6 +1777,9 @@ public class ReportsController {
         }
         if (isTransfer(tx)) {
             return transferSignedAmount(tx);
+        }
+        if (isLoanCashMovement(tx)) {
+            return loanSignedAmount(tx);
         }
         return tx.getAmount();
     }
@@ -1728,6 +1883,132 @@ public class ReportsController {
                 .toList();
     }
 
+    private List<Asset> activeAssetRecords() {
+        return database.listAssets().stream()
+                .filter(asset -> !isTerminalAssetStatus(asset.getStatus()))
+                .filter(asset -> !"PENDING_REGISTRATION".equals(assetStatusCode(asset.getStatus())))
+                .toList();
+    }
+
+    private String assetRegisterItem(Asset asset) {
+        List<String> parts = new ArrayList<>();
+        parts.add(asset.getAssetName());
+        if (asset.getQuantity() > 1.005 || asset.getQuantity() < 0.995) {
+            parts.add("qty " + String.format(Locale.US, "%,.2f", asset.getQuantity()));
+        }
+        if (asset.getProjectName() != null && !asset.getProjectName().isBlank()) {
+            parts.add("project " + asset.getProjectName());
+        }
+        if (asset.getPurchaseTransactionId() != null) {
+            parts.add("txn " + asset.getPurchaseTransactionId());
+        }
+        return String.join(" / ", parts);
+    }
+
+    private String assetRecommendation(Asset asset) {
+        String status = assetStatusCode(asset.getStatus());
+        if ("PENDING_REGISTRATION".equals(status)) {
+            return "Complete acquisition evidence before including this asset in active reports.";
+        }
+        if ("UNDER_MAINTENANCE".equals(status) || "DAMAGED".equals(status) || "FROZEN".equals(status)) {
+            return "Review condition, maintenance and valuation before further disposal or sale.";
+        }
+        if (isTerminalAssetStatus(status)) {
+            return "Keep this record for history. Do not delete sold or disposed assets.";
+        }
+        if (asset.getPurchaseTransactionId() == null && "LINK_EXISTING_TRANSACTION".equalsIgnoreCase(blankAs(asset.getPaymentTreatment(), ""))) {
+            return "Link the purchase transaction so financial evidence is complete.";
+        }
+        return "Keep valuation, location and supporting documents current.";
+    }
+
+    private String valuationStatus(double currentValue, double cost) {
+        if (cost <= 0 && currentValue > 0) {
+            return "Opening value";
+        }
+        if (currentValue < cost * 0.75) {
+            return "Value reduced";
+        }
+        if (currentValue > cost * 1.25) {
+            return "Value increased";
+        }
+        return "Within range";
+    }
+
+    private boolean isAssetDisposalEvent(String eventType) {
+        return Set.of(
+                "SALE",
+                "PARTIAL_SALE",
+                "TRANSFERRED",
+                "DONATED",
+                "WRITTEN_OFF",
+                "LOST",
+                "DISPOSED",
+                "ARCHIVED"
+        ).contains(assetStatusCode(eventType));
+    }
+
+    private String disposalRecommendation(AssetEvent event) {
+        String type = assetStatusCode(event.getEventType());
+        if ("SALE".equals(type) || "PARTIAL_SALE".equals(type)) {
+            return "Review sale proceeds, selling costs and gain or loss evidence.";
+        }
+        if ("WRITE_OFF".equals(type) || "LOST".equals(type) || "DISPOSAL".equals(type)) {
+            return "Confirm approval, reason and supporting evidence are attached.";
+        }
+        if ("DONATION".equals(type) || "TRANSFER".equals(type)) {
+            return "Confirm recipient, transfer evidence and ownership change.";
+        }
+        return "Preserve this asset event in history.";
+    }
+
+    private boolean isTerminalAssetStatus(String status) {
+        return Set.of(
+                "TRANSFERRED",
+                "DONATED",
+                "SOLD",
+                "LOST",
+                "WRITTEN_OFF",
+                "DISPOSED",
+                "ARCHIVED"
+        ).contains(assetStatusCode(status));
+    }
+
+    private String assetStatusCode(String status) {
+        String value = blankAs(status, "ACTIVE").toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if ("TRANSFER".equals(value)) {
+            return "TRANSFERRED";
+        }
+        if ("DONATION".equals(value)) {
+            return "DONATED";
+        }
+        if ("WRITE_OFF".equals(value)) {
+            return "WRITTEN_OFF";
+        }
+        if ("DISPOSAL".equals(value)) {
+            return "DISPOSED";
+        }
+        if ("ARCHIVE".equals(value)) {
+            return "ARCHIVED";
+        }
+        return value;
+    }
+
+    private String assetStatusLabel(String status) {
+        String value = assetStatusCode(status).replace('_', ' ').toLowerCase(Locale.ENGLISH);
+        StringBuilder builder = new StringBuilder();
+        for (String part : value.split(" ")) {
+            if (part.isBlank()) {
+                continue;
+            }
+            if (!builder.isEmpty()) {
+                builder.append(' ');
+            }
+            builder.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+        }
+        return builder.toString();
+    }
+
     private List<ScheduledObligation> activeScheduledObligations() {
         return database.listScheduledObligations().stream()
                 .filter(obligation -> isActiveReportStatus(obligation.getStatus()))
@@ -1748,7 +2029,7 @@ public class ReportsController {
 
     private boolean isActiveReportStatus(String status) {
         String value = blankAs(status, "ACTIVE").toUpperCase(Locale.ENGLISH);
-        return !"CANCELLED".equals(value) && !"INACTIVE".equals(value) && !"COMPLETED".equals(value);
+        return !List.of("CANCELLED", "INACTIVE", "COMPLETED", "SETTLED", "ARCHIVED").contains(value);
     }
 
     private boolean dateBetween(LocalDate date, LocalDate start, LocalDate end) {

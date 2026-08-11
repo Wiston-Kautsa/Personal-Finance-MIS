@@ -2,6 +2,7 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.ai.AiRecommendationService;
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AiSettings;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Goal;
@@ -41,12 +42,19 @@ public class GoalsController {
     @FXML private Label goalGapLabel;
     @FXML private TitledPane goalFormPane;
     @FXML private TextField goalNameField;
+    @FXML private ComboBox<String> goalTypeBox;
     @FXML private ComboBox<String> statusBox;
     @FXML private TextField targetAmountField;
+    @FXML private TextField currencyField;
     @FXML private TextField currentAmountField;
     @FXML private Label availableAccountBalanceLabel;
     @FXML private TextField monthlyContributionField;
+    @FXML private ComboBox<String> contributionFrequencyBox;
+    @FXML private DatePicker startDatePicker;
     @FXML private DatePicker targetDatePicker;
+    @FXML private ComboBox<String> priorityBox;
+    @FXML private ComboBox<Account> fundingAccountBox;
+    @FXML private TextArea descriptionArea;
     @FXML private Button registerGoalStepsButton;
     @FXML private TitledPane goalStepsPane;
     @FXML private ComboBox<Goal> stepGoalBox;
@@ -82,8 +90,26 @@ public class GoalsController {
     @FXML
     public void initialize() {
         if (statusBox != null) {
-            statusBox.setItems(FXCollections.observableArrayList("ACTIVE", "COMPLETED", "PAUSED", "CANCELLED"));
+            statusBox.setItems(FXCollections.observableArrayList("DRAFT", "ACTIVE", "PAUSED", "AT_RISK", "OVERDUE", "ACHIEVED", "CONVERTED_TO_PROJECT", "CANCELLED", "ARCHIVED"));
             statusBox.getSelectionModel().select("ACTIVE");
+        }
+        if (goalTypeBox != null) {
+            goalTypeBox.setItems(FXCollections.observableArrayList("Savings", "Purchase", "Emergency Fund", "Debt Repayment", "Education", "Business", "Investment", "Project", "Other"));
+            goalTypeBox.getSelectionModel().select("Savings");
+        }
+        if (priorityBox != null) {
+            priorityBox.setItems(FXCollections.observableArrayList("Essential", "High", "Medium", "Optional"));
+            priorityBox.getSelectionModel().select("Medium");
+        }
+        if (contributionFrequencyBox != null) {
+            contributionFrequencyBox.setItems(FXCollections.observableArrayList("Weekly", "Monthly", "Quarterly", "Yearly", "Custom"));
+            contributionFrequencyBox.getSelectionModel().select("Monthly");
+        }
+        if (currencyField != null && textValue(currencyField).isBlank()) {
+            currencyField.setText("MWK");
+        }
+        if (startDatePicker != null) {
+            startDatePicker.setValue(LocalDate.now());
         }
         if (stepStatusBox != null) {
             stepStatusBox.setItems(FXCollections.observableArrayList("NEEDED", "IN PROGRESS", "REACHED", "SKIPPED"));
@@ -113,6 +139,20 @@ public class GoalsController {
 
     @FXML
     private void saveGoal() {
+        activateGoal();
+    }
+
+    @FXML
+    private void saveDraft() {
+        saveGoalWithStatus("DRAFT");
+    }
+
+    @FXML
+    private void activateGoal() {
+        saveGoalWithStatus("ACTIVE");
+    }
+
+    private void saveGoalWithStatus(String requestedStatus) {
         try {
             String name = textValue(goalNameField);
             if (name.isEmpty()) {
@@ -123,15 +163,60 @@ public class GoalsController {
             double currentAmount = parseOptionalAmount(currentAmountField.getText());
             double monthlyContribution = parseOptionalAmount(monthlyContributionField.getText());
             String targetDate = targetDatePicker.getValue() == null ? null : targetDatePicker.getValue().toString();
-            String status = goalStatus(targetAmount, currentAmount);
+            if (!"DRAFT".equals(requestedStatus) && database.goalExistsByName(name, null)) {
+                UiAlerts.info("A goal with this name already exists. Open Goal Records to review or update it.");
+                return;
+            }
+            Account fundingAccount = fundingAccountBox == null ? null : fundingAccountBox.getValue();
+            if (!"DRAFT".equals(requestedStatus) && currentAmount > 0 && fundingAccount != null) {
+                double alreadyAllocated = database.activeGoalAllocationForAccount(fundingAccount.getId(), null);
+                if (alreadyAllocated + currentAmount > fundingAccount.getCurrentBalance() + 0.005) {
+                    UiAlerts.info("The selected funding account does not have enough unallocated savings for this opening allocation.");
+                    return;
+                }
+            }
+            String status = "DRAFT".equals(requestedStatus) ? "DRAFT" : goalStatus(targetAmount, currentAmount);
 
-            database.addGoal(name, targetAmount, currentAmount, monthlyContribution, targetDate, status);
+            int goalId = database.addGoal(
+                    name,
+                    selectedValue(goalTypeBox, "Savings"),
+                    targetAmount,
+                    textValue(currencyField).isBlank() ? "MWK" : textValue(currencyField),
+                    currentAmount,
+                    startDatePicker == null || startDatePicker.getValue() == null ? null : startDatePicker.getValue().toString(),
+                    targetDate,
+                    selectedValue(priorityBox, "Medium"),
+                    fundingAccount == null ? null : fundingAccount.getId(),
+                    selectedValue(contributionFrequencyBox, "Monthly"),
+                    monthlyContribution,
+                    textAreaValue(descriptionArea),
+                    status
+            );
+            if (!"DRAFT".equals(status) && currentAmount > 0) {
+                database.recordGoalContribution(
+                        goalId,
+                        startDatePicker == null || startDatePicker.getValue() == null ? LocalDate.now() : startDatePicker.getValue(),
+                        currentAmount,
+                        textValue(currencyField).isBlank() ? "MWK" : textValue(currencyField),
+                        "OPENING_ALLOCATION",
+                        fundingAccount == null ? null : fundingAccount.getId(),
+                        null,
+                        null,
+                        "OPENING-" + goalId,
+                        "ACTIVE",
+                        "Opening allocation entered when the goal was activated."
+                );
+            }
             clearForm();
             refresh();
             DataRefreshBus.notifyDataChanged();
-            UiAlerts.info("Goal registered.");
+            UiAlerts.info(("DRAFT".equals(status) ? "Goal draft saved." : "Goal activated successfully.")
+                    + "\n\nGoal: " + name
+                    + "\nTarget: " + MoneyUtil.mwk(targetAmount)
+                    + "\nTarget date: " + blankToDash(targetDate)
+                    + "\nRequired monthly contribution: " + MoneyUtil.mwk(requiredMonthlyContribution(targetAmount, currentAmount, targetDatePicker.getValue())));
         } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to register goal", exception);
+            UiAlerts.error("Failed to save goal", exception);
         }
     }
 
@@ -139,11 +224,32 @@ public class GoalsController {
     private void clearForm() {
         goalFormPane.setText("Register Goal");
         goalNameField.clear();
+        if (goalTypeBox != null) {
+            goalTypeBox.getSelectionModel().select("Savings");
+        }
         targetAmountField.clear();
+        if (currencyField != null) {
+            currencyField.setText("MWK");
+        }
         monthlyContributionField.clear();
+        if (contributionFrequencyBox != null) {
+            contributionFrequencyBox.getSelectionModel().select("Monthly");
+        }
+        if (startDatePicker != null) {
+            startDatePicker.setValue(LocalDate.now());
+        }
         targetDatePicker.setValue(null);
         statusBox.getSelectionModel().select("ACTIVE");
+        if (priorityBox != null) {
+            priorityBox.getSelectionModel().select("Medium");
+        }
+        if (fundingAccountBox != null) {
+            fundingAccountBox.setValue(null);
+        }
         currentAmountField.clear();
+        if (descriptionArea != null) {
+            descriptionArea.clear();
+        }
         applyAvailableAccountDefault();
         refreshGoalInsight();
     }
@@ -414,13 +520,27 @@ public class GoalsController {
 
     private void refreshGoalChoices() {
         List<Goal> goals = database.listGoals();
+        if (fundingAccountBox != null) {
+            Integer selectedId = fundingAccountBox.getValue() == null ? null : fundingAccountBox.getValue().getId();
+            List<Account> accounts = database.listAccounts().stream()
+                    .filter(account -> !"INACTIVE".equalsIgnoreCase(account.getStatus()))
+                    .toList();
+            fundingAccountBox.setItems(FXCollections.observableArrayList(accounts));
+            if (selectedId != null) {
+                accounts.stream()
+                        .filter(account -> account.getId() == selectedId)
+                        .findFirst()
+                        .ifPresent(fundingAccountBox::setValue);
+            }
+        }
         if (registerGoalStepsButton != null) {
             registerGoalStepsButton.setDisable(goals.isEmpty());
         }
         if (stepGoalBox == null) {
             return;
         }
-        int selectedGoalId = selectedStepGoalId();
+        Integer requestedGoalId = NavigationBus.consumeRequestedGoalId();
+        int selectedGoalId = requestedGoalId == null ? selectedStepGoalId() : requestedGoalId;
         stepGoalBox.setItems(FXCollections.observableArrayList(goals));
         selectStepGoal(selectedGoalId);
         if (stepGoalBox.getValue() == null && !goals.isEmpty()) {
@@ -729,13 +849,8 @@ public class GoalsController {
             return;
         }
         double availableBalance = Math.max(0, database.getDashboardStats().getTotalBalance());
-        String defaultValue = String.format(Locale.ENGLISH, "%.2f", availableBalance);
-        String currentValue = textValue(currentAmountField);
-        if (currentValue.isBlank() || currentValue.equals(lastAccountBalanceDefault)) {
-            currentAmountField.setText(defaultValue);
-        }
-        lastAccountBalanceDefault = defaultValue;
-        availableAccountBalanceLabel.setText("From active accounts: " + MoneyUtil.mwk(availableBalance));
+        lastAccountBalanceDefault = String.format(Locale.ENGLISH, "%.2f", availableBalance);
+        availableAccountBalanceLabel.setText("Active account balance available to allocate: " + MoneyUtil.mwk(availableBalance));
     }
 
     private void refreshAiStatus() {
@@ -926,7 +1041,7 @@ public class GoalsController {
     private String goalStatus(double targetAmount, double currentAmount) {
         String selectedStatus = normalizedStatus(statusBox.getValue());
         if ("ACTIVE".equals(selectedStatus) && targetAmount > 0 && currentAmount >= targetAmount) {
-            return "COMPLETED";
+            return "ACHIEVED";
         }
         return selectedStatus;
     }
@@ -935,7 +1050,23 @@ public class GoalsController {
         if (status == null || status.isBlank()) {
             return "ACTIVE";
         }
-        return status.trim().toUpperCase(Locale.ENGLISH);
+        return status.trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+    }
+
+    private double requiredMonthlyContribution(double targetAmount, double currentAmount, LocalDate targetDate) {
+        if (targetDate == null || !targetDate.isAfter(LocalDate.now())) {
+            return 0;
+        }
+        double remaining = Math.max(0, targetAmount - currentAmount);
+        long months = Math.max(1, ChronoUnit.MONTHS.between(YearMonth.now(), YearMonth.from(targetDate)) + 1);
+        return remaining / months;
+    }
+
+    private String selectedValue(ComboBox<String> comboBox, String fallback) {
+        if (comboBox == null || comboBox.getValue() == null || comboBox.getValue().isBlank()) {
+            return fallback;
+        }
+        return comboBox.getValue();
     }
 
     private LocalDate parseDate(String value) {

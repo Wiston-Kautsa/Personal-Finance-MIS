@@ -13,8 +13,8 @@
       spacing="12" maxWidth="Infinity" styleClass="page-section data-record-page">
     <children>
         <VBox spacing="6" styleClass="panel data-record-hero">
-            <Label text="Sync Center" styleClass="section-heading"/>
-            <Label text="Local record readiness, backup snapshot, and future external sync controls." wrapText="true" styleClass="form-note"/>
+            <Label text="Local Sync and Recovery Center" styleClass="section-heading"/>
+            <Label text="Local record readiness, backup snapshot, and recovery checks. Remote server sync is not configured in this release." wrapText="true" styleClass="form-note"/>
         </VBox>
 
         <FlowPane hgap="12" vgap="12" prefWrapLength="900">
@@ -36,11 +36,11 @@
             </VBox>
         </FlowPane>
 
-        <TitledPane text="Record Sync Actions" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <TitledPane text="Local Readiness Actions" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
             <VBox spacing="10" styleClass="settings-section">
                 <Label fx:id="syncDetailLabel" text="Run sync check before moving data." wrapText="true" styleClass="settings-status-text"/>
                 <FlowPane hgap="8" vgap="8" prefWrapLength="880" styleClass="account-form-actions">
-                    <Button text="Run Sync Check" onAction="#runSyncCheck" minWidth="130" styleClass="primary-button"/>
+                    <Button text="Run Local Check" onAction="#runSyncCheck" minWidth="130" styleClass="primary-button"/>
                     <Button text="Open Data Folder" onAction="#openDataFolder" minWidth="145" styleClass="secondary-button"/>
                 </FlowPane>
             </VBox>

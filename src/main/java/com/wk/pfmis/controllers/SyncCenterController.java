@@ -31,11 +31,11 @@ public class SyncCenterController {
         backupStateLabel.setText(backup == null
                 ? "Latest daily backup: not created yet"
                 : "Latest daily backup: " + fileName(backup.getBackupFile()) + " | " + backup.getCreatedAt());
-        syncModeLabel.setText("Sync mode: local device record center");
+        syncModeLabel.setText("Mode: local readiness and recovery");
         syncStatusLabel.setText(backup == null ? "Action needed" : "Ready");
         syncDetailLabel.setText(backup == null
                 ? "Create a daily backup before external transfer, restore, or device migration."
-                : "Records are available locally. Remote sync can be added here when a PostgreSQL or cloud sync service is connected.");
+                : "Records are available locally. No remote sync connector is configured in this release.");
     }
 
     @FXML
@@ -55,10 +55,10 @@ public class SyncCenterController {
                 syncStatusLabel.setText("Ready");
                 syncDetailLabel.setText("Local data and latest backup are ready for record review.");
             }
-            database.recordSystemLog("Data And Records", "Sync check", "INFO", syncDetailLabel.getText());
+            database.recordSystemLog("Data And Records", "Local readiness check", "INFO", syncDetailLabel.getText());
         } catch (RuntimeException exception) {
-            database.recordSystemLog("Data And Records", "Sync check failed", "ERROR", rootMessage(exception));
-            UiAlerts.error("Sync check failed", exception);
+            database.recordSystemLog("Data And Records", "Local readiness check failed", "ERROR", rootMessage(exception));
+            UiAlerts.error("Local readiness check failed", exception);
             syncStatusLabel.setText("Failed");
             syncDetailLabel.setText(rootMessage(exception));
         }

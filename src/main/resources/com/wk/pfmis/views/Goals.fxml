@@ -7,6 +7,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
@@ -44,31 +45,60 @@
                             <TextField fx:id="goalNameField" promptText="Emergency fund" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Goal Type" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="goalTypeBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
                             <Label text="Target Amount *" wrapText="true" styleClass="field-label"/>
                             <TextField fx:id="targetAmountField" promptText="500000" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="goal-field">
-                            <Label text="Already Saved" wrapText="true" styleClass="field-label"/>
-                            <TextField fx:id="currentAmountField" promptText="Active account balance" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
-                            <Label fx:id="availableAccountBalanceLabel" text="From active accounts: MWK 0.00" wrapText="true" styleClass="metric-note"/>
+                            <Label text="Currency" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="currencyField" promptText="MWK" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Current Allocated Amount" wrapText="true" styleClass="field-label"/>
+                            <TextField fx:id="currentAmountField" promptText="0.00" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                            <Label fx:id="availableAccountBalanceLabel" text="Opening allocation; no balance changes yet." wrapText="true" styleClass="metric-note"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Start Date" wrapText="true" styleClass="field-label"/>
+                            <DatePicker fx:id="startDatePicker" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="goal-field">
                             <Label text="Monthly Contribution" wrapText="true" styleClass="field-label"/>
                             <TextField fx:id="monthlyContributionField" promptText="50000" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Contribution Frequency" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="contributionFrequencyBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
                             <Label text="Target Date" wrapText="true" styleClass="field-label"/>
                             <DatePicker fx:id="targetDatePicker" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Priority" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="priorityBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
+                        </VBox>
+                        <VBox spacing="6" styleClass="goal-field">
+                            <Label text="Funding Account" wrapText="true" styleClass="field-label"/>
+                            <ComboBox fx:id="fundingAccountBox" promptText="Optional account" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
                         <VBox spacing="6" styleClass="goal-field">
                             <Label text="Status" wrapText="true" styleClass="field-label"/>
                             <ComboBox fx:id="statusBox" minHeight="34" prefHeight="34" maxHeight="34" maxWidth="Infinity"/>
                         </VBox>
+                        <VBox spacing="6" styleClass="goal-project-description">
+                            <Label text="Description" wrapText="true" styleClass="field-label"/>
+                            <TextArea fx:id="descriptionArea" promptText="Goal purpose, constraints, notes or funding assumptions" wrapText="true" prefRowCount="3" maxWidth="Infinity"/>
+                        </VBox>
                     </FlowPane>
                     <HBox spacing="8" alignment="CENTER_RIGHT" styleClass="account-form-actions">
                         <Region HBox.hgrow="ALWAYS"/>
-                        <Button text="Register Goal" onAction="#saveGoal" minWidth="120" styleClass="primary-button"/>
-                        <Button text="Clear" onAction="#clearForm" minWidth="90" styleClass="secondary-button"/>
+                        <Button text="Save Draft" onAction="#saveDraft" minWidth="120" styleClass="secondary-button"/>
+                        <Button text="Activate Goal" onAction="#activateGoal" minWidth="120" styleClass="primary-button"/>
+                        <Button text="Clear Form" onAction="#clearForm" minWidth="110" styleClass="secondary-button"/>
                     </HBox>
                 </VBox>
             </TitledPane>

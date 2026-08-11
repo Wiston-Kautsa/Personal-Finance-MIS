@@ -92,17 +92,26 @@ public class BudgetProgress {
 
     public String getMonthResult() {
         String storedStatus = budget.getStatus() == null ? "" : budget.getStatus().trim().toUpperCase(Locale.ENGLISH);
+        if ("DRAFT".equals(storedStatus)) {
+            return "Draft";
+        }
         if ("PAUSED".equals(storedStatus)) {
             return "Paused";
         }
-        if ("FULFILLED".equals(storedStatus)) {
-            return "Fulfilled";
+        if ("CLOSED".equals(storedStatus) || "FULFILLED".equals(storedStatus)) {
+            return "Closed";
         }
-        if ("NOT_MET".equals(storedStatus)) {
-            return "Not Met";
+        if ("ARCHIVED".equals(storedStatus)) {
+            return "Archived";
+        }
+        if ("EXCEEDED".equals(storedStatus) || "NOT_MET".equals(storedStatus)) {
+            return "Exceeded";
+        }
+        if ("AT_RISK".equals(storedStatus)) {
+            return "At Risk";
         }
         if (spent > budget.getAmountLimit()) {
-            return "Not Met";
+            return "Exceeded";
         }
         YearMonth month = parseMonth(budget.getBudgetMonth());
         YearMonth currentMonth = YearMonth.now();
@@ -113,15 +122,18 @@ public class BudgetProgress {
             return "Planned";
         }
         if (month.isBefore(currentMonth)) {
-            return "Fulfilled";
+            return "Closed";
         }
         return "On Budget";
     }
 
     public String getActionNeeded() {
         return switch (getMonthResult()) {
-            case "Not Met" -> "Review spending and adjust the next monthly budget.";
-            case "Fulfilled" -> "Close the month or roll unused amount forward.";
+            case "Exceeded" -> "Review spending and revise or reduce the category.";
+            case "At Risk" -> "Projected spending may exceed this limit before period end.";
+            case "Closed" -> "Final totals are preserved for reporting.";
+            case "Archived" -> "Historical budget kept out of daily monitoring.";
+            case "Draft" -> "Activate the budget before monitoring starts.";
             case "On Budget" -> "Keep tracking this month.";
             case "Planned" -> "Ready for the selected month.";
             case "Paused" -> "Budget is paused.";
@@ -130,11 +142,11 @@ public class BudgetProgress {
     }
 
     public boolean isFulfilled() {
-        return "Fulfilled".equals(getMonthResult());
+        return "Closed".equals(getMonthResult());
     }
 
     public boolean isNotMet() {
-        return "Not Met".equals(getMonthResult());
+        return "Exceeded".equals(getMonthResult());
     }
 
     public boolean isOnBudget() {
@@ -147,6 +159,34 @@ public class BudgetProgress {
 
     public Budget getBudget() {
         return budget;
+    }
+
+    public String getBudgetType() {
+        return budget.getBudgetType();
+    }
+
+    public String getStartDate() {
+        return budget.getStartDate();
+    }
+
+    public String getEndDate() {
+        return budget.getEndDate();
+    }
+
+    public String getCurrency() {
+        return budget.getCurrency();
+    }
+
+    public double getExpectedIncome() {
+        return budget.getExpectedIncome();
+    }
+
+    public double getPlannedSavings() {
+        return budget.getPlannedSavings();
+    }
+
+    public double getOverallSpendingLimit() {
+        return budget.getOverallSpendingLimit();
     }
 
     private YearMonth parseMonth(String value) {
@@ -162,12 +202,14 @@ public class BudgetProgress {
             return "Planned";
         }
         return switch (value.trim().toUpperCase(Locale.ENGLISH)) {
-            case "ACTIVE", "ON_BUDGET" -> "On Budget";
-            case "FULFILLED" -> "Fulfilled";
-            case "NOT_MET" -> "Not Met";
+            case "DRAFT", "PLANNED" -> "Draft";
+            case "ACTIVE", "ON_BUDGET" -> "Active";
+            case "AT_RISK" -> "At Risk";
+            case "EXCEEDED", "NOT_MET" -> "Exceeded";
             case "PAUSED" -> "Paused";
             case "CLOSED" -> "Closed";
-            default -> "Planned";
+            case "ARCHIVED" -> "Archived";
+            default -> "Draft";
         };
     }
 }

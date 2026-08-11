@@ -13,10 +13,8 @@
     <Label fx:id="sectionTitleLabel" text="Data Intake" styleClass="view-title"/>
     <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
         <tabs>
-            <Tab fx:id="supplementaryInputsTab" text="Supplementary Report Inputs"/>
-            <Tab fx:id="fileImportTab" text="File Import"/>
-            <Tab fx:id="importValidationTab" text="Import Validation"/>
-            <Tab fx:id="postingApprovalTab" text="Posting and Approval"/>
+            <Tab fx:id="supplementaryInputsTab" text="Manual Inputs"/>
+            <Tab fx:id="fileImportTab" text="Import File"/>
             <Tab fx:id="rejectedRecordsTab" text="Rejected Records"/>
             <Tab fx:id="importHistoryTab" text="Import History"/>
         </tabs>

@@ -21,40 +21,66 @@
             <VBox spacing="6" styleClass="panel data-record-hero">
                 <Label fx:id="policyTitleLabel" text="Data Governance" styleClass="section-heading"/>
                 <Label fx:id="policySubtitleLabel" text="Data and Records governance area." wrapText="true" styleClass="form-note"/>
-                <Label fx:id="policyStatusLabel" text="Ready." wrapText="true" styleClass="settings-status-text"/>
+                <Label text="Active Workflow - Select workflow steps, required fields and process buttons to run available checks, create requests, export evidence or create safety backups. High-risk import, freeze, purge, reset, delete and sync writes remain controlled by role, backup, confirmation and audit requirements." wrapText="true" styleClass="data-preview-banner"/>
+                <Label fx:id="policyStatusLabel" text="Active workflow ready." wrapText="true" styleClass="settings-status-text"/>
             </VBox>
 
             <FlowPane hgap="12" vgap="12" prefWrapLength="980">
-                <VBox spacing="5" styleClass="data-wireframe-card">
+                <VBox spacing="5" styleClass="data-workbench-card">
                     <Label text="Process Phase" styleClass="field-label"/>
                     <Label fx:id="phaseLabel" text="Governance" wrapText="true" styleClass="settings-status-title"/>
                 </VBox>
-                <VBox spacing="5" styleClass="data-wireframe-card">
+                <VBox spacing="5" styleClass="data-workbench-card">
                     <Label text="Primary Owner" styleClass="field-label"/>
                     <Label fx:id="ownerLabel" text="Administrator" wrapText="true" styleClass="settings-status-title"/>
                 </VBox>
-                <VBox spacing="5" styleClass="data-wireframe-card">
+                <VBox spacing="5" styleClass="data-workbench-card">
                     <Label text="Risk Level" styleClass="field-label"/>
                     <Label fx:id="riskLabel" text="Controlled" wrapText="true" styleClass="settings-status-title"/>
                 </VBox>
-                <VBox spacing="5" styleClass="data-wireframe-card-wide">
+                <VBox spacing="5" styleClass="data-workbench-card-wide">
                     <Label text="Financial Impact" styleClass="field-label"/>
                     <Label fx:id="impactLabel" text="No direct financial posting from this page." wrapText="true" styleClass="settings-status-title"/>
                 </VBox>
             </FlowPane>
 
-            <TitledPane text="Professional Process Wireframe" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                <VBox spacing="12" styleClass="settings-section">
-                    <Label text="Workflow Steps" styleClass="table-title"/>
-                    <FlowPane fx:id="workflowStepsPane" hgap="10" vgap="10" prefWrapLength="980"/>
-                    <Label text="Expected Screen Inputs / Columns" styleClass="table-title"/>
-                    <FlowPane fx:id="wireframeFieldsPane" hgap="10" vgap="10" prefWrapLength="980"/>
+            <TitledPane fx:id="workbenchPane" text="Workflow Workbench" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+                <VBox spacing="14" styleClass="settings-section data-functional-workbench">
+                    <VBox spacing="6" styleClass="workbench-purpose-block">
+                        <Label text="What this space does" styleClass="table-title"/>
+                        <Label fx:id="workbenchSummaryLabel" text="This workspace shows the selected system function, the screen areas the user should see, required data, approval controls and evidence produced." wrapText="true" styleClass="workbench-summary-text"/>
+                        <FlowPane fx:id="functionalityOverviewPane" hgap="10" vgap="10" prefWrapLength="980"/>
+                    </VBox>
+
+                    <FlowPane hgap="12" vgap="12" prefWrapLength="980">
+                        <VBox spacing="8" styleClass="workbench-function-column">
+                            <Label text="Operational screen areas" styleClass="table-title"/>
+                            <FlowPane fx:id="screenAreasPane" hgap="8" vgap="8" prefWrapLength="455"/>
+                        </VBox>
+                        <VBox spacing="8" styleClass="workbench-function-column">
+                            <Label text="Data required before action" styleClass="table-title"/>
+                            <FlowPane fx:id="workbenchFieldsPane" hgap="8" vgap="8" prefWrapLength="455"/>
+                        </VBox>
+                        <VBox spacing="8" styleClass="workbench-function-column">
+                            <Label text="Controls that must pass" styleClass="table-title"/>
+                            <FlowPane fx:id="controlChecksPane" hgap="8" vgap="8" prefWrapLength="455"/>
+                        </VBox>
+                        <VBox spacing="8" styleClass="workbench-function-column">
+                            <Label text="Outputs and evidence produced" styleClass="table-title"/>
+                            <FlowPane fx:id="decisionOutputsPane" hgap="8" vgap="8" prefWrapLength="455"/>
+                        </VBox>
+                    </FlowPane>
+
+                    <VBox spacing="8" styleClass="workbench-workflow-block">
+                        <Label text="Workflow steps the screen must support" styleClass="table-title"/>
+                        <FlowPane fx:id="workflowStepsPane" hgap="8" vgap="8" prefWrapLength="980"/>
+                    </VBox>
                 </VBox>
             </TitledPane>
 
-            <TitledPane text="Process Buttons" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <TitledPane text="Active Process Buttons" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
                 <VBox spacing="10" styleClass="settings-section">
-                    <Label text="Every button below is wired to a safe action: preview, validate, request, export, log evidence or create backup. Destructive execution remains restricted to the controlled maintenance workflow." wrapText="true" styleClass="form-note"/>
+                    <Label text="Every button below is active. Available safe actions run immediately; high-impact changes are routed through controlled request, backup, confirmation and audit steps before execution." wrapText="true" styleClass="form-note"/>
                     <FlowPane fx:id="processActionsPane" hgap="8" vgap="8" prefWrapLength="980"/>
                 </VBox>
             </TitledPane>

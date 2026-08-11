@@ -4,8 +4,6 @@
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.DatePicker?>
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.control.TableColumn?>
-<?import javafx.scene.control.TableView?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
@@ -15,81 +13,61 @@
 
 <VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.wk.pfmis.controllers.TransferMoneyController" styleClass="panel">
-    <Label text="Transfer &amp; SMS Intake" styleClass="section-heading"/>
+    <Label text="Transfer Money" styleClass="section-heading"/>
 
-    <TitledPane text="Source Review" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+    <TitledPane text="Transfer Details" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
         <VBox spacing="12">
             <GridPane hgap="16" vgap="10">
-                <Label text="Source" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
-                <ComboBox fx:id="sourceBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <Label text="Transfer date" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <DatePicker fx:id="transferDatePicker" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
 
-                <Label text="Direction" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
-                <ComboBox fx:id="directionBox" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <Label text="Status" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="statusBox" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
 
-                <Label text="Classification" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
-                <ComboBox fx:id="classificationBox" prefWidth="220" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label text="From account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="fromAccountBox" promptText="Account money leaves" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label fx:id="fromBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="1" GridPane.columnSpan="2"/>
 
-                <Label text="Review Status" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
-                <ComboBox fx:id="reviewStatusBox" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+                <Label text="To account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <ComboBox fx:id="toAccountBox" promptText="Account money enters" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <Label fx:id="toBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="2" GridPane.columnSpan="2"/>
 
-                <Label text="Raw Message" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-                <TextArea fx:id="rawMessageArea" promptText="Paste mobile money or bank notification text" prefRowCount="3"
-                          GridPane.columnIndex="1" GridPane.rowIndex="2" GridPane.columnSpan="3"/>
+                <Label text="Amount" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextField fx:id="amountField" promptText="100000" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <Label text="Currency" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="3"/>
+                <TextField fx:id="currencyField" editable="false" promptText="Account currency" prefWidth="180" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
+
+                <Label text="Transfer fee" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+                <TextField fx:id="feeField" promptText="0" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+
+                <Label text="Fee category" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="feeCategoryBox" editable="true" promptText="Transaction Fees" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="4"/>
+
+                <Label text="Exchange rate" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+                <TextField fx:id="exchangeRateField" promptText="Required for different currencies" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+
+                <Label text="Payment method" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="5"/>
+                <ComboBox fx:id="paymentMethodBox" editable="true" promptText="Bank transfer, mobile money..." prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="5"/>
+
+                <Label text="Reference number" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                <TextField fx:id="referenceField" promptText="Receipt or transaction ID" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
+
+                <Label text="Description" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+                <TextArea fx:id="descriptionArea" prefRowCount="3" GridPane.columnIndex="1" GridPane.rowIndex="7" GridPane.columnSpan="3"/>
             </GridPane>
-        </VBox>
-    </TitledPane>
 
-    <TitledPane text="Posting Details" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-        <VBox spacing="12">
-            <GridPane hgap="16" vgap="10">
-                <Label text="Debit / From Account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
-                <ComboBox fx:id="fromAccountBox" promptText="Account money leaves" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
-                <Label fx:id="fromBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
-
-                <Label text="Credit / To Account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
-                <ComboBox fx:id="toAccountBox" promptText="Account money enters" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
-                <Label fx:id="toBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
-
-                <Label text="Amount Sent" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
-                <TextField fx:id="amountSentField" promptText="50000" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
-                <Label text="Amount Received" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
-                <TextField fx:id="amountReceivedField" promptText="Leave blank if same amount" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
-
-                <Label text="Date" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
-                <DatePicker fx:id="datePicker" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
-                <Label text="Method" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="3"/>
-                <ComboBox fx:id="paymentMethodBox" editable="true" promptText="Bank transfer, mobile money..." prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
-
-                <Label text="Category" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
-                <ComboBox fx:id="categoryBox" editable="true" promptText="Income, loan, or other category" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
-                <Label text="Contact / Institution" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="4"/>
-                <ComboBox fx:id="personBox" editable="true" promptText="Borrower, lender, or sender" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="4"/>
-
-                <Label text="Reference" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
-                <TextField fx:id="referenceField" promptText="Receipt or transaction ID" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
-
-                <Label text="Note" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
-                <TextArea fx:id="descriptionArea" prefRowCount="2" GridPane.columnIndex="1" GridPane.rowIndex="6" GridPane.columnSpan="3"/>
-            </GridPane>
+            <Label fx:id="transferCheckLabel" text="A transfer moves money between your own accounts; it is not income or an expense." styleClass="form-note"/>
 
             <HBox spacing="8">
-                <Button text="Post Movement" onAction="#saveTransfer" styleClass="primary-button"/>
-                <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
-                <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+                <Button text="Save Draft" onAction="#saveDraft" styleClass="secondary-button"/>
+                <Button text="Transfer Money" onAction="#transferMoney" styleClass="primary-button"/>
+                <Button text="Clear Form" onAction="#clearForm" styleClass="link-button"/>
             </HBox>
         </VBox>
     </TitledPane>
 
-    <Label text="Recent Classified Movements" styleClass="table-title"/>
-    <TableView fx:id="transfersTable" prefHeight="260" VBox.vgrow="ALWAYS">
-        <columns>
-            <TableColumn fx:id="dateColumn" text="Date" prefWidth="105"/>
-            <TableColumn fx:id="accountColumn" text="Account" prefWidth="180"/>
-            <TableColumn fx:id="purposeColumn" text="Classification" prefWidth="185"/>
-            <TableColumn fx:id="counterpartyColumn" text="Contact" prefWidth="160"/>
-            <TableColumn fx:id="amountColumn" text="Amount" prefWidth="140"/>
-            <TableColumn fx:id="methodColumn" text="Method" prefWidth="145"/>
-            <TableColumn fx:id="referenceColumn" text="Reference" prefWidth="160"/>
-        </columns>
-    </TableView>
+    <TitledPane text="Posting Result" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <TextArea fx:id="resultArea" editable="false" wrapText="true" prefRowCount="7"/>
+    </TitledPane>
 </VBox>

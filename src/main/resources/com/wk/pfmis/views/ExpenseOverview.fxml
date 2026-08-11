@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="18" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ExpenseOverviewController" styleClass="module-overview-page expense-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Expense Overview" styleClass="section-heading"/>
+            <Label text="Spending, planned obligations and recurring expenses without mixing entry forms and records." wrapText="true" styleClass="form-note"/>
+            <Label fx:id="emptyStateLabel" text="Loading expense overview..." wrapText="true" styleClass="overview-empty-state"/>
+        </VBox>
+        <Button text="+ Record Expense" onAction="#openRecordExpense" styleClass="primary-button"/>
+        <Button text="Expense Records" onAction="#openExpenseRecords" styleClass="secondary-button"/>
+        <Button text="Planned Expenses" onAction="#openPlannedRecurringExpenses" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <GridPane hgap="12" vgap="12">
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+            <Label text="Spent This Month" styleClass="metric-title"/>
+            <Label fx:id="spentValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Posted expense transactions" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+            <Label text="Planned Next 30 Days" styleClass="metric-title"/>
+            <Label fx:id="plannedValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Scheduled obligations due soon" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+            <Label text="Overdue Items" styleClass="metric-title"/>
+            <Label fx:id="overdueValueLabel" text="0" styleClass="metric-value"/>
+            <Label text="Planned or recurring items past due" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+            <Label text="Recurring Due" styleClass="metric-title"/>
+            <Label fx:id="recurringValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Active expense plans due soon" styleClass="metric-note"/>
+        </VBox>
+    </GridPane>
+
+    <TitledPane text="Expense Attention" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <Label fx:id="attentionStateLabel" text="No expense items need attention." styleClass="form-note"/>
+            <TableView fx:id="attentionTable" prefHeight="220" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="attentionItemColumn" text="Item" prefWidth="220"/>
+                    <TableColumn fx:id="attentionTypeColumn" text="Type" prefWidth="180"/>
+                    <TableColumn fx:id="attentionAccountColumn" text="Account" prefWidth="180"/>
+                    <TableColumn fx:id="attentionAmountColumn" text="Amount" prefWidth="150"/>
+                    <TableColumn fx:id="attentionDueColumn" text="Due Date" prefWidth="125"/>
+                    <TableColumn fx:id="attentionStatusColumn" text="Status" prefWidth="130"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Recent Expenses" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="recentStateLabel" text="No posted expenses yet." styleClass="form-note"/>
+                <TableView fx:id="recentExpenseTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="recentDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="recentCategoryColumn" text="Category" prefWidth="180"/>
+                        <TableColumn fx:id="recentAccountColumn" text="Account" prefWidth="190"/>
+                        <TableColumn fx:id="recentAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="recentProjectColumn" text="Project" prefWidth="170"/>
+                        <TableColumn fx:id="recentStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+                <HBox alignment="CENTER_RIGHT">
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button text="Open Expense Records" onAction="#openExpenseRecords" styleClass="secondary-button"/>
+                </HBox>
+            </VBox>
+        </TitledPane>
+        <TitledPane text="Upcoming Expenses" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="upcomingStateLabel" text="No upcoming planned or recurring expenses." styleClass="form-note"/>
+                <TableView fx:id="upcomingExpenseTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="upcomingDueColumn" text="Due Date" prefWidth="125"/>
+                        <TableColumn fx:id="upcomingDescriptionColumn" text="Description" prefWidth="200"/>
+                        <TableColumn fx:id="upcomingAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="upcomingAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="upcomingFrequencyColumn" text="Frequency" prefWidth="130"/>
+                        <TableColumn fx:id="upcomingStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

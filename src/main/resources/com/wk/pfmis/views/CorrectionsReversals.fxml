@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.CorrectionsReversalsController" styleClass="core-workspace-page transaction-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Corrections &amp; Reversals" styleClass="section-heading"/>
+            <Label text="Controlled lifecycle actions for incorrect posted income or expense records. Reversals use the existing transaction system." wrapText="true" styleClass="form-note"/>
+        </VBox>
+        <Button text="Open Ledger" onAction="#openLedger" styleClass="primary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <TitledPane text="Lifecycle Action" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <GridPane hgap="18" vgap="10">
+                <Label text="Transaction ID *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <TextField fx:id="transactionIdField" promptText="Posted transaction ID" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <Label text="Reason *" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <TextArea fx:id="reasonArea" promptText="Why the transaction is being reversed or corrected" prefRowCount="3" wrapText="true" GridPane.columnIndex="1" GridPane.rowIndex="1" GridPane.columnSpan="3"/>
+            </GridPane>
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Button text="Create Reversal" onAction="#createReversal" styleClass="primary-button"/>
+                <Button text="Create Correction Draft" onAction="#createCorrectionDraft" styleClass="secondary-button"/>
+                <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="resultLabel" text="Enter a posted transaction ID and reason before creating a reversal or correction draft." wrapText="true" styleClass="form-note"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Correction Drafts" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="draftStateLabel" text="No correction drafts." styleClass="form-note"/>
+                <TableView fx:id="correctionDraftsTable" prefHeight="360" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="draftIdColumn" text="Draft" prefWidth="95"/>
+                        <TableColumn fx:id="draftOriginalColumn" text="Original" prefWidth="110"/>
+                        <TableColumn fx:id="draftAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="draftTypeColumn" text="Type / Purpose" prefWidth="220"/>
+                        <TableColumn fx:id="draftAmountColumn" text="Amount" prefWidth="145"/>
+                        <TableColumn fx:id="draftDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="draftStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+        <TitledPane text="Recent Posted Income and Expenses" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="recentStateLabel" text="No posted income or expense transactions." styleClass="form-note"/>
+                <TableView fx:id="recentTransactionsTable" prefHeight="360" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="recentIdColumn" text="ID" prefWidth="90"/>
+                        <TableColumn fx:id="recentDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="recentTypeColumn" text="Type / Purpose" prefWidth="220"/>
+                        <TableColumn fx:id="recentAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="recentAmountColumn" text="Amount" prefWidth="145"/>
+                        <TableColumn fx:id="recentStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

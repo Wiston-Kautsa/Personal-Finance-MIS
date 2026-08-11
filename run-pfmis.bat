@@ -1,18 +1,28 @@
 @echo off
 setlocal
 
-set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot"
-set "MAVEN_HOME=C:\Program Files\JetBrains\IntelliJ IDEA 2026.1\plugins\maven\lib\maven3"
+if defined JAVA_HOME (
+    if exist "%JAVA_HOME%\bin\java.exe" (
+        set "PATH=%JAVA_HOME%\bin;%PATH%"
+    )
+)
 
-if not exist "%JAVA_HOME%\bin\java.exe" (
-    echo JDK not found at %JAVA_HOME%
+if defined MAVEN_HOME (
+    if exist "%MAVEN_HOME%\bin\mvn.cmd" (
+        set "PATH=%MAVEN_HOME%\bin;%PATH%"
+    )
+)
+
+where java >nul 2>nul
+if errorlevel 1 (
+    echo Java was not found. Install JDK 21 or newer, or set JAVA_HOME.
     exit /b 1
 )
 
-if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
-    echo Maven not found at %MAVEN_HOME%
+where mvn >nul 2>nul
+if errorlevel 1 (
+    echo Maven was not found. Install Maven, add it to PATH, or set MAVEN_HOME.
     exit /b 1
 )
 
-set "PATH=%JAVA_HOME%\bin;%MAVEN_HOME%\bin;%PATH%"
-mvn javafx:run
+mvn compile javafx:run

@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<ScrollPane fitToWidth="true" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.wk.pfmis.controllers.NewLoanController" styleClass="module-scroll-pane">
+    <VBox spacing="16" styleClass="panel">
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <VBox spacing="4" HBox.hgrow="ALWAYS">
+                <Label text="Add Loan" styleClass="section-heading"/>
+                <Label text="Register borrowed money once, create the liability, generate instalments, and post proceeds as borrowed money." wrapText="true" styleClass="form-note"/>
+            </VBox>
+            <Button text="Register Loan" onAction="#registerLoan" styleClass="primary-button"/>
+            <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
+        </HBox>
+
+        <Label fx:id="validationSummaryLabel" wrapText="true" styleClass="form-error-summary"/>
+
+        <TitledPane text="1. Lender and Source" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <GridPane hgap="18" vgap="8">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                </columnConstraints>
+
+                <HBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Loan Name" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                    <TextField fx:id="loanNameField" promptText="e.g. NBS personal loan"/>
+                    <Label fx:id="loanNameError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Lender Type" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                    <ComboBox fx:id="lenderTypeBox" maxWidth="Infinity"/>
+                    <Label fx:id="lenderTypeError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Lender" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="1">
+                    <TextField fx:id="lenderField" promptText="Bank, group, employer or person"/>
+                    <Label fx:id="lenderError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                    <Label text="Savings Group" styleClass="field-label"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="3" GridPane.rowIndex="1">
+                    <ComboBox fx:id="savingsGroupBox" promptText="Select existing group" maxWidth="Infinity"/>
+                    <Label fx:id="savingsGroupError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+            </GridPane>
+        </TitledPane>
+
+        <TitledPane text="2. Liability and Interest" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <GridPane hgap="18" vgap="8">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                </columnConstraints>
+
+                <HBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Principal Amount" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                    <TextField fx:id="principalField" promptText="500000"/>
+                    <Label fx:id="principalError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Currency" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                    <TextField fx:id="currencyField" promptText="MWK"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Interest Method" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="1">
+                    <ComboBox fx:id="interestMethodBox" maxWidth="Infinity"/>
+                    <Label fx:id="interestError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <Label text="Fees" styleClass="field-label" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <TextField fx:id="feesField" promptText="0" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+
+                <Label text="Interest Rate %" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <TextField fx:id="interestRateField" promptText="10" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+
+                <Label text="Fixed Interest Amount" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <TextField fx:id="fixedInterestField" promptText="50000" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <HBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="2">
+                    <Label text="Loan Start Date" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="3">
+                    <DatePicker fx:id="startDatePicker" maxWidth="Infinity"/>
+                    <Label fx:id="startDateError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="3" GridPane.rowIndex="2">
+                    <Label text="Status" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <ComboBox fx:id="statusBox" maxWidth="Infinity" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
+            </GridPane>
+        </TitledPane>
+
+        <TitledPane text="3. Repayment Schedule" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <GridPane hgap="18" vgap="8">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                </columnConstraints>
+
+                <HBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Repayment Frequency" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <ComboBox fx:id="frequencyBox" maxWidth="Infinity" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+
+                <HBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Repayment Method" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <TextField fx:id="repaymentMethodField" promptText="Bank transfer" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+                <HBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Number of Instalments" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="1">
+                    <TextField fx:id="installmentsField" promptText="5"/>
+                    <Label fx:id="installmentsError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                    <Label text="First Repayment Date" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="3" GridPane.rowIndex="1">
+                    <DatePicker fx:id="firstRepaymentDatePicker" maxWidth="Infinity"/>
+                    <Label fx:id="firstRepaymentDateError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+            </GridPane>
+        </TitledPane>
+
+        <TitledPane text="4. Accounts and Automation" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <GridPane hgap="18" vgap="8">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                </columnConstraints>
+
+                <HBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Proceeds Account" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="0" GridPane.rowIndex="1">
+                    <ComboBox fx:id="proceedsAccountBox" promptText="Money was received here" maxWidth="Infinity"/>
+                    <Label fx:id="proceedsBalanceLabel" text="Proceeds account balance: -" styleClass="form-note"/>
+                    <Label fx:id="proceedsAccountError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Repayment Account" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                    <ComboBox fx:id="repaymentAccountBox" promptText="Repayments leave this account" maxWidth="Infinity"/>
+                    <Label fx:id="repaymentBalanceLabel" text="Repayment account balance: -" styleClass="form-note"/>
+                    <Label fx:id="repaymentAccountError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <HBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Repayment Mode" styleClass="field-label"/>
+                    <Label text="*" styleClass="required-indicator"/>
+                </HBox>
+                <VBox spacing="3" GridPane.columnIndex="2" GridPane.rowIndex="1">
+                    <ComboBox fx:id="repaymentModeBox" maxWidth="Infinity"/>
+                    <Label fx:id="automaticError" wrapText="true" styleClass="inline-validation-error"/>
+                </VBox>
+
+                <Label text="Reference" styleClass="field-label" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <TextField fx:id="referenceField" promptText="Agreement or transfer ref" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+
+                <Label text="Automatic Day" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <TextField fx:id="automaticDayField" promptText="1-31" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+
+                <Label text="Automatic Amount" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <TextField fx:id="automaticAmountField" promptText="Instalment amount" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <Label text="Automatic Start" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
+                <DatePicker fx:id="automaticStartDatePicker" maxWidth="Infinity" GridPane.columnIndex="2" GridPane.rowIndex="3"/>
+
+                <Label text="Automatic End" styleClass="field-label" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
+                <DatePicker fx:id="automaticEndDatePicker" maxWidth="Infinity" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
+            </GridPane>
+        </TitledPane>
+
+        <TitledPane text="5. Notes and Result" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10">
+                <Label text="Notes" styleClass="field-label"/>
+                <TextArea fx:id="notesArea" prefRowCount="3" wrapText="true"/>
+                <Label text="Registration Result" styleClass="field-label"/>
+                <TextArea fx:id="resultArea" editable="false" wrapText="true" prefRowCount="9"/>
+            </VBox>
+        </TitledPane>
+
+        <HBox alignment="CENTER_RIGHT" spacing="8">
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button text="Register Loan" onAction="#registerLoan" styleClass="primary-button"/>
+            <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
+        </HBox>
+
+        <padding>
+            <Insets top="0" right="0" bottom="0" left="0"/>
+        </padding>
+    </VBox>
+</ScrollPane>

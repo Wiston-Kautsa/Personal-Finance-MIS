@@ -26,13 +26,10 @@ public class RegisterController {
         boolean firstUser = !authDatabase.hasUsers();
         headingLabel.setText(firstUser ? "Create the First Super Administrator" : "Registration Is Controlled by the Super Administrator");
         roleHintLabel.setText(firstUser
-                ? "The first account controls user administration and can open every user's workspace."
+                ? "Enter new credentials. The first account becomes the Super Administrator; PFMIS does not provide a built-in password."
                 : "Return to sign in. Additional users must be created from Manage Users by a Super Administrator.");
         if (firstUser) {
-            fullNameField.setText(AuthDatabase.DEFAULT_SUPER_ADMIN_FULL_NAME);
-            usernameField.setText(AuthDatabase.DEFAULT_SUPER_ADMIN_USERNAME);
-            emailField.setText(AuthDatabase.DEFAULT_SUPER_ADMIN_EMAIL);
-            Platform.runLater(passwordField::requestFocus);
+            Platform.runLater(fullNameField::requestFocus);
         } else {
             Platform.runLater(MainApp::showLogin);
         }

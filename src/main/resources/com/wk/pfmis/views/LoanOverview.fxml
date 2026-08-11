@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="18" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.LoanOverviewController" styleClass="module-overview-page loan-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Loan Overview" styleClass="section-heading"/>
+            <Label text="Central dashboard for borrowed-money obligations, repayment pressure, and loan cash movements." wrapText="true" styleClass="form-note"/>
+            <Label fx:id="emptyStateLabel" text="Loading loan overview..." wrapText="true" styleClass="overview-empty-state"/>
+        </VBox>
+        <Button text="+ New Loan" onAction="#openNewLoan" styleClass="primary-button"/>
+        <Button text="Loan Records" onAction="#openLoanRecords" styleClass="secondary-button"/>
+        <Button text="Record Repayment" onAction="#openRecordRepayment" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <GridPane hgap="12" vgap="12">
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+            <Label text="Total Outstanding Debt" styleClass="metric-title"/>
+            <Label fx:id="borrowedValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Open loan liability" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+            <Label text="Original Borrowed Amount" styleClass="metric-title"/>
+            <Label fx:id="lentValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Principal received as loans" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+            <Label text="Due Soon" styleClass="metric-title"/>
+            <Label fx:id="dueSoonValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Payments due in the next 30 days" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+            <Label text="Overdue" styleClass="metric-title"/>
+            <Label fx:id="overdueValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Open balances past due" styleClass="metric-note"/>
+        </VBox>
+    </GridPane>
+
+    <TitledPane text="Loans Needing Attention" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <Label fx:id="attentionStateLabel" text="No loans need attention." styleClass="form-note"/>
+            <TableView fx:id="attentionTable" prefHeight="220" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="attentionLoanColumn" text="Loan" prefWidth="220"/>
+                    <TableColumn fx:id="attentionDirectionColumn" text="Direction" prefWidth="145"/>
+                    <TableColumn fx:id="attentionBalanceColumn" text="Balance" prefWidth="150"/>
+                    <TableColumn fx:id="attentionPaymentColumn" text="Next Payment" prefWidth="150"/>
+                    <TableColumn fx:id="attentionDueColumn" text="Due Date" prefWidth="125"/>
+                    <TableColumn fx:id="attentionStatusColumn" text="Status" prefWidth="140"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Upcoming Repayments" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="repaymentsStateLabel" text="No upcoming repayments." styleClass="form-note"/>
+                <TableView fx:id="repaymentsTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="repaymentLoanColumn" text="Loan" prefWidth="220"/>
+                        <TableColumn fx:id="repaymentDirectionColumn" text="Direction" prefWidth="145"/>
+                        <TableColumn fx:id="repaymentBalanceColumn" text="Balance" prefWidth="150"/>
+                        <TableColumn fx:id="repaymentAmountColumn" text="Payment" prefWidth="150"/>
+                        <TableColumn fx:id="repaymentDueColumn" text="Due Date" prefWidth="125"/>
+                        <TableColumn fx:id="repaymentStatusColumn" text="Status" prefWidth="140"/>
+                    </columns>
+                </TableView>
+                <HBox alignment="CENTER_RIGHT">
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button text="Repayment Schedule" onAction="#openRepaymentSchedule" styleClass="secondary-button"/>
+                    <Button text="Loan Contacts" onAction="#openLoanContacts" styleClass="secondary-button"/>
+                </HBox>
+            </VBox>
+        </TitledPane>
+        <TitledPane text="Recent Loan Transactions" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="activityStateLabel" text="No recent loan activity." styleClass="form-note"/>
+                <TableView fx:id="activityTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="activityDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="activityPartyColumn" text="Person" prefWidth="190"/>
+                        <TableColumn fx:id="activityTypeColumn" text="Type" prefWidth="170"/>
+                        <TableColumn fx:id="activityAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="activityReferenceColumn" text="Reference" prefWidth="170"/>
+                        <TableColumn fx:id="activityStatusColumn" text="Status" prefWidth="140"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

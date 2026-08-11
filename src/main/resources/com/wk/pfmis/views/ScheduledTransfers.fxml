@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.ScheduledTransfersController" styleClass="panel">
+    <Label text="Scheduled Transfers" styleClass="section-heading"/>
+
+    <TitledPane text="Schedule Details" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <GridPane hgap="16" vgap="10">
+                <Label text="Transfer name" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <TextField fx:id="transferNameField" promptText="Monthly savings transfer" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+                <Label text="Status" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+                <ComboBox fx:id="statusBox" prefWidth="190" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+
+                <Label text="From account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <ComboBox fx:id="fromAccountBox" promptText="Source account" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label fx:id="fromBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="1" GridPane.columnSpan="2"/>
+
+                <Label text="To account" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <ComboBox fx:id="toAccountBox" promptText="Destination account" prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                <Label fx:id="toBalanceLabel" text="Balance: -" styleClass="form-note" GridPane.columnIndex="2" GridPane.rowIndex="2" GridPane.columnSpan="2"/>
+
+                <Label text="Amount" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextField fx:id="amountField" promptText="100000" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+
+                <Label text="Currency" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="3"/>
+                <TextField fx:id="currencyField" editable="false" prefWidth="190" GridPane.columnIndex="3" GridPane.rowIndex="3"/>
+
+                <Label text="Transfer fee" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="4"/>
+                <TextField fx:id="feeField" promptText="0" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="4"/>
+
+                <Label text="Fee category" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="4"/>
+                <ComboBox fx:id="feeCategoryBox" editable="true" promptText="Transaction Fees" prefWidth="220" GridPane.columnIndex="3" GridPane.rowIndex="4"/>
+
+                <Label text="First transfer date" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="5"/>
+                <DatePicker fx:id="firstTransferDatePicker" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="5"/>
+
+                <Label text="Frequency" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="5"/>
+                <ComboBox fx:id="frequencyBox" prefWidth="190" GridPane.columnIndex="3" GridPane.rowIndex="5"/>
+
+                <Label text="End date" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
+                <DatePicker fx:id="endDatePicker" prefWidth="190" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
+
+                <Label text="Reminder period" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="6"/>
+                <ComboBox fx:id="reminderPeriodBox" prefWidth="190" GridPane.columnIndex="3" GridPane.rowIndex="6"/>
+
+                <Label text="Transfer method" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+                <ComboBox fx:id="transferMethodBox" editable="true" promptText="Bank transfer, mobile money..." prefWidth="260" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
+
+                <CheckBox fx:id="confirmationRequiredBox" text="Confirmation required before posting" selected="true"
+                          GridPane.columnIndex="2" GridPane.rowIndex="7" GridPane.columnSpan="2"/>
+
+                <Label text="Notes" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="8"/>
+                <TextArea fx:id="notesArea" prefRowCount="3" GridPane.columnIndex="1" GridPane.rowIndex="8" GridPane.columnSpan="3"/>
+            </GridPane>
+
+            <Label fx:id="scheduleCheckLabel" text="Scheduled transfers do not change balances until Transfer Now is confirmed." styleClass="form-note"/>
+
+            <HBox spacing="8">
+                <Button text="Save Schedule" onAction="#saveSchedule" styleClass="primary-button"/>
+                <Button text="Transfer Now" onAction="#transferNow" styleClass="secondary-button"/>
+                <Button text="Clear Form" onAction="#clearForm" styleClass="link-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TableView fx:id="schedulesTable" prefHeight="280" VBox.vgrow="ALWAYS">
+        <columns>
+            <TableColumn fx:id="nameColumn" text="Transfer Name" prefWidth="210"/>
+            <TableColumn fx:id="nextDueColumn" text="Next Due" prefWidth="115"/>
+            <TableColumn fx:id="fromColumn" text="From" prefWidth="170"/>
+            <TableColumn fx:id="toColumn" text="To" prefWidth="170"/>
+            <TableColumn fx:id="amountColumn" text="Amount" prefWidth="130"/>
+            <TableColumn fx:id="frequencyColumn" text="Frequency" prefWidth="125"/>
+            <TableColumn fx:id="statusColumn" text="Status" prefWidth="120"/>
+        </columns>
+    </TableView>
+
+    <TitledPane text="Schedule Details" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <TextArea fx:id="detailsArea" editable="false" wrapText="true" prefRowCount="7"/>
+    </TitledPane>
+</VBox>

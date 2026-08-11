@@ -2,6 +2,7 @@ package com.wk.pfmis.models;
 
 public class SystemUser {
     public static final String ROLE_SUPER_ADMIN = "SUPER_ADMIN";
+    public static final String ROLE_ADMIN = "ADMIN";
     public static final String ROLE_USER = "USER";
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_INACTIVE = "INACTIVE";
@@ -46,10 +47,18 @@ public class SystemUser {
     public boolean isMustChangePassword() { return mustChangePassword; }
     public String getPasswordStatus() { return mustChangePassword ? "Change Required" : "Current"; }
     public boolean isSuperAdmin() { return ROLE_SUPER_ADMIN.equals(role); }
+    public boolean isAdmin() { return ROLE_ADMIN.equals(role); }
+    public boolean isAdminOrSuperAdmin() { return isSuperAdmin() || isAdmin(); }
     public boolean isActive() { return STATUS_ACTIVE.equals(status); }
 
     public String getRoleDisplay() {
-        return isSuperAdmin() ? "Super Administrator" : "User";
+        if (isSuperAdmin()) {
+            return "Super Administrator";
+        }
+        if (isAdmin()) {
+            return "Administrator";
+        }
+        return "User";
     }
 
     public String getDisplayName() {

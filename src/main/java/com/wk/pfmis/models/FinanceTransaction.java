@@ -16,6 +16,9 @@ public class FinanceTransaction {
     private final String description;
     private final String paymentMethod;
     private final String referenceNumber;
+    private final String createdAt;
+    private final Integer loanId;
+    private final Integer loanInstallmentId;
 
     public FinanceTransaction(
             int id,
@@ -47,6 +50,9 @@ public class FinanceTransaction {
                 paymentMethod,
                 referenceNumber,
                 null,
+                null,
+                null,
+                null,
                 null
         );
     }
@@ -68,6 +74,48 @@ public class FinanceTransaction {
             Integer projectActivityId,
             String projectActivityName
     ) {
+        this(
+                id,
+                accountName,
+                transactionType,
+                transactionPurpose,
+                transactionStatus,
+                categoryName,
+                projectName,
+                personName,
+                amount,
+                transactionDate,
+                description,
+                paymentMethod,
+                referenceNumber,
+                projectActivityId,
+                projectActivityName,
+                null,
+                null,
+                null
+        );
+    }
+
+    public FinanceTransaction(
+            int id,
+            String accountName,
+            String transactionType,
+            String transactionPurpose,
+            String transactionStatus,
+            String categoryName,
+            String projectName,
+            String personName,
+            double amount,
+            String transactionDate,
+            String description,
+            String paymentMethod,
+            String referenceNumber,
+            Integer projectActivityId,
+            String projectActivityName,
+            String createdAt,
+            Integer loanId,
+            Integer loanInstallmentId
+    ) {
         this.id = id;
         this.accountName = accountName;
         this.transactionType = transactionType;
@@ -83,6 +131,9 @@ public class FinanceTransaction {
         this.description = description;
         this.paymentMethod = paymentMethod;
         this.referenceNumber = referenceNumber;
+        this.createdAt = createdAt;
+        this.loanId = loanId;
+        this.loanInstallmentId = loanInstallmentId;
     }
 
     public int getId() {
@@ -145,11 +196,24 @@ public class FinanceTransaction {
         return referenceNumber;
     }
 
+    public String getCreatedAt() {
+        return createdAt;
+    }
+
+    public Integer getLoanId() {
+        return loanId;
+    }
+
+    public Integer getLoanInstallmentId() {
+        return loanInstallmentId;
+    }
+
     public String getIncomeStatusLabel() {
         return switch (transactionStatus) {
-            case "OPEN" -> "Pending";
+            case "OPEN" -> "Draft";
             case "CANCELLED" -> "Cancelled";
-            default -> "Received";
+            case "REVERSED" -> "Reversed";
+            default -> "Posted";
         };
     }
 }

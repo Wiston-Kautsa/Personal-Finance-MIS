@@ -26,6 +26,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public class TransactionsController {
@@ -85,18 +86,22 @@ public class TransactionsController {
     private String requestedTransactionType;
     private String requestedTransactionPurpose;
     private String requestedPersonName;
+    private Integer requestedProjectId;
+    private Integer requestedProjectActivityId;
 
     @FXML
     public void initialize() {
-        typeBox.setItems(FXCollections.observableArrayList("INCOME", "EXPENSE", "TRANSFER"));
+        typeBox.setItems(FXCollections.observableArrayList("INCOME", "EXPENSE", "LOAN"));
         purposeBox.setItems(FXCollections.observableArrayList(
                 "NORMAL", "PROJECT_EXPENSE", "MONEY_LENT", "MONEY_BORROWED",
                 "LENT_REPAID", "BORROWED_REPAID", "SUPPORT_GIVEN", "SAVINGS", "GOAL_CONTRIBUTION"));
-        statusBox.setItems(FXCollections.observableArrayList("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED", "CANCELLED"));
+        statusBox.setItems(FXCollections.observableArrayList("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED"));
         configureDisplayConverters();
         requestedTransactionType = NavigationBus.consumeRequestedTransactionType();
         requestedTransactionPurpose = NavigationBus.consumeRequestedTransactionPurpose();
         requestedPersonName = NavigationBus.consumeRequestedPersonName();
+        requestedProjectId = NavigationBus.consumeRequestedProjectId();
+        requestedProjectActivityId = NavigationBus.consumeRequestedProjectActivityId();
         typeBox.getSelectionModel().select(requestedTransactionType == null ? "EXPENSE" : requestedTransactionType);
         purposeBox.getSelectionModel().select(requestedTransactionPurpose == null ? "NORMAL" : requestedTransactionPurpose);
         statusBox.getSelectionModel().select(isNewLoanPurpose(requestedTransactionPurpose) ? "OPEN" : "COMPLETED");
@@ -147,14 +152,15 @@ public class TransactionsController {
                 return;
             }
             if (editingTransaction == null) {
+                String purpose = purposeBox.getValue();
                 database.recordTransaction(
                         account.getId(),
                         categoryId,
                         projectId,
                         activityId,
                         personId,
-                        typeBox.getValue(),
-                        purposeBox.getValue(),
+                        transactionTypeForPurpose(typeBox.getValue(), purpose),
+                        purpose,
                         statusBox.getValue(),
                         amount,
                         datePicker.getValue(),
@@ -170,7 +176,7 @@ public class TransactionsController {
                         projectId,
                         activityId,
                         personId,
-                        typeBox.getValue(),
+                        transactionTypeForPurpose(typeBox.getValue(), purposeBox.getValue()),
                         purposeBox.getValue(),
                         statusBox.getValue(),
                         amount,
@@ -201,9 +207,11 @@ public class TransactionsController {
         accountBox.setItems(FXCollections.observableArrayList(database.listAccounts()));
         refreshCategories();
         projectBox.setItems(FXCollections.observableArrayList(database.listProjects()));
-        selectProjectById(selectedProject == null ? null : selectedProject.getId());
+        selectProjectById(requestedProjectId != null ? requestedProjectId : selectedProject == null ? null : selectedProject.getId());
+        requestedProjectId = null;
         refreshActivitiesForProject();
-        selectActivityById(selectedActivity == null ? null : selectedActivity.getId());
+        selectActivityById(requestedProjectActivityId != null ? requestedProjectActivityId : selectedActivity == null ? null : selectedActivity.getId());
+        requestedProjectActivityId = null;
         personBox.setItems(FXCollections.observableArrayList(database.listPeople()));
         if (requestedPersonName != null && !requestedPersonName.isBlank()) {
             selectPersonByName(requestedPersonName);
@@ -215,8 +223,9 @@ public class TransactionsController {
         }
         List<FinanceTransaction> transactions = database.listRecentTransactions(100);
         if (requestedTransactionType != null) {
+            String effectiveRequestedType = transactionTypeForPurpose(requestedTransactionType, requestedTransactionPurpose);
             transactions = transactions.stream()
-                    .filter(transaction -> requestedTransactionType.equals(transaction.getTransactionType()))
+                    .filter(transaction -> effectiveRequestedType.equals(transaction.getTransactionType()))
                     .toList();
         }
         if (requestedTransactionPurpose != null) {
@@ -319,6 +328,10 @@ public class TransactionsController {
             UiAlerts.info("Select a transaction to edit.");
             return;
         }
+        if (!isEditableInGenericForm(selected)) {
+            UiAlerts.info("Use the dedicated ledger, transfer, or reversal workflow for this record.");
+            return;
+        }
         editingTransaction = selected;
         selectAccountByName(selected.getAccountName());
         selectCategoryByName(selected.getCategoryName());
@@ -393,16 +406,36 @@ public class TransactionsController {
     }
 
     private List<javafx.scene.control.MenuItem> transactionMenuItems(FinanceTransaction transaction) {
-        return List.of(
-                TableActions.menuItem("View Transaction", this::viewSelected),
-                TableActions.menuItem("Edit Transaction", this::editSelected),
-                TableActions.menuItem("Void Transaction", this::deleteSelected),
-                TableActions.separator(),
-                TableActions.copyRowItem(transactionsTable, transaction),
-                TableActions.exportTableItem(transactionsTable, recordsLabel.getText()),
-                TableActions.printTableItem(transactionsTable, recordsLabel.getText()),
-                TableActions.refreshItem(this::refresh)
-        );
+        List<javafx.scene.control.MenuItem> items = new ArrayList<>();
+        items.add(TableActions.menuItem("View Transaction", this::viewSelected));
+        if (isEditableInGenericForm(transaction)) {
+            items.add(TableActions.menuItem("Edit Transaction", this::editSelected));
+            items.add(TableActions.menuItem("Void Transaction", this::deleteSelected));
+        }
+        items.add(TableActions.separator());
+        items.add(TableActions.copyRowItem(transactionsTable, transaction));
+        items.add(TableActions.exportTableItem(transactionsTable, recordsLabel.getText()));
+        items.add(TableActions.printTableItem(transactionsTable, recordsLabel.getText()));
+        items.add(TableActions.refreshItem(this::refresh));
+        return items;
+    }
+
+    private boolean isEditableInGenericForm(FinanceTransaction transaction) {
+        if (transaction == null) {
+            return false;
+        }
+        String type = safe(transaction.getTransactionType());
+        String purpose = safe(transaction.getTransactionPurpose());
+        String status = safe(transaction.getTransactionStatus());
+        return !"TRANSFER".equals(type)
+                && !"REVERSAL".equals(purpose)
+                && !purpose.startsWith("TRANSFER_")
+                && !"REVERSED".equals(status)
+                && !"CANCELLED".equals(status);
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ENGLISH);
     }
 
     private void selectAccountByName(String accountName) {
@@ -741,6 +774,10 @@ public class TransactionsController {
                 || "MONEY_BORROWED".equals(purpose)
                 || "LENT_REPAID".equals(purpose)
                 || "BORROWED_REPAID".equals(purpose);
+    }
+
+    private String transactionTypeForPurpose(String selectedType, String purpose) {
+        return isLoanPurpose(purpose) ? "LOAN" : selectedType;
     }
 
     private boolean isNewLoanPurpose(String purpose) {

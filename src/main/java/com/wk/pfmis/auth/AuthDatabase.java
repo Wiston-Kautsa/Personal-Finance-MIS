@@ -1,6 +1,5 @@
 package com.wk.pfmis.auth;
 
-import com.wk.pfmis.config.AppConfig;
 import com.wk.pfmis.db.DatabaseHandler;
 import com.wk.pfmis.models.AuthenticationEventRecord;
 import com.wk.pfmis.models.SystemUser;
@@ -34,20 +33,6 @@ public final class AuthDatabase {
     private static final String LATEST_SECURITY_BACKUP = "pfmis-auth-latest-daily-backup.db";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final char[] TEMP_PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
-    public static final String DEFAULT_SUPER_ADMIN_EMAIL = normalizeConfiguredEmail(
-            AppConfig.get("PFMIS_DEFAULT_SUPER_ADMIN_EMAIL", "wistonkautsa095@gmail.com")
-    );
-    public static final String DEFAULT_SUPER_ADMIN_USERNAME = normalizeConfiguredUsername(
-            AppConfig.get("PFMIS_DEFAULT_SUPER_ADMIN_USERNAME", "wistonkautsa095")
-    );
-    public static final String DEFAULT_SUPER_ADMIN_FULL_NAME = normalizeConfiguredText(
-            AppConfig.get("PFMIS_DEFAULT_SUPER_ADMIN_FULL_NAME", "Wiston Kautsa"),
-            "Wiston Kautsa"
-    );
-    public static final String DEFAULT_SUPER_ADMIN_PASSWORD = normalizeConfiguredText(
-            AppConfig.get("PFMIS_DEFAULT_SUPER_ADMIN_PASSWORD", "Mundane@2000"),
-            "Mundane@2000"
-    );
 
     public record PasswordResetDelivery(
             int userId,
@@ -87,7 +72,6 @@ public final class AuthDatabase {
     }
 
     public void initialize() {
-        Integer firstDevelopmentAdminId;
         try (Connection connection = connect(); Statement statement = connection.createStatement()) {
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS users (
@@ -106,13 +90,13 @@ public final class AuthDatabase {
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TEXT,
                         last_login_at TEXT,
-                        CHECK (role IN ('SUPER_ADMIN','USER')),
+                        CHECK (role IN ('SUPER_ADMIN','ADMIN','USER')),
                         CHECK (status IN ('ACTIVE','INACTIVE'))
                     )
                     """);
+            migrateUsersTable(connection);
             statement.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)");
-            migrateUsersTable(connection);
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS authentication_log (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,12 +109,9 @@ public final class AuthDatabase {
                         FOREIGN KEY (user_id) REFERENCES users(id)
                     )
                     """);
-            firstDevelopmentAdminId = ensureDevelopmentSuperAdminAccount(connection);
+            statement.execute("DROP TABLE IF EXISTS remembered_login_tokens");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to initialize PFMIS user security database.", exception);
-        }
-        if (firstDevelopmentAdminId != null) {
-            DatabaseHandler.migrateLegacyDatabaseToUser(firstDevelopmentAdminId);
         }
     }
 
@@ -161,6 +142,79 @@ public final class AuthDatabase {
 
     private void migrateUsersTable(Connection connection) throws SQLException {
         addColumnIfMissing(connection, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
+        ensureAdminRoleAllowed(connection);
+    }
+
+    private void ensureAdminRoleAllowed(Connection connection) throws SQLException {
+        String createSql = null;
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT sql
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'users'
+                """);
+             ResultSet resultSet = statement.executeQuery()) {
+            if (resultSet.next()) {
+                createSql = resultSet.getString("sql");
+            }
+        }
+        if (createSql == null || createSql.contains("'ADMIN'")) {
+            return;
+        }
+        boolean originalAutoCommit = connection.getAutoCommit();
+        int originalCount = countRows(connection, "users");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys = OFF");
+            connection.setAutoCommit(false);
+            statement.execute("DROP TABLE IF EXISTS users_new");
+            statement.execute("""
+                    CREATE TABLE users_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                        full_name TEXT NOT NULL,
+                        email TEXT COLLATE NOCASE UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        password_salt TEXT NOT NULL,
+                        password_iterations INTEGER NOT NULL,
+                        role TEXT NOT NULL DEFAULT 'USER',
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        failed_login_count INTEGER NOT NULL DEFAULT 0,
+                        locked_until TEXT,
+                        must_change_password INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        last_login_at TEXT,
+                        CHECK (role IN ('SUPER_ADMIN','ADMIN','USER')),
+                        CHECK (status IN ('ACTIVE','INACTIVE'))
+                    )
+                    """);
+            statement.execute("""
+                    INSERT INTO users_new (
+                        id, username, full_name, email, password_hash, password_salt,
+                        password_iterations, role, status, failed_login_count, locked_until,
+                        must_change_password, created_at, updated_at, last_login_at
+                    )
+                    SELECT id, username, full_name, email, password_hash, password_salt,
+                           password_iterations, role, status, failed_login_count, locked_until,
+                           must_change_password, created_at, updated_at, last_login_at
+                    FROM users
+                    """);
+            int migratedCount = countRows(connection, "users_new");
+            if (migratedCount != originalCount) {
+                throw new SQLException("User migration copied " + migratedCount + " of " + originalCount + " users.");
+            }
+            statement.execute("DROP TABLE users");
+            statement.execute("ALTER TABLE users_new RENAME TO users");
+            connection.commit();
+        } catch (SQLException exception) {
+            rollbackQuietly(connection);
+            throw exception;
+        } finally {
+            connection.setAutoCommit(originalAutoCommit);
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA foreign_keys = ON");
+            }
+        }
+        assertNoForeignKeyViolations(connection);
     }
 
     private void addColumnIfMissing(
@@ -179,6 +233,23 @@ public final class AuthDatabase {
         }
         try (Statement statement = connection.createStatement()) {
             statement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+        }
+    }
+
+    private int countRows(Connection connection, String tableName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM " + tableName);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
+        }
+    }
+
+    private void assertNoForeignKeyViolations(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("PRAGMA foreign_key_check")) {
+            if (resultSet.next()) {
+                throw new SQLException("Foreign key violation after users migration: "
+                        + resultSet.getString(1) + "#" + resultSet.getString(2));
+            }
         }
     }
 
@@ -233,11 +304,9 @@ public final class AuthDatabase {
                 if (!createdFirstUser && !isActiveSuperAdmin(connection, actingUserId)) {
                     throw new SecurityException("Only an active super administrator can create users.");
                 }
-                boolean requestedSuperAdmin = SystemUser.ROLE_SUPER_ADMIN.equals(requestedRole);
-                boolean developmentSuperAdminEmail = isDevelopmentSuperAdminEmail(cleanEmail);
-                String role = createdFirstUser || requestedSuperAdmin || developmentSuperAdminEmail
+                String role = createdFirstUser
                         ? SystemUser.ROLE_SUPER_ADMIN
-                        : SystemUser.ROLE_USER;
+                        : normalizeRequestedRole(requestedRole);
                 String sql = """
                         INSERT INTO users (
                             username, full_name, email, password_hash, password_salt,
@@ -358,14 +427,31 @@ public final class AuthDatabase {
                         : "Too many failed attempts. The account is locked for " + LOCK_MINUTES + " minutes.");
             }
 
-            try (PreparedStatement update = connection.prepareStatement("""
-                    UPDATE users
-                    SET failed_login_count = 0, locked_until = NULL,
-                        last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """)) {
-                update.setInt(1, authenticationRow.id());
-                update.executeUpdate();
+            if (PasswordSecurity.needsRehash(authenticationRow.passwordIterations())) {
+                PasswordSecurity.PasswordRecord upgraded = PasswordSecurity.hash(password);
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE users
+                        SET password_hash = ?, password_salt = ?, password_iterations = ?,
+                            failed_login_count = 0, locked_until = NULL,
+                            last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    update.setString(1, upgraded.hash());
+                    update.setString(2, upgraded.salt());
+                    update.setInt(3, upgraded.iterations());
+                    update.setInt(4, authenticationRow.id());
+                    update.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE users
+                        SET failed_login_count = 0, locked_until = NULL,
+                            last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    update.setInt(1, authenticationRow.id());
+                    update.executeUpdate();
+                }
             }
             recordAuthEvent(connection, authenticationRow.id(), authenticationRow.username(), "LOGIN", true, "Successful login.");
             return findUserById(connection, authenticationRow.id());
@@ -404,7 +490,7 @@ public final class AuthDatabase {
         String sql = """
                 SELECT id, username, full_name, email, role, status, created_at, last_login_at, must_change_password
                 FROM users
-                ORDER BY CASE role WHEN 'SUPER_ADMIN' THEN 0 ELSE 1 END, full_name COLLATE NOCASE
+                ORDER BY CASE role WHEN 'SUPER_ADMIN' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END, full_name COLLATE NOCASE
                 """;
         List<SystemUser> users = new ArrayList<>();
         try (Connection connection = connect()) {
@@ -679,104 +765,16 @@ public final class AuthDatabase {
         }
     }
 
-    private Integer ensureDevelopmentSuperAdminAccount(Connection connection) throws SQLException {
-        boolean firstUser = userCount(connection) == 0;
-        int userId;
-        String username;
-        String fullName;
-        String email;
-        String role;
-        String status;
-        String passwordHash;
-        String passwordSalt;
-        int passwordIterations;
-        try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT id, username, full_name, email, role, status,
-                       password_hash, password_salt, password_iterations
-                FROM users
-                WHERE lower(COALESCE(email, '')) = ?
-                   OR lower(username) = ?
-                ORDER BY CASE WHEN lower(COALESCE(email, '')) = ? THEN 0 ELSE 1 END
-                LIMIT 1
-                """)) {
-            statement.setString(1, DEFAULT_SUPER_ADMIN_EMAIL);
-            statement.setString(2, DEFAULT_SUPER_ADMIN_USERNAME);
-            statement.setString(3, DEFAULT_SUPER_ADMIN_EMAIL);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                if (!resultSet.next()) {
-                    PasswordSecurity.PasswordRecord passwordRecord = PasswordSecurity.hash(DEFAULT_SUPER_ADMIN_PASSWORD);
-                    try (PreparedStatement insert = connection.prepareStatement("""
-                            INSERT INTO users (
-                                username, full_name, email, password_hash, password_salt,
-                                password_iterations, role, status, failed_login_count, locked_until, must_change_password
-                            ) VALUES (?, ?, ?, ?, ?, ?, 'SUPER_ADMIN', 'ACTIVE', 0, NULL, 0)
-                            """, Statement.RETURN_GENERATED_KEYS)) {
-                        insert.setString(1, DEFAULT_SUPER_ADMIN_USERNAME);
-                        insert.setString(2, DEFAULT_SUPER_ADMIN_FULL_NAME);
-                        insert.setString(3, DEFAULT_SUPER_ADMIN_EMAIL);
-                        insert.setString(4, passwordRecord.hash());
-                        insert.setString(5, passwordRecord.salt());
-                        insert.setInt(6, passwordRecord.iterations());
-                        insert.executeUpdate();
-                        try (ResultSet keys = insert.getGeneratedKeys()) {
-                            if (!keys.next()) {
-                                throw new SQLException("No user ID was generated.");
-                            }
-                            userId = keys.getInt(1);
-                        }
-                    }
-                    recordAuthEvent(connection, userId, DEFAULT_SUPER_ADMIN_USERNAME, "DEVELOPMENT_SUPER_ADMIN", true,
-                            "Default development Super Administrator account created from .env credentials.");
-                    return firstUser ? userId : null;
-                }
-                userId = resultSet.getInt("id");
-                username = resultSet.getString("username");
-                fullName = resultSet.getString("full_name");
-                email = resultSet.getString("email");
-                role = resultSet.getString("role");
-                status = resultSet.getString("status");
-                passwordHash = resultSet.getString("password_hash");
-                passwordSalt = resultSet.getString("password_salt");
-                passwordIterations = resultSet.getInt("password_iterations");
-            }
+    private String normalizeRequestedRole(String requestedRole) {
+        if (requestedRole == null || requestedRole.isBlank()) {
+            return SystemUser.ROLE_USER;
         }
-        boolean profileMatches = DEFAULT_SUPER_ADMIN_USERNAME.equals(username)
-                && DEFAULT_SUPER_ADMIN_FULL_NAME.equals(fullName)
-                && DEFAULT_SUPER_ADMIN_EMAIL.equalsIgnoreCase(email == null ? "" : email);
-        boolean securityMatches = SystemUser.ROLE_SUPER_ADMIN.equals(role)
-                && SystemUser.STATUS_ACTIVE.equals(status)
-                && PasswordSecurity.verify(DEFAULT_SUPER_ADMIN_PASSWORD, passwordHash, passwordSalt, passwordIterations);
-        if (profileMatches && securityMatches) {
-            return null;
-        }
-        PasswordSecurity.PasswordRecord passwordRecord = PasswordSecurity.hash(DEFAULT_SUPER_ADMIN_PASSWORD);
-        try (PreparedStatement update = connection.prepareStatement("""
-                UPDATE users
-                SET username = ?,
-                    full_name = ?,
-                    email = ?,
-                    password_hash = ?,
-                    password_salt = ?,
-                    password_iterations = ?,
-                    role = 'SUPER_ADMIN',
-                    status = 'ACTIVE',
-                    failed_login_count = 0,
-                    locked_until = NULL,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """)) {
-            update.setString(1, DEFAULT_SUPER_ADMIN_USERNAME);
-            update.setString(2, DEFAULT_SUPER_ADMIN_FULL_NAME);
-            update.setString(3, DEFAULT_SUPER_ADMIN_EMAIL);
-            update.setString(4, passwordRecord.hash());
-            update.setString(5, passwordRecord.salt());
-            update.setInt(6, passwordRecord.iterations());
-            update.setInt(7, userId);
-            update.executeUpdate();
-        }
-        recordAuthEvent(connection, userId, DEFAULT_SUPER_ADMIN_USERNAME, "DEVELOPMENT_SUPER_ADMIN", true,
-                "Default development Super Administrator .env credentials enforced.");
-        return null;
+        return switch (requestedRole.trim().toUpperCase(Locale.ENGLISH)) {
+            case SystemUser.ROLE_SUPER_ADMIN -> SystemUser.ROLE_SUPER_ADMIN;
+            case SystemUser.ROLE_ADMIN -> SystemUser.ROLE_ADMIN;
+            case SystemUser.ROLE_USER -> SystemUser.ROLE_USER;
+            default -> throw new IllegalArgumentException("Invalid user role.");
+        };
     }
 
     private boolean isActiveSuperAdmin(Connection connection, int userId) throws SQLException {
@@ -923,10 +921,6 @@ public final class AuthDatabase {
         return clean.contains("@") && !clean.startsWith("@") && !clean.endsWith("@");
     }
 
-    private boolean isDevelopmentSuperAdminEmail(String email) {
-        return DEFAULT_SUPER_ADMIN_EMAIL.equals(email == null ? "" : email.trim().toLowerCase(Locale.ENGLISH));
-    }
-
     private boolean isStillLocked(String lockedUntil) {
         if (lockedUntil == null || lockedUntil.isBlank()) {
             return false;
@@ -959,20 +953,4 @@ public final class AuthDatabase {
         return message != null && message.toLowerCase(Locale.ENGLISH).contains("constraint");
     }
 
-    private static String normalizeConfiguredEmail(String value) {
-        String clean = normalizeConfiguredText(value, "wistonkautsa095@gmail.com").toLowerCase(Locale.ENGLISH);
-        if (!clean.contains("@") || clean.startsWith("@") || clean.endsWith("@")) {
-            return "wistonkautsa095@gmail.com";
-        }
-        return clean;
-    }
-
-    private static String normalizeConfiguredUsername(String value) {
-        String clean = normalizeConfiguredText(value, "wistonkautsa095").toLowerCase(Locale.ENGLISH);
-        return clean.matches("[a-z0-9._-]{3,40}") ? clean : "wistonkautsa095";
-    }
-
-    private static String normalizeConfiguredText(String value, String fallback) {
-        return value == null || value.trim().isEmpty() ? fallback : value.trim();
-    }
 }

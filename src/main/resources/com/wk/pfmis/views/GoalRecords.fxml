@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="14" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.GoalRecordsController" styleClass="panel">
+    <Label text="Goal Records" styleClass="section-heading"/>
+
+    <TitledPane text="Filters" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <GridPane hgap="16" vgap="10">
+            <Label text="Status" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+            <ComboBox fx:id="statusFilterBox" prefWidth="180" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+            <Label text="Priority" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+            <ComboBox fx:id="priorityFilterBox" prefWidth="170" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+
+            <Label text="Goal type" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+            <ComboBox fx:id="typeFilterBox" prefWidth="180" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+            <Label text="Target date" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+            <ComboBox fx:id="targetDateFilterBox" prefWidth="170" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+
+            <Label text="Search" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+            <TextField fx:id="searchField" promptText="Goal name, type, priority or notes" prefWidth="420" GridPane.columnIndex="1" GridPane.rowIndex="2" GridPane.columnSpan="3"/>
+        </GridPane>
+    </TitledPane>
+
+    <TitledPane text="Goals" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+        <VBox spacing="10">
+            <TableView fx:id="goalTable" prefHeight="310" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="goalColumn" text="Goal" prefWidth="190"/>
+                    <TableColumn fx:id="targetColumn" text="Target" prefWidth="130"/>
+                    <TableColumn fx:id="allocatedColumn" text="Allocated" prefWidth="130"/>
+                    <TableColumn fx:id="remainingColumn" text="Remaining" prefWidth="130"/>
+                    <TableColumn fx:id="targetDateColumn" text="Target Date" prefWidth="120"/>
+                    <TableColumn fx:id="progressColumn" text="Progress" prefWidth="100"/>
+                    <TableColumn fx:id="statusColumn" text="Status" prefWidth="140"/>
+                </columns>
+            </TableView>
+            <HBox spacing="8">
+                <Button text="Open Goal" onAction="#openGoal" styleClass="primary-button"/>
+                <Button text="Record Contribution" onAction="#recordContribution" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Opened Goal" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="8">
+            <TextArea fx:id="detailsArea" editable="false" wrapText="true" prefRowCount="14"/>
+            <HBox spacing="8">
+                <Button text="More Actions" onAction="#moreActions" styleClass="secondary-button"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

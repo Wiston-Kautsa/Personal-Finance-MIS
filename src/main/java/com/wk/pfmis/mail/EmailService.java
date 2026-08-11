@@ -2,7 +2,7 @@ package com.wk.pfmis.mail;
 
 import com.wk.pfmis.config.AppConfig;
 
-import javax.net.SocketFactory;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import java.io.BufferedReader;
@@ -10,6 +10,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
@@ -42,7 +43,7 @@ public final class EmailService {
         imapHost = AppConfig.get("PFMIS_IMAP_HOST", "imap.gmail.com");
         imapPort = AppConfig.getInt("PFMIS_IMAP_PORT", 993);
         imapSsl = AppConfig.getBoolean("PFMIS_IMAP_SSL", true);
-        fromAddress = AppConfig.get("PFMIS_MAIL_FROM", AppConfig.get("PFMIS_DEFAULT_SUPER_ADMIN_EMAIL", ""));
+        fromAddress = AppConfig.get("PFMIS_MAIL_FROM", "");
         replyToAddress = AppConfig.get("PFMIS_MAIL_REPLY_TO", fromAddress);
         username = AppConfig.get("PFMIS_MAIL_USERNAME", fromAddress);
         password = AppConfig.get("PFMIS_MAIL_PASSWORD", "");
@@ -59,6 +60,7 @@ public final class EmailService {
     public boolean isSendConfigured() {
         return hasText(smtpHost)
                 && smtpPort > 0
+                && (smtpSsl || smtpStartTls)
                 && isEmailLike(fromAddress)
                 && hasText(username)
                 && hasText(password);
@@ -67,6 +69,7 @@ public final class EmailService {
     public boolean isReceiveConfigured() {
         return hasText(imapHost)
                 && imapPort > 0
+                && imapSsl
                 && hasText(username)
                 && hasText(password);
     }
@@ -75,12 +78,18 @@ public final class EmailService {
         if (isSendConfigured()) {
             return "Outgoing email configured as " + systemEmailAddress() + ".";
         }
+        if (!smtpSsl && !smtpStartTls) {
+            return "Outgoing email requires PFMIS_SMTP_SSL=true or PFMIS_SMTP_STARTTLS=true.";
+        }
         return "Outgoing email needs PFMIS_MAIL_PASSWORD in .env for " + systemEmailAddress() + ".";
     }
 
     public String receiveConfigurationStatus() {
         if (isReceiveConfigured()) {
             return "Incoming email configured on " + imapHost + ":" + imapPort + ".";
+        }
+        if (!imapSsl) {
+            return "Incoming email requires PFMIS_IMAP_SSL=true.";
         }
         return "Incoming email needs PFMIS_MAIL_PASSWORD in .env.";
     }
@@ -132,6 +141,9 @@ public final class EmailService {
     }
 
     private void sendPlainText(String toAddress, String subject, String body) {
+        if (!smtpSsl && !smtpStartTls) {
+            throw new IllegalStateException("SMTP authentication requires SSL/TLS or STARTTLS.");
+        }
         Socket socket = null;
         try {
             socket = openSmtpSocket();
@@ -164,9 +176,7 @@ public final class EmailService {
     }
 
     private Socket openSmtpSocket() throws IOException {
-        SocketFactory factory = smtpSsl ? SSLSocketFactory.getDefault() : SocketFactory.getDefault();
-        Socket socket = factory.createSocket(smtpHost, smtpPort);
-        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        Socket socket = smtpSsl ? tlsSocket(smtpHost, smtpPort) : plainSocket(smtpHost, smtpPort);
         if (socket instanceof SSLSocket sslSocket) {
             sslSocket.startHandshake();
         }
@@ -174,12 +184,27 @@ public final class EmailService {
     }
 
     private Socket openImapSocket() throws IOException {
-        SocketFactory factory = imapSsl ? SSLSocketFactory.getDefault() : SocketFactory.getDefault();
-        Socket socket = factory.createSocket(imapHost, imapPort);
-        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
-        if (socket instanceof SSLSocket sslSocket) {
-            sslSocket.startHandshake();
+        if (!imapSsl) {
+            throw new IllegalStateException("IMAP authentication requires SSL/TLS.");
         }
+        SSLSocket socket = tlsSocket(imapHost, imapPort);
+        socket.startHandshake();
+        return socket;
+    }
+
+    private Socket plainSocket(String host, int port) throws IOException {
+        Socket socket = new Socket();
+        socket.connect(new InetSocketAddress(host, port), SOCKET_TIMEOUT_MILLIS);
+        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        return socket;
+    }
+
+    private SSLSocket tlsSocket(String host, int port) throws IOException {
+        SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        SSLSocket socket = (SSLSocket) factory.createSocket();
+        socket.connect(new InetSocketAddress(host, port), SOCKET_TIMEOUT_MILLIS);
+        socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+        configureEndpointVerification(socket);
         return socket;
     }
 
@@ -188,9 +213,16 @@ public final class EmailService {
         Socket tlsSocket = factory.createSocket(plainSocket, smtpHost, smtpPort, true);
         tlsSocket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
         if (tlsSocket instanceof SSLSocket sslSocket) {
+            configureEndpointVerification(sslSocket);
             sslSocket.startHandshake();
         }
         return tlsSocket;
+    }
+
+    private void configureEndpointVerification(SSLSocket socket) {
+        SSLParameters parameters = socket.getSSLParameters();
+        parameters.setEndpointIdentificationAlgorithm("HTTPS");
+        socket.setSSLParameters(parameters);
     }
 
     private void authenticateSmtp(BufferedWriter writer, BufferedReader reader) throws IOException {

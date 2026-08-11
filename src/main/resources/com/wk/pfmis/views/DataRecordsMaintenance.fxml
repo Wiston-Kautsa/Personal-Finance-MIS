@@ -11,12 +11,12 @@
       fx:controller="com.wk.pfmis.controllers.DataRecordsSectionController"
       spacing="12" styleClass="content-view">
     <Label fx:id="sectionTitleLabel" text="Data Maintenance" styleClass="view-title"/>
-    <Label text="Super Administrator Only. Destructive actions require impact analysis, recovery backup, confirmation, verification and immutable audit." wrapText="true" styleClass="form-note"/>
+    <Label text="Super Administrator only. Choose a task, follow the simple steps, and create a verified backup before any final action." wrapText="true" styleClass="form-note"/>
     <TabPane fx:id="dataRecordsTabs" tabClosingPolicy="UNAVAILABLE" maxWidth="Infinity" VBox.vgrow="ALWAYS" styleClass="setup-tab-pane">
         <tabs>
-            <Tab fx:id="recordDisposalTab" text="Record Disposal"/>
-            <Tab fx:id="clearTestDataTab" text="Clear Test or Demo Data"/>
-            <Tab fx:id="purgeArchivedTab" text="Purge Archived Records"/>
+            <Tab fx:id="recordDisposalTab" text="Remove Selected Records"/>
+            <Tab fx:id="clearTestDataTab" text="Clear Test Data"/>
+            <Tab fx:id="purgeArchivedTab" text="Delete Old Archived Records"/>
             <Tab fx:id="resetWorkspaceTab" text="Reset Workspace"/>
             <Tab fx:id="deleteWorkspaceTab" text="Delete Workspace"/>
             <Tab fx:id="maintenanceHistoryTab" text="Maintenance History"/>

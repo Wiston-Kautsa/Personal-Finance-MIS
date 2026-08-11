@@ -2,7 +2,10 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressIndicator?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.FlowPane?>
@@ -17,67 +20,281 @@
     <children>
         <VBox spacing="10" styleClass="panel ai-center-hero">
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Button text="Back" onAction="#goBack" minWidth="78" styleClass="secondary-button"/>
-                <VBox spacing="5" HBox.hgrow="ALWAYS">
-                    <Label text="Smart Analysis" styleClass="section-heading"/>
-                    <Label text="Professional system-wide analysis for transactions, planning, projects, loans, reports, controls, and logs." wrapText="true" styleClass="form-note"/>
+                <VBox spacing="6" HBox.hgrow="ALWAYS">
+                    <Label fx:id="pageTitleLabel" text="Smart Analysis Overview" styleClass="section-heading"/>
+                    <Label fx:id="pageDescriptionLabel"
+                           text="Review your current financial position, available data, detected risks and the most important actions requiring attention."
+                           wrapText="true" styleClass="form-note"/>
+                    <Label fx:id="financialOverviewLabel" text="Loading financial overview..." wrapText="true" styleClass="ai-overview-text"/>
                 </VBox>
-                <VBox spacing="4" styleClass="analysis-status-box">
-                    <Label text="Provider" styleClass="field-label"/>
-                    <Label fx:id="providerStatusLabel" text="Connection status" wrapText="true" styleClass="ai-provider-status"/>
+                <VBox spacing="7" styleClass="analysis-status-box">
+                    <Label fx:id="providerStatusLabel" text="AI: Checking..." wrapText="true" styleClass="ai-provider-status"/>
+                    <Label fx:id="lastUpdatedLabel" text="Last updated: -" wrapText="true" styleClass="form-note"/>
+                    <FlowPane hgap="8" vgap="8" alignment="CENTER_RIGHT" prefWrapLength="320" styleClass="responsive-action-row">
+                        <Button text="View Provider Details" onAction="#viewProviderDetails" styleClass="secondary-button"/>
+                        <Button text="Refresh Data" onAction="#refreshContext" styleClass="secondary-button"/>
+                        <ProgressIndicator fx:id="requestProgressIndicator" visible="false" managed="false" prefWidth="22" prefHeight="22"/>
+                    </FlowPane>
                 </VBox>
-            </HBox>
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="privacyStatusLabel" text="Privacy mode" wrapText="true" styleClass="ai-privacy-note" HBox.hgrow="ALWAYS"/>
             </HBox>
         </VBox>
 
-        <TitledPane text="Analysis Command Center" expanded="true" collapsible="false" maxWidth="Infinity" styleClass="section-pane">
+        <VBox fx:id="overviewSection" spacing="12" visible="false" managed="false">
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900" maxWidth="Infinity">
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Current Account Position" styleClass="table-title"/>
+                    <Label fx:id="overviewAccountPositionLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Current-Month Income" styleClass="table-title"/>
+                    <Label fx:id="overviewIncomeLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Current-Month Expenses" styleClass="table-title"/>
+                    <Label fx:id="overviewExpensesLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Net Cash Flow" styleClass="table-title"/>
+                    <Label fx:id="overviewNetCashFlowLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Savings Rate" styleClass="table-title"/>
+                    <Label fx:id="overviewSavingsRateLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Active Budget Pressure" styleClass="table-title"/>
+                    <Label fx:id="overviewBudgetPressureLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Upcoming Obligations" styleClass="table-title"/>
+                    <Label fx:id="overviewObligationsLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Overdue Loan Repayments" styleClass="table-title"/>
+                    <Label fx:id="overviewLoansLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Goal and Project Risks" styleClass="table-title"/>
+                    <Label fx:id="overviewGoalsProjectsLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Data-Quality Warnings" styleClass="table-title"/>
+                    <Label fx:id="overviewDataQualityLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="AI Provider Status" styleClass="table-title"/>
+                    <Label fx:id="overviewProviderLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Recent Analysis Activity" styleClass="table-title"/>
+                    <Label fx:id="recentActivityLabel" text="No recent analysis activity." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+            </FlowPane>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="overviewRunFullButton" text="Run Full Financial Analysis" onAction="#runFinancialHealthAnalysis" styleClass="primary-button"/>
+                <Button fx:id="overviewActionPlanButton" text="Create 7-Day Action Plan" onAction="#buildActionPlan" styleClass="secondary-button"/>
+                <Button fx:id="overviewHighestRiskButton" text="Review Highest Risk" onAction="#reviewHighestRisk" styleClass="secondary-button"/>
+                <Button text="Refresh Overview" onAction="#refreshContext" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="financialHealthSection" spacing="12" visible="false" managed="false">
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900" maxWidth="Infinity">
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Total Active Account Balance" styleClass="table-title"/>
+                    <Label fx:id="financialBalanceLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Income For Period" styleClass="table-title"/>
+                    <Label fx:id="financialIncomeLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Expenses For Period" styleClass="table-title"/>
+                    <Label fx:id="financialExpensesLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Net Cash Flow" styleClass="table-title"/>
+                    <Label fx:id="financialCashFlowLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Savings Rate" styleClass="table-title"/>
+                    <Label fx:id="financialSavingsRateLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Essential Versus Discretionary" styleClass="table-title"/>
+                    <Label fx:id="financialSpendingMixLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Budget Pressure" styleClass="table-title"/>
+                    <Label fx:id="financialBudgetPressureLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Debt Obligations" styleClass="table-title"/>
+                    <Label fx:id="financialDebtLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Goal Commitments" styleClass="table-title"/>
+                    <Label fx:id="financialGoalCommitmentLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Project Commitments" styleClass="table-title"/>
+                    <Label fx:id="financialProjectCommitmentLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Data Completeness" styleClass="table-title"/>
+                    <Label fx:id="financialCompletenessLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+            </FlowPane>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="runFinancialHealthButton" text="Run Financial Health Analysis" onAction="#runFinancialHealthAnalysis" styleClass="primary-button"/>
+                <Button text="Refresh Figures" onAction="#refreshContext" styleClass="secondary-button"/>
+                <Button text="View Supporting Evidence" onAction="#viewEvidence" styleClass="secondary-button"/>
+                <Button text="Open Recommended Area" onAction="#openRecommendedArea" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="reportsTrendsSection" spacing="12" visible="false" managed="false">
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900" maxWidth="Infinity">
+                <VBox spacing="8" styleClass="analysis-scope-card-wide">
+                    <Label text="Latest Generated Reports" styleClass="table-title"/>
+                    <Label fx:id="reportsStatusSummaryLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card-wide">
+                    <Label text="Trends and Reporting Gaps" styleClass="table-title"/>
+                    <Label fx:id="reportsTrendSummaryLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+            </FlowPane>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="runReportsButton" text="Analyse Reports and Trends" onAction="#runReportsAnalysis" styleClass="primary-button"/>
+                <Button text="Open Reports" onAction="#openReports" styleClass="secondary-button"/>
+                <Button text="Refresh Report Status" onAction="#refreshContext" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="budgetForecastSection" spacing="12" visible="false" managed="false">
             <VBox spacing="10" styleClass="analysis-section">
-                <Label fx:id="financialOverviewLabel" text="No financial overview yet." wrapText="true" styleClass="ai-overview-text"/>
-                <FlowPane hgap="8" vgap="8" prefWrapLength="860">
-                    <Button text="Deep System Analysis" onAction="#runDeepSystemAnalysis" styleClass="primary-button"/>
-                    <Button text="Reports Analysis" onAction="#runReportsAnalysis" styleClass="primary-button"/>
-                    <Button text="Budget And Household" onAction="#reviewBudgetPlan" styleClass="secondary-button"/>
-                    <Button text="Goal To Project Path" onAction="#reviewGoalReadiness" styleClass="secondary-button"/>
-                    <Button text="Loan And Repayment Review" onAction="#reviewLoanPosition" styleClass="secondary-button"/>
-                    <Button text="Data Quality Review" onAction="#reviewDataQuality" styleClass="secondary-button"/>
-                    <Button text="7-Day Action Plan" onAction="#buildActionPlan" styleClass="primary-button"/>
-                    <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+                <Label text="Budget Review" styleClass="table-title"/>
+                <Label fx:id="budgetSummaryLabel" text="Loading budget status..." wrapText="true" styleClass="goal-insight-text"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900">
+                    <Button fx:id="reviewBudgetButton" text="Review Budget Performance" onAction="#reviewBudgetPlan" styleClass="primary-button"/>
+                    <Button text="Open Budgets" onAction="#openBudgets" styleClass="secondary-button"/>
                 </FlowPane>
             </VBox>
-        </TitledPane>
-
-        <FlowPane hgap="14" vgap="14" prefWrapLength="900" maxWidth="Infinity">
-            <VBox spacing="8" styleClass="analysis-scope-card">
-                <Label text="System" styleClass="table-title"/>
-                <Label fx:id="systemCoverageLabel" text="Loading system coverage..." wrapText="true" styleClass="goal-insight-text"/>
-            </VBox>
-            <VBox spacing="8" styleClass="analysis-scope-card">
-                <Label text="Reports" styleClass="table-title"/>
-                <Label fx:id="reportCoverageLabel" text="Loading report coverage..." wrapText="true" styleClass="goal-insight-text"/>
-            </VBox>
-            <VBox spacing="8" styleClass="analysis-scope-card">
-                <Label text="Checks" styleClass="table-title"/>
-                <VBox fx:id="actionQueueBox" spacing="7"/>
-            </VBox>
-        </FlowPane>
-
-        <TitledPane text="Analysis Result" expanded="true" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
             <VBox spacing="10" styleClass="analysis-section">
-                <Label fx:id="requestStatusLabel" text="Ready." wrapText="true" styleClass="form-note"/>
-                <TextArea fx:id="answerArea" editable="false" wrapText="true" prefRowCount="12" promptText="Run an analysis to see findings, risks, recommendations, and next actions." styleClass="ai-answer-area"/>
-            </VBox>
-        </TitledPane>
-
-        <TitledPane text="Ask Follow-Up Question" expanded="false" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
-            <VBox spacing="10" styleClass="analysis-section">
-                <TextArea fx:id="questionArea" promptText="Ask about budgets, reports, goals, projects, loans, missing records, risks, or what to do next..." prefRowCount="3" wrapText="true"/>
+                <Label text="Cash Forecast" styleClass="table-title"/>
+                <Label fx:id="forecastSummaryLabel" text="Loading forecast status..." wrapText="true" styleClass="goal-insight-text"/>
                 <HBox spacing="8" alignment="CENTER_LEFT">
-                    <Button text="Ask" onAction="#askQuestion" styleClass="primary-button"/>
-                    <Button text="Clear" onAction="#clearConversation" styleClass="secondary-button"/>
+                    <Label text="Forecast period" styleClass="field-label"/>
+                    <ComboBox fx:id="forecastPeriodBox" prefWidth="150"/>
+                    <DatePicker fx:id="forecastStartDatePicker" prefWidth="140"/>
+                    <DatePicker fx:id="forecastEndDatePicker" prefWidth="140"/>
                     <Region HBox.hgrow="ALWAYS"/>
                 </HBox>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900">
+                    <Button fx:id="forecastCashButton" text="Forecast Cash Position" onAction="#forecastCashPosition" styleClass="primary-button"/>
+                    <Button text="Open Transaction Ledger" onAction="#openTransactionLedger" styleClass="secondary-button"/>
+                </FlowPane>
+            </VBox>
+            <VBox spacing="10" styleClass="analysis-section">
+                <Label text="Seven-Day Action Plan" styleClass="table-title"/>
+                <Label fx:id="actionPlanSummaryLabel" text="Build a maximum seven-action plan from visible obligations, risks and missing records." wrapText="true" styleClass="goal-insight-text"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900">
+                    <Button fx:id="actionPlanButton" text="Create 7-Day Action Plan" onAction="#buildActionPlan" styleClass="primary-button"/>
+                </FlowPane>
+            </VBox>
+        </VBox>
+
+        <VBox fx:id="goalsProjectsSection" spacing="12" visible="false" managed="false">
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900" maxWidth="Infinity">
+                <VBox spacing="8" styleClass="analysis-scope-card-wide">
+                    <Label text="Goals" styleClass="table-title"/>
+                    <Label fx:id="goalsSummaryLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card-wide">
+                    <Label text="Projects" styleClass="table-title"/>
+                    <Label fx:id="projectsSummaryLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+            </FlowPane>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="reviewGoalsProjectsButton" text="Analyse Goals and Projects" onAction="#reviewGoalReadiness" styleClass="primary-button"/>
+                <Button text="Open Goals" onAction="#openGoals" styleClass="secondary-button"/>
+                <Button text="Open Projects" onAction="#openProjects" styleClass="secondary-button"/>
+                <Button fx:id="planGoalStepsButton" text="Plan Goal Steps" onAction="#planGoalSteps" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="loansRepaymentsSection" spacing="12" visible="false" managed="false">
+            <FlowPane hgap="12" vgap="12" prefWrapLength="900" maxWidth="Infinity">
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Money Borrowed" styleClass="table-title"/>
+                    <Label fx:id="loansBorrowedLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card">
+                    <Label text="Money Lent" styleClass="table-title"/>
+                    <Label fx:id="loansLentLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+                <VBox spacing="8" styleClass="analysis-scope-card-wide">
+                    <Label text="Repayment Schedule Quality" styleClass="table-title"/>
+                    <Label fx:id="loansScheduleLabel" text="Loading..." wrapText="true" styleClass="goal-insight-text"/>
+                </VBox>
+            </FlowPane>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="reviewLoansButton" text="Analyse Loans and Repayments" onAction="#reviewLoanPosition" styleClass="primary-button"/>
+                <Button text="Open Loan Ledger" onAction="#openLoanLedger" styleClass="secondary-button"/>
+                <Button text="Open Repayment Schedule" onAction="#openRepaymentSchedule" styleClass="secondary-button"/>
+                <Button fx:id="reviewOverdueLoansButton" text="Review Overdue Loans" onAction="#reviewOverdueLoans" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="dataQualitySection" spacing="12" visible="false" managed="false">
+            <VBox spacing="8" styleClass="analysis-section">
+                <Label text="Rule-Based Checks" styleClass="table-title"/>
+                <Label fx:id="dataQualityRulesLabel" text="Loading checks..." wrapText="true" styleClass="goal-insight-text"/>
+            </VBox>
+            <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                <Button fx:id="runDataQualityButton" text="Run Data Quality Analysis" onAction="#reviewDataQuality" styleClass="primary-button"/>
+                <Button text="Open Data Quality Records" onAction="#openDataQualityRecords" styleClass="secondary-button"/>
+                <Button text="Review Unreconciled Accounts" onAction="#reviewUnreconciledAccounts" styleClass="secondary-button"/>
+                <Button text="Refresh Checks" onAction="#refreshContext" styleClass="secondary-button"/>
+            </FlowPane>
+        </VBox>
+
+        <VBox fx:id="smartAssistantSection" spacing="12" visible="false" managed="false">
+            <VBox spacing="10" styleClass="analysis-section">
+                <Label text="Ask Smart Assistant" styleClass="table-title"/>
+                <TextArea fx:id="questionArea" promptText="Ask a specific question about the financial records currently stored in PFMIS." prefRowCount="4" wrapText="true"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900">
+                    <Button text="What is my biggest financial risk?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="Can I meet upcoming obligations?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="Which budget is likely to be exceeded?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="Which loan requires attention first?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="Which goal is falling behind?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="What should I do in the next seven days?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                    <Button text="Are there problems with my financial data?" onAction="#useSuggestedQuestion" styleClass="secondary-button"/>
+                </FlowPane>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900">
+                    <Button fx:id="askQuestionButton" text="Ask" onAction="#askQuestion" styleClass="primary-button"/>
+                    <Button text="Clear" onAction="#clearConversation" styleClass="secondary-button"/>
+                    <Button text="View Evidence" onAction="#viewEvidence" styleClass="secondary-button"/>
+                </FlowPane>
+            </VBox>
+        </VBox>
+
+        <TitledPane fx:id="analysisResultPane" text="Analysis Result" expanded="true" collapsible="true" maxWidth="Infinity" styleClass="section-pane">
+            <VBox spacing="10" styleClass="analysis-section">
+                <VBox spacing="4">
+                    <Label fx:id="resultTitleLabel" text="Analysis: No result yet" wrapText="true" styleClass="table-title"/>
+                    <Label fx:id="resultMetaLabel" text="Generated: - | Period: - | Provider: - | Data status: -" wrapText="true" styleClass="form-note"/>
+                    <Label fx:id="requestStatusLabel" text="Choose a Smart Analysis area. No external AI request runs until you click an analysis button." wrapText="true" styleClass="form-note"/>
+                </VBox>
+                <FlowPane fx:id="resultCategoryPane" hgap="8" vgap="8" prefWrapLength="900"/>
+                <TextArea fx:id="answerArea" editable="false" wrapText="true" prefRowCount="13" promptText="Run an analysis to see Summary, Checks, Risks, Recommended Actions, Conclusion and Limitations." styleClass="ai-answer-area"/>
+                <FlowPane hgap="8" vgap="8" prefWrapLength="900" styleClass="analysis-action-row">
+                    <Button fx:id="openRecommendedAreaButton" text="Open Recommended Area" onAction="#openRecommendedArea" styleClass="primary-button"/>
+                    <Button fx:id="viewEvidenceButton" text="View Evidence" onAction="#viewEvidence" styleClass="secondary-button"/>
+                    <Button fx:id="exportAnalysisButton" text="Export Analysis" onAction="#exportAnalysis" styleClass="secondary-button"/>
+                    <Button fx:id="runAgainButton" text="Run Again" onAction="#runAgain" styleClass="secondary-button"/>
+                </FlowPane>
             </VBox>
         </TitledPane>
     </children>

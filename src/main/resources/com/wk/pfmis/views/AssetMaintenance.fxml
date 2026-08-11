@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AssetMaintenanceController" styleClass="core-workspace-page asset-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Maintenance &amp; Condition" styleClass="section-heading"/>
+            <Label text="Record maintenance and condition events without creating unrelated asset records." wrapText="true" styleClass="form-note"/>
+        </VBox>
+        <Button text="Record Maintenance" onAction="#recordMaintenance" styleClass="primary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <TitledPane text="Selected Asset" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label text="Asset" styleClass="field-label"/>
+                <ComboBox fx:id="assetBox" promptText="Choose asset" minWidth="300"/>
+            </HBox>
+            <GridPane hgap="12" vgap="12">
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                    <Label text="Status" styleClass="metric-title"/>
+                    <Label fx:id="statusLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <Label text="Condition" styleClass="metric-title"/>
+                    <Label fx:id="conditionLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                    <Label text="Current Value" styleClass="metric-title"/>
+                    <Label fx:id="valueLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+                <VBox styleClass="compact-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                    <Label text="Location" styleClass="metric-title"/>
+                    <Label fx:id="locationLabel" text="-" styleClass="overview-value"/>
+                </VBox>
+            </GridPane>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Maintenance Event" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="12">
+            <GridPane hgap="18" vgap="10">
+                <Label text="Maintenance Date *" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <DatePicker fx:id="maintenanceDatePicker" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <Label text="Cost" styleClass="field-label" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                <TextField fx:id="costField" promptText="0.00" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label text="Provider" styleClass="field-label" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+                <TextField fx:id="providerField" promptText="Workshop, technician or supplier" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+                <Label text="Reference" styleClass="field-label" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+                <TextField fx:id="referenceField" promptText="Invoice or receipt" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+                <CheckBox fx:id="addToAssetValueBox" text="Capitalize cost into asset value" GridPane.columnIndex="0" GridPane.rowIndex="2" GridPane.columnSpan="2"/>
+                <Label text="Notes" styleClass="field-label" GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextArea fx:id="notesArea" prefRowCount="3" wrapText="true" GridPane.columnIndex="0" GridPane.rowIndex="4" GridPane.columnSpan="4"/>
+            </GridPane>
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Button text="Record Maintenance" onAction="#recordMaintenance" styleClass="primary-button"/>
+                <Button text="Clear" onAction="#clearForm" styleClass="secondary-button"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="resultLabel" text="Select an asset, then record the maintenance event." wrapText="true" styleClass="form-note"/>
+            </HBox>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane text="Maintenance and Condition History" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+        <VBox spacing="10">
+            <Label fx:id="eventStateLabel" text="No asset events yet." styleClass="form-note"/>
+            <TableView fx:id="eventTable" prefHeight="300" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="eventDateColumn" text="Date" prefWidth="125"/>
+                    <TableColumn fx:id="eventTypeColumn" text="Event" prefWidth="160"/>
+                    <TableColumn fx:id="eventAmountColumn" text="Amount" prefWidth="145"/>
+                    <TableColumn fx:id="eventCounterpartyColumn" text="Provider" prefWidth="180"/>
+                    <TableColumn fx:id="eventTransactionColumn" text="Transaction" prefWidth="130"/>
+                    <TableColumn fx:id="eventStatusColumn" text="Status" prefWidth="130"/>
+                    <TableColumn fx:id="eventNotesColumn" text="Notes" prefWidth="320"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

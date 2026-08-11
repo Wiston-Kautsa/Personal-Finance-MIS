@@ -1,6 +1,8 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.security.UserSession;
+import com.wk.pfmis.utils.ReadableTextSupport;
+import com.wk.pfmis.utils.RequiredFieldSupport;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
@@ -158,6 +160,8 @@ public class SetupSectionController {
             if (spec.setupArea() != null && controller instanceof SetupPolicyController setupPolicyController) {
                 setupPolicyController.selectArea(spec.setupArea());
             }
+            RequiredFieldSupport.apply(view);
+            ReadableTextSupport.apply(view);
             tab.setContent(unwrapScrollPane(view));
             if (controller != null) {
                 loadedControllers.put(tab, controller);

@@ -26,15 +26,19 @@
             <TitledPane text="Governance Controls" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
                 <VBox spacing="10" styleClass="settings-section">
                     <Label text="Use this page only for supporting information that cannot be reliably derived from validated transactions. These inputs must not override calculated income, expense, account, loan, project or budget totals." wrapText="true" styleClass="form-note"/>
-                    <Label text="Required workflow: Draft -> Validate -> Review -> Approve -> Post -> Freeze -> Use in Report. Posted values should be revised through a new version rather than overwritten." wrapText="true" styleClass="settings-status-text"/>
+                    <Label text="Active Workflow - Select workflow steps and required fields to open their control detail. Saving supporting records is operational; lifecycle controls record governed actions and keep destructive changes under confirmation, backup and audit controls." wrapText="true" styleClass="data-preview-banner"/>
+                    <Label text="Required Workflow" styleClass="table-title"/>
+                    <FlowPane fx:id="reportWorkflowStepsPane" hgap="10" vgap="10" prefWrapLength="980"/>
+                    <Label text="Required Supplementary Input Fields" styleClass="table-title"/>
+                    <FlowPane fx:id="reportWorkbenchFieldsPane" hgap="10" vgap="10" prefWrapLength="980"/>
                     <FlowPane hgap="8" vgap="8" prefWrapLength="900">
                         <Button text="New Input" onAction="#clearAllForms" minWidth="100" styleClass="secondary-button"/>
-                        <Button text="Validate" onAction="#validateSelectedInput" minWidth="95" styleClass="secondary-button"/>
-                        <Button text="Submit for Approval" onAction="#submitSelectedInput" minWidth="155" styleClass="secondary-button"/>
-                        <Button text="Approve" onAction="#approveSelectedInput" minWidth="95" styleClass="secondary-button"/>
-                        <Button text="Reject" onAction="#rejectSelectedInput" minWidth="95" styleClass="secondary-button"/>
-                        <Button text="Freeze" onAction="#freezeSelectedInput" minWidth="95" styleClass="secondary-button"/>
-                        <Button text="Create Revised Version" onAction="#createRevisedVersion" minWidth="170" styleClass="secondary-button"/>
+                        <Button text="Run Input Check" onAction="#validateSelectedInput" minWidth="130" styleClass="secondary-button"/>
+                        <Button text="Record Submission Request" onAction="#submitSelectedInput" minWidth="190" styleClass="secondary-button"/>
+                        <Button text="Record Approval Review" onAction="#approveSelectedInput" minWidth="170" styleClass="secondary-button"/>
+                        <Button text="Record Rejection Review" onAction="#rejectSelectedInput" minWidth="170" styleClass="secondary-button"/>
+                        <Button text="Record Freeze Request" onAction="#freezeSelectedInput" minWidth="160" styleClass="secondary-button"/>
+                        <Button text="Prepare Revised Version" onAction="#createRevisedVersion" minWidth="175" styleClass="secondary-button"/>
                         <Button text="View Source" onAction="#viewSource" minWidth="110" styleClass="secondary-button"/>
                         <Button text="View History" onAction="#viewHistory" minWidth="110" styleClass="secondary-button"/>
                     </FlowPane>

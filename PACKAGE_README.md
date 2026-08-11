@@ -2,11 +2,24 @@ PFMIS MULTI-USER PACKAGE
 
 This package adds first-run administrator setup, Super Administrator-controlled user creation, secure sign-in, private per-user workspaces, Super Administrator user management, workspace switching, password change/reset, failed-login lockout, authentication auditing, per-user AI credentials, and per-user backups.
 
+SECURITY BASELINE
+- PFMIS does not ship with a built-in username or password.
+- The application must never recreate, reactivate, promote or reset an administrator account during startup.
+- The first registered account becomes the Super Administrator only when no users exist.
+- Additional users must be created from Manage Users by an active Super Administrator.
+
 FIRST RUN
 1. Start PFMIS.
 2. Choose Create First Administrator.
-3. Register the first account. Existing single-user pfmis.db data is copied into this administrator's workspace automatically.
+3. Enter new credentials for the first account. Existing single-user pfmis.db data is copied into this administrator's workspace automatically only during first-user registration.
 4. Use Manage Users to create or administer additional accounts.
+
+RELEASE PACKAGING
+Use `scripts/package-release.ps1` to create shareable application archives. The package script runs release validation, writes a release manifest, and writes a SHA-256 checksum file.
+
+Release packages must not contain `.env` variants, SQLite/database files, lock files, backups, logs, personal reports, generated exports, local AI model files, nested archives or credentials. Use `.env.example` as the configuration template.
+
+If any Gmail App Password, SMTP/IMAP password or external AI API key was ever exposed in a shared project copy or release archive, rotate it at the provider before using PFMIS again.
 
 DATA LOCATION
 - User registry: operating-system PFMIS data folder/pfmis-auth.db

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="18" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.TransactionsOverviewController" styleClass="module-overview-page transaction-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Transactions Overview" styleClass="section-heading"/>
+            <Label text="Operational control for posted movement, transfers, schedules and correction work." wrapText="true" styleClass="form-note"/>
+            <Label fx:id="emptyStateLabel" text="Loading transaction overview..." wrapText="true" styleClass="overview-empty-state"/>
+        </VBox>
+        <Button text="Open Ledger" onAction="#openTransactionLedger" styleClass="primary-button"/>
+        <Button text="Transfer Money" onAction="#openTransferMoney" styleClass="secondary-button"/>
+        <Button text="Corrections" onAction="#openCorrectionsReversals" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <GridPane hgap="12" vgap="12">
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+            <Label text="Inflows This Month" styleClass="metric-title"/>
+            <Label fx:id="inflowsValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Income and loan inflows" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+            <Label text="Outflows This Month" styleClass="metric-title"/>
+            <Label fx:id="outflowsValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Expenses and loan outflows" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+            <Label text="Transfers This Month" styleClass="metric-title"/>
+            <Label fx:id="transfersValueLabel" text="MWK 0.00" styleClass="metric-value"/>
+            <Label text="Outgoing side only to avoid double count" styleClass="metric-note"/>
+        </VBox>
+        <VBox styleClass="metric-card overview-metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+            <Label text="Exceptions" styleClass="metric-title"/>
+            <Label fx:id="exceptionsValueLabel" text="0" styleClass="metric-value"/>
+            <Label text="Drafts and corrections needing review" styleClass="metric-note"/>
+        </VBox>
+    </GridPane>
+
+    <TitledPane text="Recent Financial Movement" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
+        <VBox spacing="10">
+            <Label fx:id="recentStateLabel" text="No recent posted movement." styleClass="form-note"/>
+            <TableView fx:id="recentMovementTable" prefHeight="245" VBox.vgrow="ALWAYS">
+                <columns>
+                    <TableColumn fx:id="recentDateColumn" text="Date" prefWidth="125"/>
+                    <TableColumn fx:id="recentTypeColumn" text="Type / Purpose" prefWidth="220"/>
+                    <TableColumn fx:id="recentAccountColumn" text="Account" prefWidth="190"/>
+                    <TableColumn fx:id="recentAmountColumn" text="Amount" prefWidth="150"/>
+                    <TableColumn fx:id="recentReferenceColumn" text="Reference" prefWidth="170"/>
+                    <TableColumn fx:id="recentStatusColumn" text="Status" prefWidth="130"/>
+                </columns>
+            </TableView>
+        </VBox>
+    </TitledPane>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Scheduled and Draft Transfers" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="scheduledStateLabel" text="No pending drafts or scheduled transfers." styleClass="form-note"/>
+                <TableView fx:id="scheduledTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="scheduledDueColumn" text="Due / Transfer Date" prefWidth="140"/>
+                        <TableColumn fx:id="scheduledNameColumn" text="Schedule / Draft" prefWidth="200"/>
+                        <TableColumn fx:id="scheduledRouteColumn" text="Route" prefWidth="230"/>
+                        <TableColumn fx:id="scheduledAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="scheduledFrequencyColumn" text="Frequency / Fee" prefWidth="150"/>
+                        <TableColumn fx:id="scheduledStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+                <HBox alignment="CENTER_RIGHT">
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button text="Scheduled Transfers" onAction="#openScheduledTransfers" styleClass="secondary-button"/>
+                </HBox>
+            </VBox>
+        </TitledPane>
+        <TitledPane text="Corrections Queue" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="correctionsStateLabel" text="No correction drafts." styleClass="form-note"/>
+                <TableView fx:id="correctionsTable" prefHeight="260" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="correctionIdColumn" text="Draft" prefWidth="100"/>
+                        <TableColumn fx:id="correctionOriginalColumn" text="Original" prefWidth="120"/>
+                        <TableColumn fx:id="correctionAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="correctionAmountColumn" text="Amount" prefWidth="150"/>
+                        <TableColumn fx:id="correctionDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="correctionStatusColumn" text="Status" prefWidth="130"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

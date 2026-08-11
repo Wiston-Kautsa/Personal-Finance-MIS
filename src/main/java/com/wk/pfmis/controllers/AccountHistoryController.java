@@ -14,16 +14,20 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.text.NumberFormat;
+import java.util.Locale;
 import java.util.Set;
 
 public class AccountHistoryController {
@@ -36,6 +40,7 @@ public class AccountHistoryController {
     @FXML private DatePicker historyDatePicker;
     @FXML private ComboBox<String> historyPeriodFilter;
     @FXML private ComboBox<String> historyYearsFilter;
+    @FXML private TextField historySearchField;
     @FXML private TableView<Account> accountsTable;
     @FXML private TableColumn<Account, String> accountNameColumn;
     @FXML private TableColumn<Account, String> accountTypeColumn;
@@ -44,18 +49,20 @@ public class AccountHistoryController {
     @FXML private TableColumn<Account, String> currencyColumn;
     @FXML private TableColumn<Account, String> balanceColumn;
     @FXML private TableColumn<Account, String> accountStatusColumn;
-    @FXML private TableView<FinanceTransaction> historyTable;
-    @FXML private TableColumn<FinanceTransaction, String> dateColumn;
-    @FXML private TableColumn<FinanceTransaction, String> typeColumn;
-    @FXML private TableColumn<FinanceTransaction, String> categoryColumn;
-    @FXML private TableColumn<FinanceTransaction, String> amountColumn;
-    @FXML private TableColumn<FinanceTransaction, String> paymentMethodColumn;
-    @FXML private TableColumn<FinanceTransaction, String> referenceColumn;
-    @FXML private TableColumn<FinanceTransaction, String> statusColumn;
+    @FXML private TableView<LedgerRow> historyTable;
+    @FXML private TableColumn<LedgerRow, String> dateColumn;
+    @FXML private TableColumn<LedgerRow, String> typeColumn;
+    @FXML private TableColumn<LedgerRow, String> categoryColumn;
+    @FXML private TableColumn<LedgerRow, String> amountColumn;
+    @FXML private TableColumn<LedgerRow, String> paymentMethodColumn;
+    @FXML private TableColumn<LedgerRow, String> referenceColumn;
+    @FXML private TableColumn<LedgerRow, String> runningBalanceColumn;
+    @FXML private TableColumn<LedgerRow, String> statusColumn;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
     private final ObservableList<Account> allAccounts = FXCollections.observableArrayList();
     private final ObservableList<FinanceTransaction> selectedAccountTransactions = FXCollections.observableArrayList();
+    private final ObservableList<LedgerRow> selectedLedgerRows = FXCollections.observableArrayList();
     private final Map<Integer, Set<LocalDate>> accountTransactionDates = new HashMap<>();
     private final Set<LocalDate> allTransactionDates = new HashSet<>();
     private final Set<LocalDate> selectedAccountTransactionDates = new HashSet<>();
@@ -68,15 +75,16 @@ public class AccountHistoryController {
         providerColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getBankProviderName())));
         accountNumberColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().getAccountNumber())));
         currencyColumn.setCellValueFactory(new PropertyValueFactory<>("currency"));
-        balanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(MoneyUtil.mwk(cell.getValue().getCurrentBalance())));
+        balanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().getCurrency(), cell.getValue().getCurrentBalance())));
         accountStatusColumn.setCellValueFactory(new PropertyValueFactory<>("status"));
-        dateColumn.setCellValueFactory(new PropertyValueFactory<>("transactionDate"));
-        typeColumn.setCellValueFactory(new PropertyValueFactory<>("transactionType"));
-        categoryColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayCategory(cell.getValue())));
-        amountColumn.setCellValueFactory(cell -> new SimpleStringProperty(MoneyUtil.mwk(cell.getValue().getAmount())));
-        paymentMethodColumn.setCellValueFactory(new PropertyValueFactory<>("paymentMethod"));
-        referenceColumn.setCellValueFactory(new PropertyValueFactory<>("referenceNumber"));
-        statusColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayStatus(cell.getValue().getTransactionStatus())));
+        dateColumn.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().transaction().getTransactionDate()));
+        typeColumn.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().transaction().getTransactionType()));
+        categoryColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayCategory(cell.getValue().transaction())));
+        amountColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().currency(), cell.getValue().transaction().getAmount())));
+        paymentMethodColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().transaction().getPaymentMethod())));
+        referenceColumn.setCellValueFactory(cell -> new SimpleStringProperty(blankToDash(cell.getValue().transaction().getReferenceNumber())));
+        runningBalanceColumn.setCellValueFactory(cell -> new SimpleStringProperty(money(cell.getValue().currency(), cell.getValue().runningBalance())));
+        statusColumn.setCellValueFactory(cell -> new SimpleStringProperty(displayStatus(cell.getValue().transaction().getTransactionStatus())));
 
         filteredAccounts = new FilteredList<>(allAccounts);
         accountsTable.setItems(filteredAccounts);
@@ -95,6 +103,7 @@ public class AccountHistoryController {
         historyPeriodFilter.getSelectionModel().select("All Dates");
         historyPeriodFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyHistoryFilters());
         historyYearsFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyHistoryFilters());
+        historySearchField.textProperty().addListener((observable, oldValue, newValue) -> applyHistoryFilters());
         refresh();
     }
 
@@ -105,6 +114,14 @@ public class AccountHistoryController {
                 ? requestedId
                 : selectedAccountId();
         List<Account> accounts = database.listAccounts();
+        if (requestedId != null && accounts.stream().noneMatch(account -> account.getId() == requestedId)) {
+            try {
+                accounts = new ArrayList<>(accounts);
+                accounts.add(database.getInternalAccountById(requestedId));
+            } catch (RuntimeException ignored) {
+                // Normal account history should remain limited to user accounts unless an internal ledger was explicitly requested.
+            }
+        }
         allAccounts.setAll(accounts);
         refreshDatabaseTransactionDates(accounts);
         refreshFilterOptions(accounts);
@@ -116,12 +133,14 @@ public class AccountHistoryController {
         Account account = accountsTable.getSelectionModel().getSelectedItem();
         if (account == null) {
             selectedAccountTransactions.clear();
+            selectedLedgerRows.clear();
             historyTable.getItems().clear();
             return;
         }
 
         List<FinanceTransaction> transactions = database.listTransactionsForAccount(account.getId());
         selectedAccountTransactions.setAll(transactions);
+        selectedLedgerRows.setAll(ledgerRows(account, transactions));
         refreshSelectedAccountTransactionDates();
         refreshHistoryYearOptions();
         applyHistoryFilters();
@@ -144,11 +163,11 @@ public class AccountHistoryController {
         );
     }
 
-    private List<javafx.scene.control.MenuItem> historyMenuItems(FinanceTransaction transaction) {
+    private List<javafx.scene.control.MenuItem> historyMenuItems(LedgerRow row) {
         return List.of(
-                TableActions.menuItem("View Transaction Details", () -> viewTransactionDetails(transaction)),
+                TableActions.menuItem("View Transaction Details", () -> viewTransactionDetails(row.transaction())),
                 TableActions.separator(),
-                TableActions.copyRowItem(historyTable, transaction),
+                TableActions.copyRowItem(historyTable, row),
                 TableActions.exportTableItem(historyTable, selectedAccountTitle()),
                 TableActions.printTableItem(historyTable, selectedAccountTitle()),
                 TableActions.refreshItem(this::refreshSelectedAccount)
@@ -165,7 +184,7 @@ public class AccountHistoryController {
                         + "\nProvider: " + blankToDash(account.getBankProviderName())
                         + "\nAccount Number: " + blankToDash(account.getAccountNumber())
                         + "\nCurrency: " + blankToDash(account.getCurrency())
-                        + "\nBalance: " + MoneyUtil.mwk(account.getCurrentBalance())
+                        + "\nBalance: " + money(account.getCurrency(), account.getCurrentBalance())
                         + "\nStatus: " + blankToDash(account.getStatus())
         );
     }
@@ -178,7 +197,7 @@ public class AccountHistoryController {
                 "Date: " + transaction.getTransactionDate()
                         + "\nType: " + transaction.getTransactionType()
                         + "\nCategory/Project: " + displayCategory(transaction)
-                        + "\nAmount: " + MoneyUtil.mwk(transaction.getAmount())
+                        + "\nAmount: " + money(selectedAccountCurrency(), transaction.getAmount())
                         + "\nMethod: " + blankToDash(transaction.getPaymentMethod())
                         + "\nReference: " + blankToDash(transaction.getReferenceNumber())
                         + "\nStatus: " + displayStatus(transaction.getTransactionStatus())
@@ -189,6 +208,11 @@ public class AccountHistoryController {
     private String selectedAccountTitle() {
         Account account = accountsTable.getSelectionModel().getSelectedItem();
         return account == null ? "Account Transactions" : account.getAccountName() + " Transactions";
+    }
+
+    private String selectedAccountCurrency() {
+        Account account = accountsTable.getSelectionModel().getSelectedItem();
+        return account == null ? "MWK" : account.getCurrency();
     }
 
     private Integer selectedAccountId() {
@@ -303,8 +327,9 @@ public class AccountHistoryController {
 
     private void applyHistoryFilters() {
         String period = historyPeriodFilter.getValue();
-        List<FinanceTransaction> filtered = selectedAccountTransactions.stream()
-                .filter(transaction -> matchesHistoryPeriod(transaction, period))
+        List<LedgerRow> filtered = selectedLedgerRows.stream()
+                .filter(row -> matchesHistoryPeriod(row.transaction(), period))
+                .filter(this::matchesHistorySearch)
                 .toList();
         historyTable.setItems(FXCollections.observableArrayList(filtered));
     }
@@ -392,6 +417,61 @@ public class AccountHistoryController {
         };
     }
 
+    private List<LedgerRow> ledgerRows(Account account, List<FinanceTransaction> transactions) {
+        Map<Integer, Double> runningBalances = new HashMap<>();
+        List<FinanceTransaction> chronological = transactions.stream()
+                .sorted(Comparator
+                        .comparing((FinanceTransaction transaction) -> parseDate(transaction.getTransactionDate()), Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparingInt(FinanceTransaction::getId))
+                .toList();
+        double balance = account.getOpeningBalance();
+        for (FinanceTransaction transaction : chronological) {
+            balance += signedAmount(transaction);
+            runningBalances.put(transaction.getId(), balance);
+        }
+        return transactions.stream()
+                .map(transaction -> new LedgerRow(
+                        transaction,
+                        runningBalances.getOrDefault(transaction.getId(), account.getCurrentBalance()),
+                        account.getCurrency()
+                ))
+                .toList();
+    }
+
+    private double signedAmount(FinanceTransaction transaction) {
+        String type = blankAs(transaction.getTransactionType(), "").toUpperCase(Locale.ENGLISH);
+        String purpose = blankAs(transaction.getTransactionPurpose(), "").toUpperCase(Locale.ENGLISH);
+        if ("INCOME".equals(type) || "ASSET_SALE".equals(type) || ("TRANSFER".equals(type) && "TRANSFER_IN".equals(purpose))) {
+            return transaction.getAmount();
+        }
+        if ("EXPENSE".equals(type) || ("TRANSFER".equals(type) && "TRANSFER_OUT".equals(purpose))) {
+            return -transaction.getAmount();
+        }
+        if ("LOAN".equals(type) && List.of("MONEY_BORROWED", "LENT_REPAID").contains(purpose)) {
+            return transaction.getAmount();
+        }
+        if ("LOAN".equals(type) && List.of("MONEY_LENT", "BORROWED_REPAID").contains(purpose)) {
+            return -transaction.getAmount();
+        }
+        return 0;
+    }
+
+    private boolean matchesHistorySearch(LedgerRow row) {
+        String search = historySearchField.getText() == null ? "" : historySearchField.getText().trim().toLowerCase(Locale.ENGLISH);
+        if (search.isBlank()) {
+            return true;
+        }
+        FinanceTransaction transaction = row.transaction();
+        return contains(transaction.getTransactionDate(), search)
+                || contains(transaction.getTransactionType(), search)
+                || contains(transaction.getTransactionPurpose(), search)
+                || contains(displayCategory(transaction), search)
+                || contains(transaction.getPaymentMethod(), search)
+                || contains(transaction.getReferenceNumber(), search)
+                || contains(transaction.getDescription(), search)
+                || contains(displayStatus(transaction.getTransactionStatus()), search);
+    }
+
     private boolean isSameWeek(LocalDate transactionDate, LocalDate selectedDate) {
         LocalDate weekStart = selectedDate.with(DayOfWeek.MONDAY);
         LocalDate weekEnd = selectedDate.with(DayOfWeek.SUNDAY);
@@ -443,7 +523,29 @@ public class AccountHistoryController {
         return "Completed";
     }
 
+    private String money(String currency, double amount) {
+        String code = currency == null || currency.isBlank() ? "MWK" : currency.trim().toUpperCase(Locale.ENGLISH);
+        if ("MWK".equals(code)) {
+            return MoneyUtil.mwk(amount);
+        }
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.US);
+        format.setMinimumFractionDigits(2);
+        format.setMaximumFractionDigits(2);
+        return code + " " + format.format(amount);
+    }
+
+    private boolean contains(String value, String search) {
+        return value != null && value.toLowerCase(Locale.ENGLISH).contains(search);
+    }
+
+    private String blankAs(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
     private String blankToDash(String value) {
         return value == null || value.isBlank() ? "-" : value;
+    }
+
+    private record LedgerRow(FinanceTransaction transaction, double runningBalance, String currency) {
     }
 }

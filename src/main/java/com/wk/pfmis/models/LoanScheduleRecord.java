@@ -2,6 +2,7 @@ package com.wk.pfmis.models;
 
 public class LoanScheduleRecord {
     private final int id;
+    private final Integer personId;
     private final String personName;
     private final String loanDirection;
     private final double principalAmount;
@@ -15,6 +16,7 @@ public class LoanScheduleRecord {
 
     public LoanScheduleRecord(
             int id,
+            Integer personId,
             String personName,
             String loanDirection,
             double principalAmount,
@@ -27,6 +29,7 @@ public class LoanScheduleRecord {
             String notes
     ) {
         this.id = id;
+        this.personId = personId;
         this.personName = personName;
         this.loanDirection = loanDirection;
         this.principalAmount = principalAmount;
@@ -41,6 +44,10 @@ public class LoanScheduleRecord {
 
     public int getId() {
         return id;
+    }
+
+    public Integer getPersonId() {
+        return personId;
     }
 
     public String getPersonName() {

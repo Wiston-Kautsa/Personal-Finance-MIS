@@ -90,15 +90,7 @@ public class GoalProjectController {
                     projectCanBeActive ? "ACTIVE" : "PLANNED"
             );
             if (projectCanBeActive) {
-                database.updateGoal(
-                        goal.getId(),
-                        goal.getGoalName(),
-                        goal.getTargetAmount(),
-                        goal.getCurrentAmount(),
-                        goal.getMonthlyContribution(),
-                        goal.getTargetDate(),
-                        "COMPLETED"
-                );
+                database.updateGoalStatus(goal.getId(), "CONVERTED_TO_PROJECT", "Goal converted to project: " + projectName + ".");
             }
             refreshProjectGoalChoices();
             DataRefreshBus.notifyDataChanged();
@@ -112,7 +104,10 @@ public class GoalProjectController {
 
     @FXML
     private void refreshProjectGoalChoices() {
-        Integer selectedId = projectGoalBox.getValue() == null ? null : projectGoalBox.getValue().getId();
+        Integer requestedGoalId = NavigationBus.consumeRequestedGoalId();
+        Integer selectedId = requestedGoalId == null
+                ? projectGoalBox.getValue() == null ? null : projectGoalBox.getValue().getId()
+                : requestedGoalId;
         List<Goal> goals = database.listGoals();
         refreshingGoalChoices = true;
         try {
@@ -155,7 +150,7 @@ public class GoalProjectController {
         String defaultBudget = amountText(goal.getTargetAmount());
         LocalDate defaultStartDate = LocalDate.now();
         LocalDate defaultEndDate = parseDate(goal.getTargetDate());
-        boolean defaultMarkCompleted = goalReadyForProject(goal) || "COMPLETED".equals(normalizedStatus(goal.getStatus()));
+        boolean defaultMarkCompleted = goalReadyForProject(goal) || List.of("ACHIEVED", "COMPLETED").contains(normalizedStatus(goal.getStatus()));
         String defaultDescription = defaultProjectDescription(goal, defaultName, goal.getTargetAmount());
 
         applyTextDefault(projectNameField, defaultName, lastDefaultProjectName, selectedDifferentGoal);
@@ -224,7 +219,7 @@ public class GoalProjectController {
         return goal != null
                 && goal.getTargetAmount() > 0
                 && (goal.getCurrentAmount() >= goal.getTargetAmount()
-                || "COMPLETED".equals(normalizedStatus(goal.getStatus())));
+                || List.of("ACHIEVED", "COMPLETED").contains(normalizedStatus(goal.getStatus())));
     }
 
     private String normalizedStatus(String status) {

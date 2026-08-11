@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="16" maxWidth="Infinity" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.wk.pfmis.controllers.AssetRecognitionController" styleClass="core-workspace-page asset-workspace">
+    <HBox spacing="12" alignment="CENTER_LEFT" styleClass="module-header">
+        <VBox spacing="4" HBox.hgrow="ALWAYS">
+            <Label text="Asset Recognition" styleClass="section-heading"/>
+            <Label text="Review posted purchase-style expenses and pending registrations before they become asset records." wrapText="true" styleClass="form-note"/>
+        </VBox>
+        <Button text="Recognize Selected Transaction" onAction="#recognizeSelectedTransaction" styleClass="primary-button"/>
+        <Button text="+ Register Asset" onAction="#openRegisterAsset" styleClass="secondary-button"/>
+        <Button text="Asset Register" onAction="#openAssetRegister" styleClass="secondary-button"/>
+        <Button text="Refresh" onAction="#refresh" styleClass="secondary-button"/>
+    </HBox>
+
+    <HBox spacing="14" alignment="TOP_LEFT" VBox.vgrow="ALWAYS">
+        <TitledPane text="Purchase Candidates" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
+            <VBox spacing="10">
+                <Label fx:id="candidateStateLabel" text="No purchase candidates detected." styleClass="form-note"/>
+                <TableView fx:id="candidateTable" prefHeight="360" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="candidateIdColumn" text="ID" prefWidth="90"/>
+                        <TableColumn fx:id="candidateDateColumn" text="Date" prefWidth="125"/>
+                        <TableColumn fx:id="candidateDescriptionColumn" text="Description" prefWidth="260"/>
+                        <TableColumn fx:id="candidateAccountColumn" text="Account" prefWidth="180"/>
+                        <TableColumn fx:id="candidateCategoryColumn" text="Category" prefWidth="170"/>
+                        <TableColumn fx:id="candidateAmountColumn" text="Amount" prefWidth="145"/>
+                        <TableColumn fx:id="candidateStatusColumn" text="Status" prefWidth="120"/>
+                    </columns>
+                </TableView>
+            </VBox>
+        </TitledPane>
+        <VBox spacing="14" HBox.hgrow="ALWAYS">
+            <TitledPane text="Pending Asset Records" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+                <VBox spacing="10">
+                    <Label fx:id="pendingAssetStateLabel" text="No pending asset registrations." styleClass="form-note"/>
+                    <TableView fx:id="pendingAssetTable" prefHeight="210" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="pendingNameColumn" text="Asset" prefWidth="210"/>
+                            <TableColumn fx:id="pendingCategoryColumn" text="Category" prefWidth="150"/>
+                            <TableColumn fx:id="pendingValueColumn" text="Value" prefWidth="145"/>
+                            <TableColumn fx:id="pendingDateColumn" text="Purchase Date" prefWidth="125"/>
+                            <TableColumn fx:id="pendingStatusColumn" text="Status" prefWidth="140"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </TitledPane>
+            <TitledPane text="Recognition Guidance" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane" VBox.vgrow="ALWAYS">
+                <VBox spacing="10">
+                    <Label fx:id="resultLabel" text="Select a transaction candidate or pending asset." wrapText="true" styleClass="form-note"/>
+                    <TextArea fx:id="guidanceArea" editable="false" wrapText="true" prefRowCount="11" VBox.vgrow="ALWAYS"/>
+                </VBox>
+            </TitledPane>
+        </VBox>
+    </HBox>
+
+    <padding>
+        <Insets top="0" right="0" bottom="0" left="0"/>
+    </padding>
+</VBox>

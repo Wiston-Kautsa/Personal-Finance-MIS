@@ -3,6 +3,7 @@ package com.wk.pfmis.ai;
 import com.wk.pfmis.models.AiSettings;
 
 import java.io.IOException;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -10,6 +11,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -17,16 +20,20 @@ import java.util.concurrent.TimeUnit;
 
 public final class BundledLocalAiManager {
     public static final String HOST = "127.0.0.1";
-    public static final int PORT = 8080;
+    public static final int DEFAULT_PORT = 8080;
+    public static final int PORT = DEFAULT_PORT;
     public static final String MODEL_ALIAS = AiSettings.BUNDLED_LOCAL_MODEL;
     public static final String ENDPOINT = AiSettings.BUNDLED_LOCAL_ENDPOINT;
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration START_TIMEOUT = Duration.ofMinutes(3);
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(REQUEST_TIMEOUT)
             .build();
-    private static Process serverProcess;
+    private static volatile Process serverProcess;
+    private static volatile String currentEndpoint;
+    private static volatile String currentApiKey;
 
     private BundledLocalAiManager() {
     }
@@ -36,6 +43,7 @@ public final class BundledLocalAiManager {
         if (isReady()) {
             return "PFMIS Local AI ready.";
         }
+        resetManagedEndpointIfProcessStopped();
         Path serverExecutable = serverExecutable();
         Path modelFile = modelFile();
         if (!Files.isRegularFile(serverExecutable)) {
@@ -52,13 +60,23 @@ public final class BundledLocalAiManager {
     }
 
     public static boolean isReady() {
-        return "ok".equalsIgnoreCase(healthStatus());
+        return serverProcess != null
+                && serverProcess.isAlive()
+                && "ok".equalsIgnoreCase(healthStatus());
     }
 
     public static String healthStatus() {
+        if (serverProcess == null || !serverProcess.isAlive()) {
+            resetManagedEndpoint();
+            return "not available";
+        }
+        if (currentEndpoint == null || currentApiKey == null || currentApiKey.isBlank()) {
+            return "not available";
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder(healthUri())
                     .timeout(REQUEST_TIMEOUT)
+                    .header("Authorization", "Bearer " + currentApiKey)
                     .GET()
                     .build();
             HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
@@ -93,6 +111,7 @@ public final class BundledLocalAiManager {
             }
         }
         serverProcess = null;
+        resetManagedEndpoint();
     }
 
     public static List<String> modelAliases() {
@@ -148,16 +167,27 @@ public final class BundledLocalAiManager {
     }
 
     public static URI healthUri() {
-        return URI.create(ENDPOINT + "/health");
+        return URI.create(endpoint() + "/health");
     }
 
     public static URI chatCompletionsUri() {
-        return URI.create(ENDPOINT + "/v1/chat/completions");
+        return URI.create(endpoint() + "/v1/chat/completions");
+    }
+
+    public static String endpoint() {
+        return currentEndpoint == null || currentEndpoint.isBlank() ? ENDPOINT : currentEndpoint;
+    }
+
+    public static String apiKey() {
+        return currentApiKey == null ? "" : currentApiKey;
     }
 
     private static void startServer(Path serverExecutable, Path modelFile) {
         try {
             Files.createDirectories(logDirectory());
+            int port = availableLoopbackPort();
+            String apiKey = randomApiKey();
+            String endpoint = "http://" + HOST + ":" + port;
             ProcessBuilder processBuilder = new ProcessBuilder(
                     serverExecutable.toString(),
                     "-m",
@@ -169,15 +199,21 @@ public final class BundledLocalAiManager {
                     "--host",
                     HOST,
                     "--port",
-                    String.valueOf(PORT),
+                    String.valueOf(port),
+                    "--api-key",
+                    apiKey,
                     "--sleep-idle-seconds",
                     "300"
             );
             processBuilder.directory(serverExecutable.getParent().toFile());
             processBuilder.redirectErrorStream(true);
             processBuilder.redirectOutput(ProcessBuilder.Redirect.appendTo(logDirectory().resolve("llama-server.log").toFile()));
-            serverProcess = processBuilder.start();
+            Process process = processBuilder.start();
+            currentEndpoint = endpoint;
+            currentApiKey = apiKey;
+            serverProcess = process;
         } catch (IOException exception) {
+            resetManagedEndpoint();
             throw new IllegalStateException("Failed to start PFMIS Local AI.", exception);
         }
     }
@@ -196,6 +232,30 @@ public final class BundledLocalAiManager {
             }
         }
         throw new IllegalStateException("PFMIS Local AI did not become ready within " + START_TIMEOUT.toSeconds() + " seconds.");
+    }
+
+    private static int availableLoopbackPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(false);
+            return socket.getLocalPort();
+        }
+    }
+
+    private static String randomApiKey() {
+        byte[] token = new byte[32];
+        SECURE_RANDOM.nextBytes(token);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
+    }
+
+    private static void resetManagedEndpointIfProcessStopped() {
+        if (serverProcess == null || !serverProcess.isAlive()) {
+            resetManagedEndpoint();
+        }
+    }
+
+    private static void resetManagedEndpoint() {
+        currentEndpoint = null;
+        currentApiKey = null;
     }
 
     private static void ensureAgentConfig() {

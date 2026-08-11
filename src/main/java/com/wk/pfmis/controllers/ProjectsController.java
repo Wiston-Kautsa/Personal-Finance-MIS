@@ -1,6 +1,8 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.models.Account;
+import com.wk.pfmis.models.Goal;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.beans.property.SimpleStringProperty;
@@ -19,15 +21,26 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ProjectsController {
-    private static final List<String> PROJECT_STATUSES = List.of("ACTIVE", "PLANNED", "COMPLETED", "ON HOLD", "CANCELLED");
+    private static final List<String> PROJECT_STATUSES = List.of("Draft", "Planned", "Active", "At Risk", "Delayed", "Paused", "Completed", "Cancelled", "Archived");
+    private static final List<String> PROJECT_TYPES = List.of("Business", "Construction", "Agriculture", "Education", "Household", "Technology", "Community", "Personal", "Other");
+    private static final List<String> PRIORITIES = List.of("Critical", "High", "Medium", "Optional");
 
     @FXML private TextField projectNameField;
+    @FXML private ComboBox<String> projectTypeBox;
     @FXML private TextField plannedBudgetField;
     @FXML private DatePicker startDatePicker;
     @FXML private DatePicker endDatePicker;
+    @FXML private TextField projectOwnerField;
+    @FXML private ComboBox<String> priorityBox;
+    @FXML private TextField currencyField;
+    @FXML private TextField fundingSourceField;
+    @FXML private ComboBox<Account> fundingAccountBox;
+    @FXML private ComboBox<Goal> linkedGoalBox;
     @FXML private ComboBox<String> statusBox;
     @FXML private TextArea descriptionArea;
+    @FXML private TextArea notesArea;
     @FXML private Label projectCountLabel;
+    @FXML private Label activationSummaryLabel;
     @FXML private ComboBox<String> selectedProjectStatusBox;
     @FXML private TableView<Project> projectsTable;
     @FXML private TableColumn<Project, String> nameColumn;
@@ -43,7 +56,11 @@ public class ProjectsController {
     @FXML
     public void initialize() {
         statusBox.setItems(FXCollections.observableArrayList(PROJECT_STATUSES));
-        statusBox.getSelectionModel().select("ACTIVE");
+        statusBox.getSelectionModel().select("Draft");
+        projectTypeBox.setItems(FXCollections.observableArrayList(PROJECT_TYPES));
+        projectTypeBox.getSelectionModel().select("Other");
+        priorityBox.setItems(FXCollections.observableArrayList(PRIORITIES));
+        priorityBox.getSelectionModel().select("Medium");
         selectedProjectStatusBox.setItems(FXCollections.observableArrayList(PROJECT_STATUSES));
 
         projectsTable.setPlaceholder(new Label("No projects registered yet."));
@@ -63,25 +80,94 @@ public class ProjectsController {
 
     @FXML
     private void addProject() {
+        activateProject();
+    }
+
+    @FXML
+    private void saveDraft() {
+        saveProjectWithStatus("Draft");
+    }
+
+    @FXML
+    private void activateProject() {
+        if (!activationProblem().isBlank()) {
+            UiAlerts.info(activationProblem());
+            return;
+        }
+        saveProjectWithStatus("Active");
+    }
+
+    private void saveProjectWithStatus(String status) {
         try {
             String name = projectNameField.getText().trim();
             if (name.isEmpty()) {
                 UiAlerts.info("Enter a project name.");
                 return;
             }
+            double plannedBudget = plannedBudgetValue();
             database.addProject(
                     name,
+                    projectTypeBox.getValue(),
                     descriptionArea.getText().trim(),
-                    plannedBudgetValue(),
                     startDatePicker.getValue() == null ? null : startDatePicker.getValue().toString(),
                     endDatePicker.getValue() == null ? null : endDatePicker.getValue().toString(),
-                    statusBox.getValue()
+                    textValue(projectOwnerField),
+                    priorityBox.getValue(),
+                    textValue(currencyField),
+                    plannedBudget,
+                    textValue(fundingSourceField),
+                    fundingAccountBox.getValue() == null ? null : fundingAccountBox.getValue().getId(),
+                    linkedGoalBox.getValue() == null ? null : linkedGoalBox.getValue().getId(),
+                    status,
+                    textValue(notesArea)
             );
+            if ("Active".equals(status)) {
+                activationSummaryLabel.setText("Project activated. Planned budget " + MoneyUtil.mwk(plannedBudget)
+                        + ", available funding " + MoneyUtil.mwk(availableFunding())
+                        + ", funding gap " + MoneyUtil.mwk(Math.max(0, plannedBudget - availableFunding()))
+                        + ", expected completion " + blankToDash(endDatePicker.getValue() == null ? null : endDatePicker.getValue().toString()) + ".");
+            } else {
+                activationSummaryLabel.setText("Project draft saved. It will not generate project monitoring alerts until activation.");
+            }
             clearForm();
             refreshProjects();
             DataRefreshBus.notifyDataChanged();
         } catch (RuntimeException exception) {
-            UiAlerts.error("Failed to add project", exception);
+            UiAlerts.error("Failed to save project", exception);
+        }
+    }
+
+    @FXML
+    private void updateProject() {
+        try {
+            Project selectedProject = projectsTable.getSelectionModel().getSelectedItem();
+            if (selectedProject == null) {
+                UiAlerts.info("Select a project first.");
+                return;
+            }
+            database.updateProject(
+                    selectedProject.getId(),
+                    textValue(projectNameField),
+                    projectTypeBox.getValue(),
+                    textValue(descriptionArea),
+                    startDatePicker.getValue() == null ? null : startDatePicker.getValue().toString(),
+                    endDatePicker.getValue() == null ? null : endDatePicker.getValue().toString(),
+                    textValue(projectOwnerField),
+                    priorityBox.getValue(),
+                    textValue(currencyField),
+                    plannedBudgetValue(),
+                    textValue(fundingSourceField),
+                    fundingAccountBox.getValue() == null ? null : fundingAccountBox.getValue().getId(),
+                    linkedGoalBox.getValue() == null ? null : linkedGoalBox.getValue().getId(),
+                    statusBox.getValue(),
+                    textValue(notesArea)
+            );
+            clearForm();
+            refreshProjects(selectedProject.getId());
+            DataRefreshBus.notifyDataChanged();
+            UiAlerts.info("Project updated.");
+        } catch (RuntimeException exception) {
+            UiAlerts.error("Failed to update project", exception);
         }
     }
 
@@ -110,11 +196,19 @@ public class ProjectsController {
     @FXML
     private void clearForm() {
         projectNameField.clear();
+        projectTypeBox.getSelectionModel().select("Other");
         plannedBudgetField.clear();
         startDatePicker.setValue(null);
         endDatePicker.setValue(null);
-        statusBox.getSelectionModel().select("ACTIVE");
+        projectOwnerField.clear();
+        priorityBox.getSelectionModel().select("Medium");
+        currencyField.setText("MWK");
+        fundingSourceField.clear();
+        fundingAccountBox.getSelectionModel().clearSelection();
+        linkedGoalBox.getSelectionModel().clearSelection();
+        statusBox.getSelectionModel().select("Draft");
         descriptionArea.clear();
+        notesArea.clear();
     }
 
     private void refreshProjects() {
@@ -124,6 +218,8 @@ public class ProjectsController {
 
     private void refreshProjects(int selectedProjectId) {
         List<Project> projects = database.listProjects();
+        fundingAccountBox.setItems(FXCollections.observableArrayList(database.listAccounts()));
+        linkedGoalBox.setItems(FXCollections.observableArrayList(database.listGoals()));
         projectsTable.setItems(FXCollections.observableArrayList(projects));
         projectCountLabel.setText(projects.size() == 1 ? "1 project registered" : projects.size() + " projects registered");
         restoreSelection(selectedProjectId);
@@ -154,6 +250,7 @@ public class ProjectsController {
             return;
         }
         selectedProjectStatusBox.getSelectionModel().select(project.getStatus());
+        fillForm(project);
     }
 
     private void configureContextMenu() {
@@ -184,6 +281,9 @@ public class ProjectsController {
         UiAlerts.info(
                 "Project: " + project.getProjectName()
                         + "\nStatus: " + blankToDash(project.getStatus())
+                        + "\nType: " + blankToDash(project.getProjectType())
+                        + "\nPriority: " + blankToDash(project.getPriority())
+                        + "\nOwner: " + blankToDash(project.getProjectOwner())
                         + "\nPlanned Budget: " + MoneyUtil.mwk(project.getPlannedBudget())
                         + "\nSpent: " + MoneyUtil.mwk(project.getAmountSpent())
                         + "\nRemaining: " + MoneyUtil.mwk(project.getRemainingBudget())
@@ -211,8 +311,93 @@ public class ProjectsController {
         if (project != null) {
             projectsTable.getSelectionModel().select(project);
         }
-        NavigationBus.requestTransaction("EXPENSE", "PROJECT_EXPENSE", null);
+        NavigationBus.requestProjectExpense(project == null ? null : project.getId(), null);
         NavigationBus.showTransactionEntry("Record Project Expense");
+    }
+
+    private void fillForm(Project project) {
+        projectNameField.setText(project.getProjectName());
+        projectTypeBox.getSelectionModel().select(blankOrDefault(project.getProjectType(), "Other"));
+        plannedBudgetField.setText(String.format("%.2f", project.getPlannedBudget()));
+        startDatePicker.setValue(parseDate(project.getStartDate()));
+        endDatePicker.setValue(parseDate(project.getEndDate()));
+        projectOwnerField.setText(blankOrDefault(project.getProjectOwner(), ""));
+        priorityBox.getSelectionModel().select(blankOrDefault(project.getPriority(), "Medium"));
+        currencyField.setText(blankOrDefault(project.getCurrency(), "MWK"));
+        fundingSourceField.setText(blankOrDefault(project.getFundingSource(), ""));
+        selectAccount(project.getFundingAccountId());
+        selectGoal(project.getLinkedGoalId());
+        statusBox.getSelectionModel().select(blankOrDefault(project.getStatus(), "Draft"));
+        descriptionArea.setText(blankOrDefault(project.getDescription(), ""));
+        notesArea.setText(blankOrDefault(project.getNotes(), ""));
+    }
+
+    private String activationProblem() {
+        String name = textValue(projectNameField);
+        if (name.isBlank()) {
+            return "Project name is required.";
+        }
+        if (database.projectExistsByName(name)) {
+            return "A project with this name already exists. Open Project Records to edit it.";
+        }
+        if (plannedBudgetValue() < 0) {
+            return "Planned budget cannot be negative.";
+        }
+        if (startDatePicker.getValue() != null && endDatePicker.getValue() != null
+                && endDatePicker.getValue().isBefore(startDatePicker.getValue())) {
+            return "Expected completion date cannot be before the start date.";
+        }
+        if (textValue(currencyField).isBlank()) {
+            return "Currency is required.";
+        }
+        return "";
+    }
+
+    private double availableFunding() {
+        Account account = fundingAccountBox.getValue();
+        return account == null ? 0 : Math.max(0, account.getCurrentBalance());
+    }
+
+    private void selectAccount(Integer accountId) {
+        fundingAccountBox.getSelectionModel().clearSelection();
+        if (accountId == null) {
+            return;
+        }
+        fundingAccountBox.getItems().stream()
+                .filter(account -> account.getId() == accountId)
+                .findFirst()
+                .ifPresent(account -> fundingAccountBox.getSelectionModel().select(account));
+    }
+
+    private void selectGoal(Integer goalId) {
+        linkedGoalBox.getSelectionModel().clearSelection();
+        if (goalId == null) {
+            return;
+        }
+        linkedGoalBox.getItems().stream()
+                .filter(goal -> goal.getId() == goalId)
+                .findFirst()
+                .ifPresent(goal -> linkedGoalBox.getSelectionModel().select(goal));
+    }
+
+    private String textValue(TextField field) {
+        return field.getText() == null ? "" : field.getText().trim();
+    }
+
+    private String textValue(TextArea area) {
+        return area.getText() == null ? "" : area.getText().trim();
+    }
+
+    private java.time.LocalDate parseDate(String value) {
+        try {
+            return value == null || value.isBlank() ? null : java.time.LocalDate.parse(value);
+        } catch (java.time.format.DateTimeParseException exception) {
+            return null;
+        }
+    }
+
+    private String blankOrDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private double plannedBudgetValue() {

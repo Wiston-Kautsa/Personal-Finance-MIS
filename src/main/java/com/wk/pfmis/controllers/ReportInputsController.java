@@ -23,7 +23,10 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.VBox;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -31,6 +34,8 @@ import java.util.List;
 
 public class ReportInputsController {
     @FXML private Label inputGovernanceStatusLabel;
+    @FXML private FlowPane reportWorkflowStepsPane;
+    @FXML private FlowPane reportWorkbenchFieldsPane;
     @FXML private Button deleteReconciliationButton;
     @FXML private Button deleteObligationButton;
     @FXML private Button deleteRecurringButton;
@@ -140,6 +145,7 @@ public class ReportInputsController {
         configureSelections();
         configureFormDefaults();
         configureDeletionControls();
+        renderWorkflowDesignCards();
         configureContextMenus();
         refresh();
     }
@@ -692,7 +698,10 @@ public class ReportInputsController {
 
     @FXML
     private void validateSelectedInput() {
-        recordWorkflowAction("Validate");
+        if (!requireAdminAuthority("run validation checks")) {
+            return;
+        }
+        recordWorkflowAction("Run Input Check");
     }
 
     @FXML
@@ -706,17 +715,23 @@ public class ReportInputsController {
             UiAlerts.info("Approval of important supplementary inputs requires an authorised approval role.");
             return;
         }
-        recordWorkflowAction("Approve");
+        recordWorkflowAction("Approval Review");
     }
 
     @FXML
     private void rejectSelectedInput() {
-        recordWorkflowAction("Reject");
+        if (!requireAdminAuthority("review rejection")) {
+            return;
+        }
+        recordWorkflowAction("Rejection Review");
     }
 
     @FXML
     private void freezeSelectedInput() {
-        recordWorkflowAction("Freeze");
+        if (!requireAdminAuthority("request freeze")) {
+            return;
+        }
+        recordWorkflowAction("Freeze Request");
     }
 
     @FXML
@@ -956,8 +971,79 @@ public class ReportInputsController {
         }
         if (inputGovernanceStatusLabel != null) {
             inputGovernanceStatusLabel.setText(superAdmin
-                    ? "Super Administrator mode: physical removal requires confirmation and a safety backup."
-                    : "Physical deletion is restricted. Use Request Removal for Super Administrator review.");
+                    ? "Active workflow: lifecycle controls are enabled. Physical removal requires confirmation and a safety backup."
+                    : "Active workflow: request controls are enabled. Physical deletion is restricted to Super Administrator review.");
+        }
+    }
+
+    private void renderWorkflowDesignCards() {
+        renderActiveCards(reportWorkflowStepsPane, List.of(
+                card("Draft", "Capture supporting data without affecting reports, balances or Smart Analysis conclusions."),
+                card("Validate", "Check period, amount, source, currency, attachment and whether the value can be derived from transactions."),
+                card("Review", "Confirm evidence, business reason and expected report use before approval."),
+                card("Approve", "Authorised approval role accepts the value and records the approval reference."),
+                card("Post", "Make the approved supplementary input available to report generation without overwriting transaction totals."),
+                card("Freeze", "Lock the posted value. Frozen values remain valid evidence and remain available to reports."),
+                card("Use in Report", "Issued reports reference the frozen version; corrections create a revised version rather than editing history.")
+        ), true);
+
+        renderActiveCards(reportWorkbenchFieldsPane, List.of(
+                card("Input Type", "Management note, external indicator, target, forecast assumption, opening figure or attachment."),
+                card("Reporting Period", "Month, quarter, year or custom report period."),
+                card("Description", "Clear business meaning of the supplementary value."),
+                card("Value / Unit / Currency", "Amount, count, percentage, text value and approved currency where applicable."),
+                card("Source / Source Date", "External source, internal approval, migration record or supporting reference date."),
+                card("Entered By / Date Entered", "Actor and timestamp for accountability."),
+                card("Evidence or Attachment", "Document, statement, approval note or source link."),
+                card("Validation / Approval Status", "Draft, validated, submitted, approved, rejected, posted or frozen."),
+                card("Version / Remarks", "Original and revised versions with explanation.")
+        ), false);
+    }
+
+    private void renderActiveCards(FlowPane pane, List<DesignCard> cards, boolean workflowStep) {
+        if (pane == null) {
+            return;
+        }
+        pane.getChildren().clear();
+        for (int index = 0; index < cards.size(); index++) {
+            DesignCard designCard = cards.get(index);
+            Button button = new Button();
+            button.getStyleClass().add(workflowStep ? "workflow-step-card" : "workbench-field-card");
+            button.getStyleClass().add(workflowStep ? "workflow-step-button" : "workbench-field-button");
+            button.setPrefWidth(workflowStep ? 155 : 205);
+            button.setMinWidth(workflowStep ? 155 : 205);
+            button.setMaxWidth(workflowStep ? 155 : 205);
+            button.setTooltip(new Tooltip("Open " + (workflowStep ? "workflow step: " : "required field: ") + designCard.name()));
+            button.setAccessibleText((workflowStep ? "Workflow step " + (index + 1) + ": " : "Required field: ") + designCard.name());
+
+            VBox content = new VBox(workflowStep ? 5 : 4);
+            content.setPrefWidth(workflowStep ? 132 : 182);
+            if (workflowStep) {
+                Label number = new Label(String.format("%02d", index + 1));
+                number.getStyleClass().add("workflow-step-number");
+                content.getChildren().add(number);
+            }
+            Label title = new Label(designCard.name());
+            title.setWrapText(true);
+            title.getStyleClass().add(workflowStep ? "workflow-step-label" : "field-label");
+            Label detail = new Label(designCard.detail());
+            detail.setWrapText(true);
+            detail.getStyleClass().add(workflowStep ? "workflow-step-detail" : "muted-label");
+            content.getChildren().addAll(title, detail);
+            button.setGraphic(content);
+
+            int stepNumber = index + 1;
+            button.setOnAction(event -> activateSupplementaryDesignCard(designCard, workflowStep, stepNumber));
+            pane.getChildren().add(button);
+        }
+    }
+
+    private void activateSupplementaryDesignCard(DesignCard designCard, boolean workflowStep, int stepNumber) {
+        String kind = workflowStep ? "workflow step" : "required field";
+        String prefix = workflowStep ? "Step " + stepNumber + ": " : "";
+        database.recordSystemLog("Data And Records", "Activate supplementary " + kind, "INFO", prefix + designCard.name());
+        if (inputGovernanceStatusLabel != null) {
+            inputGovernanceStatusLabel.setText("Active " + kind + ": " + prefix + designCard.name() + ". " + designCard.detail());
         }
     }
 
@@ -1019,7 +1105,19 @@ public class ReportInputsController {
             return;
         }
         database.recordSystemLog("Data And Records", action + " supplementary input", "INFO", selected + ". No stored value was overwritten.");
-        inputGovernanceStatusLabel.setText(action + " recorded for " + selected + ". No stored value was overwritten.");
+        inputGovernanceStatusLabel.setText("Active workflow: " + action + " recorded for " + selected + ". No stored value was overwritten.");
+    }
+
+    private DesignCard card(String name, String detail) {
+        return new DesignCard(name, detail);
+    }
+
+    private boolean requireAdminAuthority(String action) {
+        if (!UserSession.isAdminOrSuperAdmin()) {
+            UiAlerts.info("Only an Administrator or Super Administrator may " + action + " for supplementary report inputs.");
+            return false;
+        }
+        return true;
     }
 
     private String selectedInputLabel() {
@@ -1080,5 +1178,8 @@ public class ReportInputsController {
         items.add(TableActions.printTableItem(table, title));
         items.add(TableActions.refreshItem(this::refresh));
         return items;
+    }
+
+    private record DesignCard(String name, String detail) {
     }
 }

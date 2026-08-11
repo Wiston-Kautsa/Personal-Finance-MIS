@@ -1,9 +1,14 @@
 package com.wk.pfmis.db;
 
 import com.wk.pfmis.ai.AiCredentialStore;
+import com.wk.pfmis.domain.ChipeleganyuContributionStatus;
+import com.wk.pfmis.domain.ChipeleganyuMissedReason;
+import com.wk.pfmis.domain.Money;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.AiInteractionRecord;
 import com.wk.pfmis.models.AiSettings;
+import com.wk.pfmis.models.Asset;
+import com.wk.pfmis.models.AssetEvent;
 import com.wk.pfmis.models.BackupRecord;
 import com.wk.pfmis.models.Budget;
 import com.wk.pfmis.models.BudgetProgress;
@@ -12,6 +17,7 @@ import com.wk.pfmis.models.CurrencyRecord;
 import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Goal;
+import com.wk.pfmis.models.GoalContribution;
 import com.wk.pfmis.models.GoalStep;
 import com.wk.pfmis.models.HouseholdMonthMember;
 import com.wk.pfmis.models.AccountReconciliationRecord;
@@ -20,6 +26,7 @@ import com.wk.pfmis.models.PaymentMethodRecord;
 import com.wk.pfmis.models.Person;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.models.ProjectActivity;
+import com.wk.pfmis.models.ProjectMilestone;
 import com.wk.pfmis.models.RecurringTransactionPlan;
 import com.wk.pfmis.models.ReportPositionItem;
 import com.wk.pfmis.models.ReportRow;
@@ -36,6 +43,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -55,6 +66,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class DatabaseHandler {
     private static final String DB_FILE_NAME = "pfmis.db";
@@ -65,14 +77,31 @@ public class DatabaseHandler {
     private static final String DEFAULT_CURRENCY_DISPLAY = "MWK - Malawian Kwacha";
     private static final DateTimeFormatter FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ENGLISH);
     private static final String LATEST_DAILY_BACKUP_FILE_NAME = "pfmis-latest-daily-backup.db";
+    private static final Object BACKUP_RESTORE_LOCK = new Object();
+    private static final ReentrantReadWriteLock DATABASE_FILE_ACCESS_LOCK = new ReentrantReadWriteLock(true);
     private static final String PURPOSE_MONEY_LENT = "MONEY_LENT";
     private static final String PURPOSE_MONEY_BORROWED = "MONEY_BORROWED";
     private static final String PURPOSE_LENT_REPAID = "LENT_REPAID";
     private static final String PURPOSE_BORROWED_REPAID = "BORROWED_REPAID";
+    private static final String PURPOSE_NORMAL = "NORMAL";
+    private static final String PURPOSE_PROJECT_EXPENSE = "PROJECT_EXPENSE";
+    private static final String PURPOSE_SUPPORT_GIVEN = "SUPPORT_GIVEN";
+    private static final String PURPOSE_SAVINGS = "SAVINGS";
+    private static final String PURPOSE_GOAL_CONTRIBUTION = "GOAL_CONTRIBUTION";
+    private static final String PURPOSE_LOAN_INTEREST = "LOAN_INTEREST";
+    private static final String PURPOSE_LOAN_PENALTY = "LOAN_PENALTY";
+    private static final String PURPOSE_TRANSFER_FEE = "TRANSFER_FEE";
+    private static final String PURPOSE_TRANSFER_FEE_REVERSAL = "TRANSFER_FEE_REVERSAL";
+    private static final String PURPOSE_INCOME_REVERSAL = "INCOME_REVERSAL";
+    private static final String PURPOSE_REVERSAL = "REVERSAL";
+    private static final Set<String> GENERIC_TRANSACTION_TYPES = Set.of("INCOME", "EXPENSE", "LOAN");
+    private static final Set<String> GENERIC_TRANSACTION_STATUSES = Set.of("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED");
+    private static final Set<String> TERMINAL_TRANSACTION_STATUSES = Set.of("CANCELLED", "REVERSED");
     private static final String STATUS_OPEN = "OPEN";
     private static final String STATUS_PARTIALLY_CLEARED = "PARTIALLY_CLEARED";
     private static final String STATUS_CLEARED = "CLEARED";
     private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String STATUS_REVERSED = "REVERSED";
     private static final double LOAN_CLEARANCE_EPSILON = 0.005;
 
     private record LoanSide(Integer personId, String principalPurpose, String repaymentPurpose) {
@@ -81,10 +110,1129 @@ public class DatabaseHandler {
     private record LoanPrincipal(int id, double amount, String status) {
     }
 
+    private record GenericTransactionCommand(String transactionType, String purpose, String status) {
+    }
+
+    public record TransactionHistoryFilter(
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer accountId,
+            String transactionType,
+            String status,
+            Integer categoryId,
+            String searchText,
+            boolean includeTransferIn,
+            int limit,
+            int offset
+    ) {
+    }
+
+    public record TransactionHistoryPage(
+            List<FinanceTransaction> transactions,
+            int totalRecords
+    ) {
+    }
+
+    public record HistoryRecoveryCandidate(
+            Path databasePath,
+            long fileSize,
+            String modifiedAt,
+            int transactionCount,
+            int july2026TransactionCount,
+            String firstTransactionDate,
+            String lastTransactionDate
+    ) {
+    }
+
+    public record HistoryRecoveryResult(
+            Path sourceDatabase,
+            Path safetyBackup,
+            int accountsRecovered,
+            int categoriesRecovered,
+            int peopleRecovered,
+            int projectsRecovered,
+            int transactionsRecovered,
+            int transactionsSkipped,
+            String integrityCheck
+    ) {
+    }
+
+    public record CentralLoanRegistrationCommand(
+            String loanName,
+            String lenderType,
+            String lenderName,
+            Integer savingsGroupId,
+            double principalAmount,
+            String currency,
+            LocalDate loanStartDate,
+            String repaymentFrequency,
+            String repaymentMethod,
+            String interestMethod,
+            double interestRate,
+            double fixedInterestAmount,
+            double fees,
+            int numberOfInstallments,
+            LocalDate firstRepaymentDate,
+            int proceedsAccountId,
+            int repaymentAccountId,
+            String repaymentMode,
+            Integer automaticPaymentDay,
+            Double automaticAmount,
+            LocalDate automaticStartDate,
+            LocalDate automaticEndDate,
+            String status,
+            String referenceNumber,
+            String notes
+    ) {
+    }
+
+    public record CentralLoanRecord(
+            int id,
+            String loanNumber,
+            String loanName,
+            String lenderType,
+            String lenderName,
+            Integer savingsGroupId,
+            String savingsGroupName,
+            double principalAmount,
+            String currency,
+            String interestMethod,
+            double interestRate,
+            double fixedInterestAmount,
+            double fees,
+            double totalInterest,
+            double totalRepayable,
+            double totalPaid,
+            double outstandingBalance,
+            double principalOutstanding,
+            double interestOutstanding,
+            double feesOutstanding,
+            double penaltiesOutstanding,
+            String repaymentFrequency,
+            String repaymentMethod,
+            int numberOfInstallments,
+            String startDate,
+            String firstPaymentDate,
+            String expectedEndDate,
+            Integer proceedsAccountId,
+            String proceedsAccountName,
+            Integer repaymentAccountId,
+            String repaymentAccountName,
+            String repaymentMode,
+            String nextPaymentDate,
+            double nextPaymentAmount,
+            String status,
+            String sourceModule,
+            Integer sourceRecordId,
+            Integer proceedsTransactionId,
+            String notes,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record CentralLoanInstallmentRecord(
+            int id,
+            int loanId,
+            String loanNumber,
+            int installmentNumber,
+            String dueDate,
+            double principalDue,
+            double interestDue,
+            double feesDue,
+            double penaltyDue,
+            double totalDue,
+            double amountPaid,
+            double remainingDue,
+            String status,
+            String paidDate,
+            Integer transactionId,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record CentralLoanPaymentCommand(
+            int loanId,
+            Integer installmentId,
+            int accountId,
+            LocalDate paymentDate,
+            double amount,
+            String reference,
+            String notes,
+            boolean automaticAttempt
+    ) {
+    }
+
+    public record CentralLoanPaymentRecord(
+            int id,
+            int loanId,
+            Integer installmentId,
+            Integer accountId,
+            String accountName,
+            String paymentDate,
+            double principalPaid,
+            double interestPaid,
+            double feesPaid,
+            double penaltyPaid,
+            double totalPaid,
+            Integer transactionId,
+            String reference,
+            String status,
+            String notes,
+            String createdAt
+    ) {
+    }
+
+    public record LoanReportRow(
+            String label,
+            String group,
+            double amount,
+            String status,
+            String date
+    ) {
+    }
+
+    public record CommunitySavingsGroupCommand(
+            String groupName,
+            String groupType,
+            String description,
+            String currency,
+            LocalDate startDate,
+            LocalDate expectedEndDate,
+            String contributionFrequency,
+            double standardContributionAmount,
+            String membershipNumber,
+            String contactPerson,
+            String contactPhone,
+            String meetingFrequency,
+            String meetingDay,
+            String location,
+            double socialFundAmount,
+            String penaltyRules,
+            String notes,
+            double openingBalance,
+            boolean existingHistoricalGroup,
+            LocalDate currentCycleStartDate,
+            LocalDate historicalEntryStartDate,
+            double openingSocialFundBalance,
+            double existingOutstandingLoans,
+            double existingMemberContributions,
+            double existingPenalties,
+            double previousPayouts,
+            double previousShareOuts,
+            LocalDate reconciliationDate,
+            String sourceDocumentNotes,
+            double shareValue,
+            int minimumShares,
+            int maximumShares,
+            String loanInterestMethod,
+            double loanInterestRate,
+            String payoutMethod
+    ) {
+    }
+
+    public record CommunitySavingsGroupSummary(
+            int id,
+            int linkedAccountId,
+            String groupName,
+            String groupType,
+            String currency,
+            String status,
+            LocalDate startDate,
+            LocalDate expectedEndDate,
+            double standardContributionAmount,
+            double shareValue,
+            double accountBalance,
+            double totalContributed,
+            double socialFundBalance,
+            double outstandingLoans,
+            double penaltiesOutstanding,
+            double payoutsTotal,
+            String linkedAccountName
+    ) {
+    }
+
+    public record CommunitySavingsOverview(
+            int activeGroups,
+            double totalContributed,
+            double currentBalance,
+            double bankNkhondeBalance,
+            double zipeleganyuBalance,
+            double outstandingLoans,
+            double expectedRepayments,
+            int overdueRepayments,
+            int upcomingContributions,
+            int upcomingPayouts,
+            double expectedShareOuts,
+            double penaltiesOutstanding,
+            double socialFundBalance,
+            int groupsNearCycleCompletion
+    ) {
+    }
+
+    public record CommunitySavingsMemberRecord(
+            int id,
+            int groupId,
+            String memberName,
+            String memberNumber,
+            String phoneNumber,
+            int payoutPosition,
+            String membershipStatus,
+            LocalDate joinedDate,
+            String notes
+    ) {
+    }
+
+    public record CommunitySavingsContributionCommand(
+            int groupId,
+            Integer memberId,
+            int paymentAccountId,
+            LocalDate transactionDate,
+            YearMonth contributionPeriod,
+            LocalDate dueDate,
+            double numberOfShares,
+            double shareValue,
+            double expectedAmount,
+            double amountPaid,
+            double socialFundAmount,
+            double penaltyAmount,
+            String paymentMethod,
+            String referenceNumber,
+            String status,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record CommunitySavingsContributionRecord(
+            int id,
+            int groupId,
+            String groupName,
+            String groupType,
+            String memberName,
+            LocalDate transactionDate,
+            String contributionPeriod,
+            double shareAmount,
+            double socialFundAmount,
+            double penaltyAmount,
+            double totalAmount,
+            String status,
+            boolean backdated,
+            String referenceNumber
+    ) {
+    }
+
+    public record CommunitySavingsLoanCommand(
+            int groupId,
+            Integer memberId,
+            Integer accountId,
+            String loanDirection,
+            double principalAmount,
+            String interestMethod,
+            double interestRate,
+            LocalDate loanDate,
+            LocalDate firstRepaymentDate,
+            LocalDate dueDate,
+            String purpose,
+            String status,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record CommunitySavingsLoanRecord(
+            int id,
+            int groupId,
+            String groupName,
+            String memberName,
+            String loanDirection,
+            double principalAmount,
+            double expectedInterest,
+            double principalPaid,
+            double interestPaid,
+            double penaltyPaid,
+            double outstandingAmount,
+            LocalDate loanDate,
+            LocalDate dueDate,
+            String status,
+            boolean backdated
+    ) {
+    }
+
+    public record CommunitySavingsRepaymentCommand(
+            int loanId,
+            int paymentAccountId,
+            LocalDate repaymentDate,
+            double principalPaid,
+            double interestPaid,
+            double penaltyPaid,
+            String paymentMethod,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record CommunitySavingsPayoutCommand(
+            int groupId,
+            Integer memberId,
+            Integer payoutOrderId,
+            int receivingAccountId,
+            LocalDate payoutDate,
+            double expectedAmount,
+            double actualAmount,
+            double ownContributionComponent,
+            double profitComponent,
+            double bonusComponent,
+            double deductionAmount,
+            String status,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record CommunitySavingsPayoutRecord(
+            int id,
+            int groupId,
+            String groupName,
+            String memberName,
+            Integer payoutPosition,
+            LocalDate payoutDate,
+            double expectedAmount,
+            double actualAmount,
+            double profitComponent,
+            double deductionAmount,
+            String status,
+            boolean backdated
+    ) {
+    }
+
+    public record CommunityPayoutOrderRecord(
+            int id,
+            int groupId,
+            String memberName,
+            int positionNumber,
+            String expectedPeriod,
+            LocalDate expectedDate,
+            double expectedAmount,
+            LocalDate actualDate,
+            double actualAmount,
+            String status,
+            String notes
+    ) {
+    }
+
+    public record CommunitySavingsHistoricalRowCommand(
+            int groupId,
+            Integer memberId,
+            Integer paymentAccountId,
+            String transactionType,
+            YearMonth contributionPeriod,
+            LocalDate transactionDate,
+            double principal,
+            double interest,
+            double penalty,
+            double socialFund,
+            double payout,
+            double totalAmount,
+            String paymentMethod,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record CommunitySavingsHistoricalValidation(
+            int rowNumber,
+            String status,
+            String message,
+            boolean duplicate,
+            String accountingClassification
+    ) {
+    }
+
+    public record CommunitySavingsReportRow(
+            String reportName,
+            String groupName,
+            String groupType,
+            String memberName,
+            String recordDate,
+            String contributionPeriod,
+            double contribution,
+            double principal,
+            double interest,
+            double penalty,
+            double socialFund,
+            double payout,
+            double profit,
+            String status,
+            boolean backdated,
+            String recordedAt
+    ) {
+    }
+
+    public record SavingsGroupProfileCommand(
+            Integer profileId,
+            Integer accountId,
+            String accountName,
+            String groupName,
+            String groupType,
+            String currency,
+            String membershipNumber,
+            String contributionFrequency,
+            double expectedContributionAmount,
+            String contributionDay,
+            LocalDate actualStartDate,
+            LocalDate expectedCycleEndDate,
+            LocalDate expectedPayoutDate,
+            double expectedPayoutAmount,
+            Integer sourceAccountId,
+            String contactName,
+            String contactPhone,
+            String status,
+            String notes
+    ) {
+    }
+
+    public record SavingsGroupProfileRecord(
+            int id,
+            int accountId,
+            String accountName,
+            String groupName,
+            String groupType,
+            String currency,
+            String membershipNumber,
+            String contributionFrequency,
+            double expectedContributionAmount,
+            String contributionDay,
+            String actualStartDate,
+            String expectedCycleEndDate,
+            String expectedPayoutDate,
+            double expectedPayoutAmount,
+            Integer sourceAccountId,
+            String sourceAccountName,
+            String contactName,
+            String contactPhone,
+            String status,
+            String accountStatus,
+            String notes,
+            double totalContributed,
+            double amountReceivedBack,
+            double profitOrBonusReceived,
+            double currentContributionBalance,
+            String nextContributionDueDate,
+            String createdAt,
+            String updatedAt
+    ) {
+        @Override
+        public String toString() {
+            return accountName + " - " + groupType;
+        }
+    }
+
+    public record SavingsGroupContributionCommand(
+            int profileId,
+            LocalDate transactionDate,
+            String contributionPeriod,
+            double amount,
+            int sourceAccountId,
+            String paymentMethod,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record SavingsGroupPayoutCommand(
+            int profileId,
+            LocalDate payoutDate,
+            double originalSavingsComponent,
+            double profitComponent,
+            double bonusComponent,
+            double deductionAmount,
+            int receivingAccountId,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record SavingsGroupTransactionRecord(
+            int id,
+            int accountId,
+            String accountName,
+            String groupType,
+            Integer transactionId,
+            String transactionDate,
+            String contributionPeriod,
+            String transactionClassification,
+            double amount,
+            String counterAccountName,
+            String referenceNumber,
+            String entryDate,
+            String status,
+            boolean backdated,
+            String notes
+    ) {
+    }
+
+    public record SavingsGroupOverview(
+            int activeSavingsAccounts,
+            double totalCommunitySavings,
+            double contributionsThisMonth,
+            double contributionsThisYear,
+            String nextContributionDueDate,
+            double expectedPayout,
+            int cyclesNearingCompletion
+    ) {
+    }
+
+    public record ChipeleganyuContributionRecord(
+            int id,
+            int profileId,
+            int accountId,
+            String accountName,
+            String currency,
+            String contributionPeriod,
+            String dueDate,
+            long expectedAmountMinor,
+            long amountPaidMinor,
+            long outstandingAmountMinor,
+            String paymentDate,
+            Integer sourceAccountId,
+            String sourceAccountName,
+            Integer transactionId,
+            String status,
+            String missedReason,
+            boolean mayBePaidLater,
+            String notes,
+            String confirmationDate,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record MarkChipeleganyuMissedContributionCommand(
+            int profileId,
+            String contributionPeriod,
+            LocalDate dueDate,
+            long expectedAmountMinor,
+            String reason,
+            boolean mayBePaidLater,
+            String notes,
+            LocalDate confirmationDate
+    ) {
+    }
+
+    public record SettleChipeleganyuContributionCommand(
+            int contributionId,
+            LocalDate paymentDate,
+            long amountPaidMinor,
+            int sourceAccountId,
+            String paymentMethod,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record SavingsGroupRuleRecord(
+            int profileId,
+            double shareAmount,
+            int requiredSharesPerPeriod,
+            double loanInterestRate,
+            boolean automaticContributionEnabled,
+            String automaticStartDate,
+            String automaticEndDate
+    ) {
+    }
+
+    public record SavingsGroupRuleCommand(
+            int profileId,
+            double shareAmount,
+            int requiredSharesPerPeriod,
+            double loanInterestRate,
+            boolean automaticContributionEnabled,
+            LocalDate automaticStartDate,
+            LocalDate automaticEndDate
+    ) {
+    }
+
+    public record BankNkhondeShareRecord(
+            int id,
+            int profileId,
+            int accountId,
+            String accountName,
+            String currency,
+            String contributionPeriod,
+            String dueDate,
+            double expectedAmount,
+            double paidAmount,
+            double numberOfShares,
+            String paymentDate,
+            Integer sourceAccountId,
+            String sourceAccountName,
+            Integer transactionId,
+            String status,
+            String notes,
+            String confirmationDate,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record MarkBankNkhondeShareMissedCommand(
+            int profileId,
+            String contributionPeriod,
+            LocalDate dueDate,
+            double expectedAmount,
+            String notes,
+            LocalDate confirmationDate
+    ) {
+    }
+
+    public record BankNkhondeLoanCommand(
+            int profileId,
+            int receivingAccountId,
+            double principalAmount,
+            double interestRate,
+            LocalDate loanDate,
+            LocalDate dueDate,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record BankNkhondeLoanRecord(
+            int id,
+            int profileId,
+            String accountName,
+            String currency,
+            double principalAmount,
+            double interestRate,
+            double interestAmount,
+            double totalDue,
+            double amountRepaid,
+            double balance,
+            LocalDate loanDate,
+            LocalDate dueDate,
+            Integer receivingAccountId,
+            String receivingAccountName,
+            Integer linkedTransactionId,
+            String referenceNumber,
+            String status,
+            boolean backdated,
+            String notes,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record BankNkhondeRepaymentCommand(
+            int loanId,
+            int sourceAccountId,
+            LocalDate repaymentDate,
+            double principalComponent,
+            double interestComponent,
+            String paymentMethod,
+            String referenceNumber,
+            String notes,
+            String backdateReason,
+            boolean historicalConfirmation
+    ) {
+    }
+
+    public record BankNkhondeRepaymentRecord(
+            int id,
+            int loanId,
+            int profileId,
+            String loanReference,
+            LocalDate repaymentDate,
+            double principalComponent,
+            double interestComponent,
+            double totalPayment,
+            Integer sourceAccountId,
+            String sourceAccountName,
+            double remainingBalance,
+            Integer linkedTransactionId,
+            String referenceNumber,
+            String status,
+            boolean backdated,
+            String notes,
+            String createdAt
+    ) {
+    }
+
+    public record RecordDisposalCandidateData(
+            String tableName,
+            String recordType,
+            int recordId,
+            String description,
+            String status,
+            String recordDate,
+            double amount,
+            String createdBy,
+            int dependencies,
+            String eligibility,
+            String recommendation,
+            String eligibilityReason,
+            String financialType,
+            double balanceEffect,
+            String accountKey,
+            String importKey
+    ) {
+    }
+
+    public record RecordDisposalImpact(
+            int selectedRecords,
+            int eligibleRecords,
+            int blockedRecords,
+            double totalIncomeAffected,
+            double totalExpensesAffected,
+            int accountsAffected,
+            int reportsAffected,
+            int importBatchesAffected,
+            int syncRecordsAffected,
+            double currentAccountBalance,
+            double projectedBalanceAfterDisposal,
+            double balanceDifference,
+            String recommendation
+    ) {
+    }
+
+    public record RecordDisposalExecutionResult(
+            String operationStatus,
+            int recordsRequested,
+            int recordsDisposed,
+            int recordsSkipped,
+            String backupReference,
+            String executedBy,
+            String executionTime,
+            String integrityCheck,
+            String reconciliationCheck,
+            String auditSummary
+    ) {
+    }
+
+    public record DeletionRequestRecord(
+            int id,
+            String recordType,
+            String tableName,
+            int recordId,
+            String recordDescription,
+            String requestedBy,
+            String requestDate,
+            String reason,
+            String supportingNotes,
+            int dependencies,
+            String currentStatus,
+            String approvalStatus,
+            String reviewedBy,
+            String reviewedAt,
+            String reviewNotes
+    ) {
+    }
+
+    public record DeletedRecordRecord(
+            String tableName,
+            String recordType,
+            int recordId,
+            String recordDescription,
+            String previousStatus,
+            String deletedAt,
+            String deletedBy,
+            String deletionReason,
+            String deletionReference,
+            int dependencies,
+            boolean restorable
+    ) {
+    }
+
+    public record WorkspaceMaintenanceSummary(
+            int accounts,
+            int transactions,
+            int budgets,
+            int projects,
+            int goals,
+            int loans,
+            int reports,
+            int financialRecords
+    ) {
+    }
+
+    public record WorkspaceMaintenanceExecutionResult(
+            String operationStatus,
+            int recordsAffected,
+            String backupReference,
+            String integrityCheck,
+            String executedBy,
+            String executionTime,
+            String auditSummary
+    ) {
+    }
+
+    public record DataManualInputRecord(
+            int id,
+            String inputType,
+            String reportingPeriod,
+            String description,
+            String inputValue,
+            String source,
+            String notes,
+            String createdBy,
+            String createdAt
+    ) {
+    }
+
+    public record DataImportBatchRecord(
+            int id,
+            String batchKey,
+            String dataType,
+            String originalFilename,
+            String fileChecksum,
+            String workspaceName,
+            String importedBy,
+            int totalRows,
+            int validRows,
+            int duplicateRows,
+            int rejectedRows,
+            int importedRows,
+            double importedTotal,
+            String status,
+            String createdAt,
+            String completedAt
+    ) {
+    }
+
+    public record RejectedImportRecord(
+            int id,
+            int batchId,
+            String batchKey,
+            int rowNumber,
+            String recordText,
+            String problem,
+            String originalValue,
+            String status,
+            String correctedDate,
+            String correctedDescription,
+            Double correctedAmount,
+            String correctedAccount,
+            String correctedCategory,
+            String correctedPaymentMethod,
+            String correctedReference,
+            String correctedType,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record IncomeDraftRecord(
+            int id,
+            int accountId,
+            String accountName,
+            String accountCurrency,
+            Integer categoryId,
+            String categoryName,
+            Integer projectId,
+            String projectName,
+            Integer personId,
+            String personName,
+            Integer expectedIncomeId,
+            String expectedReference,
+            double amount,
+            String currency,
+            String incomeDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description,
+            String attachmentPath,
+            String status,
+            Integer postedTransactionId,
+            String createdAt,
+            String updatedAt
+    ) {
+        @Override
+        public String toString() {
+            String source = categoryName == null || categoryName.isBlank() ? "Income draft" : categoryName;
+            return "#" + id + " - " + source + " - " + currency + " " + String.format(Locale.ENGLISH, "%.2f", amount);
+        }
+    }
+
+    public record ExpectedIncomeRecord(
+            int id,
+            String expectedDate,
+            double expectedAmount,
+            String currency,
+            int accountId,
+            String accountName,
+            Integer categoryId,
+            String categoryName,
+            Integer personId,
+            String personName,
+            String referenceNumber,
+            String repeatFrequency,
+            String endDate,
+            String confidence,
+            String notes,
+            String status,
+            Integer linkedTransactionId,
+            String createdAt,
+            String updatedAt
+    ) {
+        @Override
+        public String toString() {
+            String source = categoryName == null || categoryName.isBlank() ? "Expected income" : categoryName;
+            return "#" + id + " - " + source + " - " + currency + " " + String.format(Locale.ENGLISH, "%.2f", expectedAmount);
+        }
+    }
+
+    public record TransferDraftRecord(
+            int id,
+            int fromAccountId,
+            String fromAccountName,
+            String fromCurrency,
+            int toAccountId,
+            String toAccountName,
+            String toCurrency,
+            double amountSent,
+            double amountReceived,
+            String currency,
+            Double exchangeRate,
+            double transferFee,
+            Integer feeCategoryId,
+            String feeCategoryName,
+            String transferDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description,
+            String status,
+            Integer postedOutgoingTransactionId,
+            String createdAt,
+            String updatedAt
+    ) {
+        @Override
+        public String toString() {
+            return "#" + id + " - " + fromAccountName + " to " + toAccountName;
+        }
+    }
+
+    public record TransferPostingResult(
+            int outgoingTransactionId,
+            int incomingTransactionId,
+            Integer feeTransactionId,
+            String transferReference,
+            double sourceBalance,
+            double destinationBalance
+    ) {
+    }
+
+    public record TransactionCorrectionDraftRecord(
+            int id,
+            int originalTransactionId,
+            String accountName,
+            String transactionType,
+            String transactionPurpose,
+            double amount,
+            String transactionDate,
+            String description,
+            String paymentMethod,
+            String referenceNumber,
+            String reason,
+            String status,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record ScheduledTransferRecord(
+            int id,
+            String transferName,
+            int fromAccountId,
+            String fromAccountName,
+            String fromCurrency,
+            int toAccountId,
+            String toAccountName,
+            String toCurrency,
+            double amount,
+            String currency,
+            double transferFee,
+            Integer feeCategoryId,
+            String feeCategoryName,
+            String firstTransferDate,
+            String nextDueDate,
+            String frequency,
+            String endDate,
+            String reminderPeriod,
+            String transferMethod,
+            boolean confirmationRequired,
+            String notes,
+            String status,
+            Integer lastTransactionId,
+            String createdAt,
+            String updatedAt
+    ) {
+        @Override
+        public String toString() {
+            return "#" + id + " - " + transferName;
+        }
+    }
+
+    private record TransferGroupData(
+            int outgoingId,
+            int incomingId,
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            double transferFee,
+            Integer feeCategoryId,
+            String transferDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description
+    ) {
+    }
+
+    private record DisposalTableSpec(
+            String recordType,
+            String tableName,
+            String descriptionExpression,
+            String statusExpression,
+            String dateExpression,
+            String amountExpression,
+            String createdExpression,
+            String searchExpression,
+            String financialTypeExpression,
+            String balanceEffectExpression,
+            String accountKeyExpression,
+            String importKeyExpression,
+            String extraWhere
+    ) {
+    }
+
+    private record DisposalAssessment(String eligibility, String recommendation, String reason) {
+    }
+
     private DatabaseHandler() {
     }
 
     private static Path resolveApplicationDataDirectory() {
+        String explicitDataDirectory = System.getProperty("pfmis.data.dir", "").trim();
+        if (!explicitDataDirectory.isBlank()) {
+            return Path.of(explicitDataDirectory).toAbsolutePath().normalize();
+        }
         String osName = System.getProperty("os.name", "").toLowerCase(Locale.ENGLISH);
         String userHome = System.getProperty("user.home", ".");
         if (osName.contains("win")) {
@@ -208,16 +1356,64 @@ public class DatabaseHandler {
     }
 
     private Connection connect() throws SQLException {
-        prepareDatabaseFile();
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath());
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA foreign_keys = ON");
+        DATABASE_FILE_ACCESS_LOCK.readLock().lock();
+        boolean releaseLock = true;
+        try {
+            prepareDatabaseFile();
+            Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath());
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA foreign_keys = ON");
+                statement.execute("PRAGMA busy_timeout = 5000");
+            }
+            releaseLock = false;
+            return lockedConnection(connection);
+        } finally {
+            if (releaseLock) {
+                DATABASE_FILE_ACCESS_LOCK.readLock().unlock();
+            }
         }
-        return connection;
+    }
+
+    private Connection lockedConnection(Connection delegate) {
+        return (Connection) Proxy.newProxyInstance(
+                DatabaseHandler.class.getClassLoader(),
+                new Class<?>[]{Connection.class},
+                new java.lang.reflect.InvocationHandler() {
+                    private boolean closed;
+
+                    @Override
+                    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                        if ("close".equals(method.getName()) && method.getParameterCount() == 0) {
+                            if (closed) {
+                                return null;
+                            }
+                            try {
+                                return invokeConnection(delegate, method, args);
+                            } finally {
+                                closed = true;
+                                DATABASE_FILE_ACCESS_LOCK.readLock().unlock();
+                            }
+                        }
+                        return invokeConnection(delegate, method, args);
+                    }
+                }
+        );
+    }
+
+    private Object invokeConnection(Connection delegate, Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(delegate, args);
+        } catch (InvocationTargetException exception) {
+            throw exception.getTargetException();
+        }
     }
 
     public void initializeDatabase() {
-        try (Connection connection = connect(); Statement statement = connection.createStatement()) {
+        createPreMigrationSafetyCopyIfNeeded();
+        try (Connection connection = connect()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS accounts (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,6 +1423,14 @@ public class DatabaseHandler {
                         bank_provider_name TEXT,
                         account_number TEXT,
                         opening_balance REAL NOT NULL DEFAULT 0,
+                        opening_balance_date TEXT,
+                        minimum_balance REAL NOT NULL DEFAULT 0,
+                        account_purpose TEXT,
+                        branch_name TEXT,
+                        account_category TEXT NOT NULL DEFAULT 'ASSET',
+                        account_subtype TEXT,
+                        community_group_id INTEGER,
+                        is_system_account INTEGER NOT NULL DEFAULT 0,
                         status TEXT NOT NULL DEFAULT 'ACTIVE',
                         notes TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -250,6 +1454,14 @@ public class DatabaseHandler {
                         start_date TEXT,
                         end_date TEXT,
                         status TEXT DEFAULT 'ACTIVE',
+                        project_type TEXT DEFAULT 'Other',
+                        project_owner TEXT,
+                        priority TEXT DEFAULT 'Medium',
+                        currency TEXT DEFAULT 'MWK',
+                        funding_source TEXT,
+                        funding_account_id INTEGER,
+                        linked_goal_id INTEGER,
+                        notes TEXT,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
@@ -268,6 +1480,12 @@ public class DatabaseHandler {
                         reason TEXT,
                         start_date TEXT,
                         end_date TEXT,
+                        activity_type TEXT DEFAULT 'Other',
+                        actual_completion_date TEXT,
+                        responsible_person TEXT,
+                        priority TEXT DEFAULT 'Medium',
+                        progress REAL DEFAULT 0,
+                        evidence_reference TEXT,
                         status TEXT DEFAULT 'ACTIVE',
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (project_id) REFERENCES projects(id),
@@ -275,6 +1493,7 @@ public class DatabaseHandler {
                         FOREIGN KEY (category_id) REFERENCES categories(id)
                     )
                     """);
+            initializeProjectWorkflowTables(connection);
             migrateProjectActivitiesTable(connection);
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS people (
@@ -297,6 +1516,14 @@ public class DatabaseHandler {
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
+            addColumnIfMissing(connection, "goals", "goal_type", "TEXT DEFAULT 'Savings'");
+            addColumnIfMissing(connection, "goals", "currency", "TEXT DEFAULT 'MWK'");
+            addColumnIfMissing(connection, "goals", "start_date", "TEXT");
+            addColumnIfMissing(connection, "goals", "priority", "TEXT DEFAULT 'Medium'");
+            addColumnIfMissing(connection, "goals", "funding_account_id", "INTEGER");
+            addColumnIfMissing(connection, "goals", "contribution_frequency", "TEXT DEFAULT 'Monthly'");
+            addColumnIfMissing(connection, "goals", "description", "TEXT");
+            addColumnIfMissing(connection, "goals", "updated_at", "TEXT");
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS goal_steps (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,6 +1540,27 @@ public class DatabaseHandler {
                     )
                     """);
             statement.execute("""
+                    CREATE TABLE IF NOT EXISTS goal_contributions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        goal_id INTEGER NOT NULL,
+                        contribution_date TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        currency TEXT DEFAULT 'MWK',
+                        contribution_type TEXT NOT NULL,
+                        source_account_id INTEGER,
+                        destination_account_id INTEGER,
+                        transaction_id INTEGER,
+                        allocation_reference TEXT,
+                        status TEXT DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+                        FOREIGN KEY (source_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (destination_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
                     CREATE TABLE IF NOT EXISTS budgets (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         budget_name TEXT NOT NULL,
@@ -322,11 +1570,19 @@ public class DatabaseHandler {
                         rollover INTEGER NOT NULL DEFAULT 0,
                         status TEXT NOT NULL DEFAULT 'ACTIVE',
                         notes TEXT,
+                        budget_type TEXT DEFAULT 'Monthly',
+                        start_date TEXT,
+                        end_date TEXT,
+                        currency TEXT DEFAULT 'MWK',
+                        expected_income REAL DEFAULT 0,
+                        planned_savings REAL DEFAULT 0,
+                        overall_spending_limit REAL DEFAULT 0,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                         updated_at TEXT,
                         FOREIGN KEY (category_id) REFERENCES categories(id)
                     )
                     """);
+            initializeBudgetPlanningTables(connection);
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS household_budget_members (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,21 +1636,90 @@ public class DatabaseHandler {
                     )
                     """);
             initializeSchemaMetadata(connection);
+            initializeCommunitySavingsTables(connection);
+            initializePersonalSavingsGroupTables(connection);
             initializeCurrencies(connection);
             initializePaymentMethods(connection);
             initializeBackupHistory(connection);
             initializeSystemEventLog(connection);
             initializeAiInteractionLog(connection);
             initializeReportInputTables(connection);
+            initializeDataIntakeTables(connection);
+            initializeIncomeWorkflowTables(connection);
+            initializeTransactionLedgerTables(connection);
             initializeSetupPolicyTables(connection);
+            initializeAssetsTables(connection);
+            initializeCentralLoansTables(connection);
             migrateHouseholdBudgetMembersTable(connection);
+            initializeRecordDeletionWorkflow(connection);
             createIndexes(connection);
             initializeAiSettings(connection);
             seedCategories(connection);
             refreshAllLoanStatuses(connection);
+            validateDatabaseHealth(connection);
+            logStartupDatabaseDiagnostics(connection);
+            connection.commit();
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(originalAutoCommit);
+            }
         } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to initialize PFMIS database", exception);
+            throw new IllegalStateException("Failed to initialize or migrate the PFMIS workspace database at "
+                    + databasePath() + ".", exception);
         }
+    }
+
+    private void logStartupDatabaseDiagnostics(Connection connection) throws SQLException {
+        int schemaVersion = 0;
+        if (tableExists(connection, "schema_version")) {
+            try (PreparedStatement statement = connection.prepareStatement("SELECT COALESCE(MAX(version), 0) FROM schema_version");
+                 ResultSet resultSet = statement.executeQuery()) {
+                schemaVersion = resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+        int transactionCount = countRows(connection, "transactions");
+        recordSystemLog(connection, "Database", "Startup Diagnostics", "INFO",
+                "Database opened: " + databasePath()
+                        + ". Schema version: " + schemaVersion
+                        + ". Transactions available: " + transactionCount
+                        + ". Backup directory: " + defaultBackupDirectory() + ".");
+    }
+
+    private void createPreMigrationSafetyCopyIfNeeded() {
+        Path database = databasePath();
+        try {
+            if (!Files.isRegularFile(database) || Files.size(database) == 0) {
+                return;
+            }
+            try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+                if (!tableExists(connection, "accounts")
+                        || columnExists(connection, "accounts", "is_system_account")) {
+                    return;
+                }
+            }
+            Path backup = uniquePreMigrationBackupPath();
+            Files.createDirectories(backup.getParent());
+            Files.copy(database, backup, StandardCopyOption.COPY_ATTRIBUTES);
+        } catch (IOException | SQLException exception) {
+            throw new IllegalStateException("Failed to create a pre-migration safety copy for workspace database "
+                    + database + ".", exception);
+        }
+    }
+
+    private Path uniquePreMigrationBackupPath() throws IOException {
+        Path directory = defaultBackupDirectory();
+        String timestamp = LocalDateTime.now().format(FILE_TIMESTAMP_FORMAT);
+        Path candidate = directory.resolve("pre-migration-" + timestamp + "-pfmis.db").toAbsolutePath().normalize();
+        int suffix = 2;
+        while (Files.exists(candidate)) {
+            candidate = directory.resolve("pre-migration-" + timestamp + "-" + suffix + "-pfmis.db")
+                    .toAbsolutePath()
+                    .normalize();
+            suffix++;
+        }
+        return candidate;
     }
 
 
@@ -467,11 +1792,8 @@ public class DatabaseHandler {
                         CHECK (status IN ('ACTIVE','INACTIVE'))
                     )
                     """);
-            statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (4, 'Workspace currency registry')
-                    """);
         }
+        recordSchemaMigration(connection, 4, "workspace-currency-registry", "Workspace currency registry");
         migrateCurrenciesTable(connection);
         if (!currencyExists(connection, DEFAULT_CURRENCY_CODE)) {
             try (PreparedStatement statement = connection.prepareStatement("""
@@ -514,11 +1836,8 @@ public class DatabaseHandler {
                         CHECK (status IN ('ACTIVE','INACTIVE'))
                     )
                     """);
-            statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (5, 'Workspace payment method registry')
-                    """);
         }
+        recordSchemaMigration(connection, 5, "workspace-payment-method-registry", "Workspace payment method registry");
         migratePaymentMethodsTable(connection);
         String[][] defaults = {
                 {"Cash", "Cash"},
@@ -632,8 +1951,221 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "accounts", "currency", "TEXT NOT NULL DEFAULT 'MWK'");
         addColumnIfMissing(connection, "accounts", "bank_provider_name", "TEXT");
         addColumnIfMissing(connection, "accounts", "account_number", "TEXT");
+        addColumnIfMissing(connection, "accounts", "opening_balance", "REAL NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "accounts", "opening_balance_date", "TEXT");
+        addColumnIfMissing(connection, "accounts", "minimum_balance", "REAL NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "accounts", "account_purpose", "TEXT");
+        addColumnIfMissing(connection, "accounts", "branch_name", "TEXT");
+        addColumnIfMissing(connection, "accounts", "account_category", "TEXT NOT NULL DEFAULT 'ASSET'");
+        addColumnIfMissing(connection, "accounts", "account_subtype", "TEXT");
+        addColumnIfMissing(connection, "accounts", "community_group_id", "INTEGER");
+        addColumnIfMissing(connection, "accounts", "is_system_account", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "accounts", "status", "TEXT NOT NULL DEFAULT 'ACTIVE'");
         addColumnIfMissing(connection, "accounts", "notes", "TEXT");
+        addColumnIfMissing(connection, "accounts", "created_at", "TEXT DEFAULT CURRENT_TIMESTAMP");
         addColumnIfMissing(connection, "accounts", "updated_at", "TEXT");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    UPDATE accounts
+                    SET account_category = 'LIABILITY'
+                    WHERE account_category IS NULL
+                      AND (
+                            upper(COALESCE(account_type, '')) LIKE '%LOAN%'
+                         OR upper(COALESCE(account_type, '')) LIKE '%CREDIT%'
+                      )
+                    """);
+            statement.execute("""
+                    UPDATE accounts
+                    SET account_category = 'ASSET'
+                    WHERE account_category IS NULL OR trim(account_category) = ''
+                    """);
+        }
+        markSavingsGroupLedgerAccounts(connection);
+    }
+
+    private void markSavingsGroupLedgerAccounts(Connection connection) throws SQLException {
+        if (!columnExists(connection, "accounts", "is_system_account")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    UPDATE accounts
+                    SET is_system_account = 1,
+                        account_type = CASE
+                            WHEN lower(trim(COALESCE(account_type, ''))) IN (
+                                'community savings',
+                                'community_savings',
+                                'community savings loan',
+                                'community_savings_loan',
+                                'internal savings ledger',
+                                'internal_savings_ledger'
+                            )
+                            THEN 'COMMUNITY_SAVINGS_INTERNAL'
+                            ELSE account_type
+                        END,
+                        account_purpose = CASE
+                            WHEN trim(COALESCE(account_purpose, '')) = ''
+                            THEN 'Internal Savings Group ledger'
+                            ELSE account_purpose
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE COALESCE(is_system_account, 0) = 0
+                      AND (
+                            community_group_id IS NOT NULL
+                         OR lower(trim(COALESCE(account_type, ''))) IN (
+                                'community savings',
+                                'community_savings',
+                                'community savings loan',
+                                'community_savings_loan',
+                                'internal savings ledger',
+                                'internal_savings_ledger'
+                            )
+                      )
+                    """);
+            if (tableExists(connection, "community_savings_profiles")) {
+                String profileDeletionPredicate = columnExists(connection, "community_savings_profiles", "is_deleted")
+                        ? "AND COALESCE(is_deleted, 0) = 0"
+                        : "";
+                statement.execute("""
+                        UPDATE accounts
+                        SET is_system_account = 1,
+                            account_type = CASE
+                                WHEN upper(COALESCE(account_type, '')) IN ('COMMUNITY_SAVINGS_INTERNAL', 'COMMUNITY_SAVINGS')
+                                  OR lower(COALESCE(account_type, '')) = 'community savings'
+                                THEN 'COMMUNITY_SAVINGS_INTERNAL'
+                                ELSE account_type
+                            END,
+                            account_purpose = CASE
+                                WHEN trim(COALESCE(account_purpose, '')) = ''
+                                THEN 'Internal Savings Group ledger'
+                                ELSE account_purpose
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id IN (
+                            SELECT account_id
+                            FROM community_savings_profiles
+                            WHERE account_id IS NOT NULL
+                              %s
+                        )
+                        """.formatted(profileDeletionPredicate));
+            }
+            if (tableExists(connection, "community_savings_groups")) {
+                List<String> groupAccountPredicates = new ArrayList<>();
+                String groupDeletionPredicate = columnExists(connection, "community_savings_groups", "is_deleted")
+                        ? "AND COALESCE(is_deleted, 0) = 0"
+                        : "";
+                if (columnExists(connection, "community_savings_groups", "linked_account_id")) {
+                    groupAccountPredicates.add("""
+                            id IN (
+                                SELECT linked_account_id
+                                FROM community_savings_groups
+                                WHERE linked_account_id IS NOT NULL
+                                  %s
+                            )
+                            """.formatted(groupDeletionPredicate));
+                }
+                if (columnExists(connection, "accounts", "community_group_id")) {
+                    groupAccountPredicates.add("community_group_id IS NOT NULL");
+                }
+                if (!groupAccountPredicates.isEmpty()) {
+                    statement.execute("""
+                        UPDATE accounts
+                        SET is_system_account = 1,
+                            account_type = CASE
+                                WHEN upper(COALESCE(account_type, '')) IN ('COMMUNITY_SAVINGS_INTERNAL', 'COMMUNITY_SAVINGS')
+                                  OR lower(COALESCE(account_type, '')) = 'community savings'
+                                THEN 'COMMUNITY_SAVINGS_INTERNAL'
+                                ELSE account_type
+                            END,
+                            account_purpose = CASE
+                                WHEN trim(COALESCE(account_purpose, '')) = ''
+                                THEN 'Internal Community Savings ledger'
+                                ELSE account_purpose
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE %s
+                        """.formatted(String.join(" OR ", groupAccountPredicates)));
+                }
+            }
+        }
+    }
+
+    private void normalizeSavingsGroupCurrencies(Connection connection) throws SQLException {
+        String fallbackCurrency = tableExists(connection, "currencies")
+                ? baseCurrencyCode(connection)
+                : DEFAULT_CURRENCY_CODE;
+        if (tableExists(connection, "community_savings_profiles")) {
+            String sql = """
+                    SELECT DISTINCT a.id, a.currency
+                    FROM accounts a
+                    JOIN community_savings_profiles p ON p.account_id = a.id
+                    WHERE a.currency IS NULL
+                       OR trim(a.currency) = ''
+                       OR instr(a.currency, ' - ') > 0
+                    """;
+            try (PreparedStatement select = connection.prepareStatement(sql);
+                 ResultSet resultSet = select.executeQuery()) {
+                while (resultSet.next()) {
+                    String canonical = canonicalIsoCurrencyForRepair(resultSet.getString("currency"), fallbackCurrency);
+                    if (canonical != null) {
+                        updateAccountCurrency(connection, resultSet.getInt("id"), canonical);
+                    }
+                }
+            }
+        }
+        if (tableExists(connection, "community_savings_groups") && columnExists(connection, "community_savings_groups", "currency")) {
+            try (PreparedStatement select = connection.prepareStatement("""
+                    SELECT id, currency
+                    FROM community_savings_groups
+                    WHERE currency IS NULL
+                       OR trim(currency) = ''
+                       OR instr(currency, ' - ') > 0
+                    """);
+                 ResultSet resultSet = select.executeQuery()) {
+                while (resultSet.next()) {
+                    String canonical = canonicalIsoCurrencyForRepair(resultSet.getString("currency"), fallbackCurrency);
+                    if (canonical != null) {
+                        try (PreparedStatement update = connection.prepareStatement("""
+                                UPDATE community_savings_groups
+                                SET currency = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE id = ?
+                                """)) {
+                            update.setString(1, canonical);
+                            update.setInt(2, resultSet.getInt("id"));
+                            update.executeUpdate();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void updateAccountCurrency(Connection connection, int accountId, String currency) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE accounts
+                SET currency = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            statement.setString(1, currency);
+            statement.setInt(2, accountId);
+            statement.executeUpdate();
+        }
+    }
+
+    private String canonicalIsoCurrencyForRepair(String value, String fallbackCurrency) {
+        String clean = safeText(value, "").trim();
+        if (clean.isBlank()) {
+            return fallbackCurrency;
+        }
+        int separator = clean.indexOf(" - ");
+        String candidate = separator > 0 ? clean.substring(0, separator).trim() : clean;
+        if (candidate.length() >= 3) {
+            String firstThree = candidate.substring(0, 3).toUpperCase(Locale.ENGLISH);
+            if (firstThree.matches("[A-Z]{3}")) {
+                return firstThree;
+            }
+        }
+        return null;
     }
 
     private void migrateHouseholdBudgetMembersTable(Connection connection) throws SQLException {
@@ -641,18 +2173,125 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "household_budget_members", "duration_scope", "TEXT NOT NULL DEFAULT 'MONTH_ONLY'");
     }
 
+    private void initializeRecordDeletionWorkflow(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS deletion_requests (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        record_type TEXT NOT NULL,
+                        table_name TEXT NOT NULL,
+                        record_id INTEGER NOT NULL,
+                        record_description TEXT NOT NULL,
+                        requested_by INTEGER,
+                        request_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        reason TEXT NOT NULL,
+                        supporting_notes TEXT,
+                        dependencies INTEGER NOT NULL DEFAULT 0,
+                        current_status TEXT,
+                        approval_status TEXT NOT NULL DEFAULT 'PENDING',
+                        reviewed_by INTEGER,
+                        reviewed_at TEXT,
+                        review_notes TEXT,
+                        completed_at TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_deletion_requests_status ON deletion_requests(approval_status, request_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_deletion_requests_record ON deletion_requests(table_name, record_id)");
+        }
+        recordSchemaMigration(connection, 23, "soft-deletion-workflow", "Role-based soft deletion, restoration and deletion request workflow");
+        for (String table : softDeleteManagedTables()) {
+            if (tableExists(connection, table)) {
+                addSoftDeleteColumns(connection, table);
+            }
+        }
+    }
+
+    private List<String> softDeleteManagedTables() {
+        return List.of(
+                "accounts",
+                "transactions",
+                "budgets",
+                "household_budget_members",
+                "projects",
+                "project_activities",
+                "goals",
+                "goal_steps",
+                "loan_schedules",
+                "assets",
+                "categories",
+                "payment_methods",
+                "currencies",
+                "report_position_items",
+                "scheduled_obligations",
+                "recurring_transaction_plans",
+                "account_reconciliations",
+                "people",
+                "community_savings_groups",
+                "community_savings_members",
+                "community_contributions",
+                "community_group_loans",
+                "community_loan_repayments",
+                "community_penalties",
+                "community_social_fund",
+                "community_payout_orders",
+                "community_payouts",
+                "community_share_outs",
+                "community_share_out_members",
+                "community_historical_entries",
+                "community_savings_profiles",
+                "community_savings_transactions",
+                "chipeleganyu_contributions"
+        );
+    }
+
+    private void addSoftDeleteColumns(Connection connection, String tableName) throws SQLException {
+        addColumnIfMissing(connection, tableName, "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, tableName, "deleted_at", "TEXT");
+        addColumnIfMissing(connection, tableName, "deleted_by", "INTEGER");
+        addColumnIfMissing(connection, tableName, "deletion_reason", "TEXT");
+        addColumnIfMissing(connection, tableName, "deletion_reference", "TEXT");
+        addColumnIfMissing(connection, tableName, "previous_status", "TEXT");
+    }
+
     private void addColumnIfMissing(Connection connection, String tableName, String columnName, String columnDefinition) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(" + tableName + ")");
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
-                if (columnName.equals(resultSet.getString("name"))) {
+                if (columnName.equalsIgnoreCase(resultSet.getString("name"))) {
                     return;
                 }
             }
         }
         try (Statement statement = connection.createStatement()) {
-            statement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+            try {
+                statement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+            } catch (SQLException exception) {
+                if (!isNonConstantDefaultColumnFailure(exception, columnDefinition)) {
+                    throw exception;
+                }
+                statement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " "
+                        + timestampSafeColumnDefinition(columnDefinition));
+                statement.execute("UPDATE " + tableName + " SET " + columnName
+                        + " = CURRENT_TIMESTAMP WHERE " + columnName
+                        + " IS NULL OR trim(COALESCE(" + columnName + ", '')) = ''");
+            }
         }
+    }
+
+    private boolean isNonConstantDefaultColumnFailure(SQLException exception, String columnDefinition) {
+        String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(Locale.ENGLISH);
+        String definition = columnDefinition == null ? "" : columnDefinition.toUpperCase(Locale.ENGLISH);
+        return message.contains("non-constant default") && definition.contains("CURRENT_TIMESTAMP");
+    }
+
+    private String timestampSafeColumnDefinition(String columnDefinition) {
+        String fallback = columnDefinition
+                .replaceAll("(?i)\\s+NOT\\s+NULL", "")
+                .replaceAll("(?i)\\s+DEFAULT\\s*\\(?\\s*CURRENT_TIMESTAMP\\s*\\)?", "")
+                .trim();
+        return fallback.isBlank() ? "TEXT" : fallback;
     }
 
     private void migrateTransactionsTable(Connection connection) throws SQLException {
@@ -660,8 +2299,733 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "transactions", "project_activity_id", "INTEGER");
         addColumnIfMissing(connection, "transactions", "transaction_purpose", "TEXT DEFAULT 'NORMAL'");
         addColumnIfMissing(connection, "transactions", "transaction_status", "TEXT DEFAULT 'COMPLETED'");
+        addColumnIfMissing(connection, "transactions", "source", "TEXT DEFAULT 'MANUAL'");
         addColumnIfMissing(connection, "transactions", "payment_method", "TEXT");
         addColumnIfMissing(connection, "transactions", "reference_number", "TEXT");
+        addColumnIfMissing(connection, "transactions", "loan_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "loan_installment_id", "INTEGER");
+        addColumnIfMissing(connection, "transactions", "savings_group_profile_id", "INTEGER");
+        addSoftDeleteColumns(connection, "transactions");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    UPDATE transactions
+                    SET source = 'TRANSFER'
+                    WHERE transaction_type = 'TRANSFER'
+                      AND upper(COALESCE(source, 'MANUAL')) = 'MANUAL'
+                    """);
+            statement.execute("""
+                    UPDATE transactions
+                    SET transaction_type = 'LOAN'
+                    WHERE transaction_purpose IN ('MONEY_LENT', 'MONEY_BORROWED', 'LENT_REPAID', 'BORROWED_REPAID')
+                      AND transaction_type IN ('INCOME', 'EXPENSE')
+                    """);
+        }
+    }
+
+    private void initializeCommunitySavingsTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_savings_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        workspace_id INTEGER,
+                        linked_account_id INTEGER,
+                        group_name TEXT NOT NULL,
+                        group_type TEXT NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        description TEXT,
+                        start_date TEXT NOT NULL,
+                        current_cycle_start_date TEXT,
+                        expected_end_date TEXT,
+                        historical_entry_start_date TEXT,
+                        contribution_frequency TEXT,
+                        standard_contribution_amount REAL NOT NULL DEFAULT 0,
+                        membership_number TEXT,
+                        contact_person TEXT,
+                        contact_phone TEXT,
+                        meeting_frequency TEXT,
+                        meeting_day TEXT,
+                        location TEXT,
+                        social_fund_amount REAL NOT NULL DEFAULT 0,
+                        penalty_rules TEXT,
+                        opening_balance REAL NOT NULL DEFAULT 0,
+                        opening_social_fund_balance REAL NOT NULL DEFAULT 0,
+                        existing_outstanding_loans REAL NOT NULL DEFAULT 0,
+                        existing_member_contributions REAL NOT NULL DEFAULT 0,
+                        existing_penalties REAL NOT NULL DEFAULT 0,
+                        previous_payouts REAL NOT NULL DEFAULT 0,
+                        previous_share_outs REAL NOT NULL DEFAULT 0,
+                        reconciliation_date TEXT,
+                        source_document_notes TEXT,
+                        share_value REAL NOT NULL DEFAULT 0,
+                        minimum_shares INTEGER NOT NULL DEFAULT 0,
+                        maximum_shares INTEGER NOT NULL DEFAULT 0,
+                        loan_interest_method TEXT,
+                        loan_interest_rate REAL NOT NULL DEFAULT 0,
+                        payout_method TEXT,
+                        status TEXT NOT NULL DEFAULT 'DRAFT',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        FOREIGN KEY (linked_account_id) REFERENCES accounts(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_savings_members (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_name TEXT NOT NULL,
+                        member_number TEXT,
+                        phone_number TEXT,
+                        payout_position INTEGER,
+                        membership_status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        joined_date TEXT,
+                        left_date TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_contributions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        contribution_period TEXT,
+                        due_date TEXT,
+                        transaction_date TEXT NOT NULL,
+                        number_of_shares REAL NOT NULL DEFAULT 0,
+                        share_value REAL NOT NULL DEFAULT 0,
+                        expected_amount REAL NOT NULL DEFAULT 0,
+                        amount_paid REAL NOT NULL DEFAULT 0,
+                        social_fund_amount REAL NOT NULL DEFAULT 0,
+                        penalty_amount REAL NOT NULL DEFAULT 0,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        status TEXT NOT NULL DEFAULT 'PAID',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_group_loans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        liability_account_id INTEGER,
+                        loan_direction TEXT NOT NULL,
+                        principal_amount REAL NOT NULL DEFAULT 0,
+                        interest_method TEXT,
+                        interest_rate REAL NOT NULL DEFAULT 0,
+                        expected_interest REAL NOT NULL DEFAULT 0,
+                        total_payable REAL NOT NULL DEFAULT 0,
+                        loan_date TEXT NOT NULL,
+                        first_repayment_date TEXT,
+                        due_date TEXT,
+                        purpose TEXT,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id),
+                        FOREIGN KEY (liability_account_id) REFERENCES accounts(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_loan_repayments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        loan_id INTEGER NOT NULL,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        repayment_date TEXT NOT NULL,
+                        principal_paid REAL NOT NULL DEFAULT 0,
+                        interest_paid REAL NOT NULL DEFAULT 0,
+                        penalty_paid REAL NOT NULL DEFAULT 0,
+                        total_paid REAL NOT NULL DEFAULT 0,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (loan_id) REFERENCES community_group_loans(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_penalties (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        contribution_id INTEGER,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        transaction_date TEXT NOT NULL,
+                        penalty_amount REAL NOT NULL DEFAULT 0,
+                        reason TEXT,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        status TEXT NOT NULL DEFAULT 'OUTSTANDING',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (contribution_id) REFERENCES community_contributions(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_social_fund (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        contribution_id INTEGER,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        transaction_date TEXT NOT NULL,
+                        amount REAL NOT NULL DEFAULT 0,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        status TEXT NOT NULL DEFAULT 'PAID',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (contribution_id) REFERENCES community_contributions(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_payout_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        position_number INTEGER NOT NULL,
+                        expected_period TEXT,
+                        expected_date TEXT,
+                        expected_amount REAL NOT NULL DEFAULT 0,
+                        actual_date TEXT,
+                        actual_amount REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'WAITING',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        UNIQUE (group_id, position_number)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_payouts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        payout_order_id INTEGER,
+                        account_id INTEGER,
+                        linked_transaction_id INTEGER,
+                        expected_amount REAL NOT NULL DEFAULT 0,
+                        actual_amount REAL NOT NULL DEFAULT 0,
+                        own_contribution_component REAL NOT NULL DEFAULT 0,
+                        profit_component REAL NOT NULL DEFAULT 0,
+                        bonus_component REAL NOT NULL DEFAULT 0,
+                        deduction_amount REAL NOT NULL DEFAULT 0,
+                        payout_date TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'PAID',
+                        reference_number TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (payout_order_id) REFERENCES community_payout_orders(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_share_outs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        cycle_label TEXT,
+                        share_out_date TEXT NOT NULL,
+                        total_contributions REAL NOT NULL DEFAULT 0,
+                        profit_distributed REAL NOT NULL DEFAULT 0,
+                        interest_earned REAL NOT NULL DEFAULT 0,
+                        penalties_included REAL NOT NULL DEFAULT 0,
+                        loan_deductions REAL NOT NULL DEFAULT 0,
+                        social_fund_treatment TEXT,
+                        status TEXT NOT NULL DEFAULT 'COMPLETED',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_share_out_members (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        share_out_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        member_contributions REAL NOT NULL DEFAULT 0,
+                        share_percentage REAL NOT NULL DEFAULT 0,
+                        profit_allocation REAL NOT NULL DEFAULT 0,
+                        loan_deduction REAL NOT NULL DEFAULT 0,
+                        penalty_deduction REAL NOT NULL DEFAULT 0,
+                        net_share_out REAL NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (share_out_id) REFERENCES community_share_outs(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_period_controls (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        period_label TEXT NOT NULL,
+                        start_date TEXT NOT NULL,
+                        end_date TEXT NOT NULL,
+                        period_status TEXT NOT NULL DEFAULT 'OPEN',
+                        notes TEXT,
+                        updated_at TEXT,
+                        updated_by INTEGER,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        UNIQUE (group_id, period_label)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_historical_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        member_id INTEGER,
+                        account_id INTEGER,
+                        transaction_type TEXT NOT NULL,
+                        contribution_period TEXT,
+                        transaction_date TEXT NOT NULL,
+                        principal REAL NOT NULL DEFAULT 0,
+                        interest REAL NOT NULL DEFAULT 0,
+                        penalty REAL NOT NULL DEFAULT 0,
+                        social_fund REAL NOT NULL DEFAULT 0,
+                        payout REAL NOT NULL DEFAULT 0,
+                        total_amount REAL NOT NULL DEFAULT 0,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 1,
+                        backdate_reason TEXT,
+                        validation_status TEXT NOT NULL DEFAULT 'PENDING',
+                        accounting_classification TEXT,
+                        linked_record_type TEXT,
+                        linked_record_id INTEGER,
+                        duplicate_override_reason TEXT,
+                        FOREIGN KEY (group_id) REFERENCES community_savings_groups(id),
+                        FOREIGN KEY (member_id) REFERENCES community_savings_members(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id)
+                    )
+                    """);
+        }
+        recordSchemaMigration(connection, 22, "community-savings-groups-ledger", "Community Savings groups, historical entry and ledger linkage");
+        addColumnIfMissing(connection, "community_contributions", "created_by", "INTEGER");
+        addColumnIfMissing(connection, "community_contributions", "updated_by", "INTEGER");
+        addColumnIfMissing(connection, "community_contributions", "is_backdated", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_contributions", "backdate_reason", "TEXT");
+        addColumnIfMissing(connection, "community_contributions", "historical_confirmation", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_group_loans", "liability_account_id", "INTEGER");
+        addColumnIfMissing(connection, "community_group_loans", "created_by", "INTEGER");
+        addColumnIfMissing(connection, "community_group_loans", "updated_by", "INTEGER");
+        addColumnIfMissing(connection, "community_group_loans", "is_backdated", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_group_loans", "backdate_reason", "TEXT");
+        addColumnIfMissing(connection, "community_group_loans", "historical_confirmation", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_loan_repayments", "updated_at", "TEXT");
+        addColumnIfMissing(connection, "community_loan_repayments", "created_by", "INTEGER");
+        addColumnIfMissing(connection, "community_loan_repayments", "updated_by", "INTEGER");
+        addColumnIfMissing(connection, "community_loan_repayments", "is_backdated", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_loan_repayments", "backdate_reason", "TEXT");
+        addColumnIfMissing(connection, "community_loan_repayments", "historical_confirmation", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_payouts", "created_by", "INTEGER");
+        addColumnIfMissing(connection, "community_payouts", "updated_by", "INTEGER");
+        addColumnIfMissing(connection, "community_payouts", "is_backdated", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_payouts", "backdate_reason", "TEXT");
+        addColumnIfMissing(connection, "community_payouts", "historical_confirmation", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "community_share_outs", "status", "TEXT NOT NULL DEFAULT 'COMPLETED'");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_groups_type_status ON community_savings_groups(group_type, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_contributions_group_date ON community_contributions(group_id, transaction_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_contributions_duplicate ON community_contributions(group_id, member_id, contribution_period, transaction_date, amount_paid, reference_number)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_loans_group_status ON community_group_loans(group_id, status, due_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_repayments_loan_date ON community_loan_repayments(loan_id, repayment_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_payouts_group_date ON community_payouts(group_id, payout_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_community_historical_group_date ON community_historical_entries(group_id, transaction_date)");
+        }
+    }
+
+    private void initializePersonalSavingsGroupTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_savings_profiles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        account_id INTEGER NOT NULL UNIQUE,
+                        group_name TEXT,
+                        group_type TEXT NOT NULL,
+                        membership_number TEXT,
+                        contribution_frequency TEXT NOT NULL,
+                        expected_contribution_amount REAL NOT NULL DEFAULT 0 CHECK (expected_contribution_amount >= 0),
+                        contribution_day TEXT,
+                        actual_start_date TEXT NOT NULL,
+                        expected_cycle_end_date TEXT,
+                        expected_payout_date TEXT,
+                        expected_payout_amount REAL NOT NULL DEFAULT 0 CHECK (expected_payout_amount >= 0),
+                        source_account_id INTEGER,
+                        contact_name TEXT,
+                        contact_phone TEXT,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE'
+                            CHECK (status IN ('ACTIVE', 'PAUSED', 'MATURED', 'CLOSED', 'ARCHIVED')),
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (source_account_id) REFERENCES accounts(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS community_savings_transactions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        account_id INTEGER NOT NULL,
+                        transaction_id INTEGER,
+                        contribution_period TEXT,
+                        transaction_classification TEXT NOT NULL
+                            CHECK (transaction_classification IN (
+                                'CONTRIBUTION',
+                                'ORIGINAL_SAVINGS_RETURN',
+                                'PROFIT',
+                                'BONUS',
+                                'PAYOUT_DEDUCTION',
+                                'ADJUSTMENT'
+                            )),
+                        original_savings_component REAL NOT NULL DEFAULT 0 CHECK (original_savings_component >= 0),
+                        profit_component REAL NOT NULL DEFAULT 0 CHECK (profit_component >= 0),
+                        bonus_component REAL NOT NULL DEFAULT 0 CHECK (bonus_component >= 0),
+                        deduction_amount REAL NOT NULL DEFAULT 0 CHECK (deduction_amount >= 0),
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS chipeleganyu_contributions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        profile_id INTEGER NOT NULL,
+                        account_id INTEGER NOT NULL,
+                        contribution_period TEXT NOT NULL,
+                        due_date TEXT NOT NULL,
+                        expected_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (expected_amount_minor >= 0),
+                        amount_paid_minor INTEGER NOT NULL DEFAULT 0 CHECK (amount_paid_minor >= 0),
+                        payment_date TEXT,
+                        source_account_id INTEGER,
+                        transaction_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'UPCOMING'
+                            CHECK (status IN (
+                                'UPCOMING',
+                                'DUE',
+                                'PAID',
+                                'PARTIALLY_PAID',
+                                'MISSED',
+                                'OVERDUE',
+                                'FAILED_AUTOMATIC_DEDUCTION',
+                                'WAIVED',
+                                'CANCELLED'
+                            )),
+                        missed_reason TEXT
+                            CHECK (missed_reason IS NULL OR missed_reason IN (
+                                'INSUFFICIENT_FUNDS',
+                                'PAYMENT_NOT_MADE',
+                                'GROUP_ALLOWED_SKIP',
+                                'USER_ABSENT',
+                                'PAYMENT_DEFERRED',
+                                'OTHER'
+                            )),
+                        may_be_paid_later INTEGER NOT NULL DEFAULT 1,
+                        notes TEXT,
+                        confirmation_date TEXT,
+                        confirmed_by INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (profile_id) REFERENCES community_savings_profiles(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (source_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id),
+                        UNIQUE (profile_id, contribution_period)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS savings_group_profile_rules (
+                        profile_id INTEGER PRIMARY KEY,
+                        share_amount REAL NOT NULL DEFAULT 0 CHECK (share_amount >= 0),
+                        required_shares_per_period INTEGER NOT NULL DEFAULT 1 CHECK (required_shares_per_period >= 0),
+                        loan_interest_rate REAL NOT NULL DEFAULT 0 CHECK (loan_interest_rate >= 0),
+                        automatic_contribution_enabled INTEGER NOT NULL DEFAULT 0,
+                        automatic_start_date TEXT,
+                        automatic_end_date TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (profile_id) REFERENCES community_savings_profiles(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS bank_nkhonde_share_periods (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        profile_id INTEGER NOT NULL,
+                        account_id INTEGER NOT NULL,
+                        contribution_period TEXT NOT NULL,
+                        due_date TEXT NOT NULL,
+                        expected_amount REAL NOT NULL DEFAULT 0 CHECK (expected_amount >= 0),
+                        paid_amount REAL NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+                        number_of_shares REAL NOT NULL DEFAULT 0 CHECK (number_of_shares >= 0),
+                        payment_date TEXT,
+                        source_account_id INTEGER,
+                        transaction_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'UPCOMING'
+                            CHECK (status IN ('UPCOMING', 'DUE', 'PAID', 'PARTIAL', 'MISSED', 'OVERDUE', 'CANCELLED')),
+                        notes TEXT,
+                        confirmation_date TEXT,
+                        confirmed_by INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (profile_id) REFERENCES community_savings_profiles(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (source_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id),
+                        UNIQUE (profile_id, contribution_period)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS bank_nkhonde_loans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        profile_id INTEGER NOT NULL,
+                        receiving_account_id INTEGER NOT NULL,
+                        linked_transaction_id INTEGER,
+                        principal_amount REAL NOT NULL DEFAULT 0 CHECK (principal_amount >= 0),
+                        interest_rate REAL NOT NULL DEFAULT 0 CHECK (interest_rate >= 0),
+                        interest_amount REAL NOT NULL DEFAULT 0 CHECK (interest_amount >= 0),
+                        total_due REAL NOT NULL DEFAULT 0 CHECK (total_due >= 0),
+                        loan_date TEXT NOT NULL,
+                        due_date TEXT,
+                        reference_number TEXT,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE'
+                            CHECK (status IN ('ACTIVE', 'PARTIALLY_REPAID', 'PAID', 'OVERDUE', 'CANCELLED')),
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (profile_id) REFERENCES community_savings_profiles(id),
+                        FOREIGN KEY (receiving_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS bank_nkhonde_repayments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        workspace_id INTEGER,
+                        loan_id INTEGER NOT NULL,
+                        source_account_id INTEGER NOT NULL,
+                        linked_transaction_id INTEGER,
+                        repayment_date TEXT NOT NULL,
+                        principal_component REAL NOT NULL DEFAULT 0 CHECK (principal_component >= 0),
+                        interest_component REAL NOT NULL DEFAULT 0 CHECK (interest_component >= 0),
+                        total_payment REAL NOT NULL DEFAULT 0 CHECK (total_payment >= 0),
+                        remaining_balance REAL NOT NULL DEFAULT 0 CHECK (remaining_balance >= 0),
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        status TEXT NOT NULL DEFAULT 'COMPLETED'
+                            CHECK (status IN ('COMPLETED', 'CANCELLED', 'REVERSED')),
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        created_by INTEGER,
+                        updated_by INTEGER,
+                        is_backdated INTEGER NOT NULL DEFAULT 0,
+                        backdate_reason TEXT,
+                        historical_confirmation INTEGER NOT NULL DEFAULT 0,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        deleted_by INTEGER,
+                        deletion_reason TEXT,
+                        deletion_reference TEXT,
+                        previous_status TEXT,
+                        FOREIGN KEY (loan_id) REFERENCES bank_nkhonde_loans(id),
+                        FOREIGN KEY (source_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_savings_profiles_account ON community_savings_profiles(account_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_savings_profiles_type_status ON community_savings_profiles(group_type, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_savings_transactions_account_period ON community_savings_transactions(account_id, contribution_period)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_savings_transactions_transaction ON community_savings_transactions(transaction_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_chipeleganyu_contributions_profile_period ON chipeleganyu_contributions(profile_id, contribution_period)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_chipeleganyu_contributions_status_due ON chipeleganyu_contributions(status, due_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_chipeleganyu_contributions_transaction ON chipeleganyu_contributions(transaction_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_savings_group_rules_profile ON savings_group_profile_rules(profile_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_bank_nkhonde_shares_profile_period ON bank_nkhonde_share_periods(profile_id, contribution_period)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_bank_nkhonde_shares_status_due ON bank_nkhonde_share_periods(status, due_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_bank_nkhonde_loans_profile_status ON bank_nkhonde_loans(profile_id, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_bank_nkhonde_repayments_loan ON bank_nkhonde_repayments(loan_id)");
+            statement.execute("""
+                    UPDATE community_savings_profiles
+                    SET group_type = 'Chipeleganyu'
+                    WHERE lower(group_type) = 'zipeleganyu'
+                    """);
+            statement.execute("""
+                    UPDATE community_savings_groups
+                    SET group_type = 'Chipeleganyu'
+                    WHERE lower(group_type) = 'zipeleganyu'
+                    """);
+            statement.execute("""
+                    UPDATE accounts
+                    SET account_subtype = 'CHIPELEGANYU'
+                    WHERE account_subtype = 'ZIPELEGANYU'
+                    """);
+        }
+        recordSchemaMigration(connection, 24, "personal-savings-group-profiles", "Personal Savings Groups profiles and transaction metadata");
+        recordSchemaMigration(connection, 25, "chipeleganyu-contribution-schedule", "Chipeleganyu monthly contribution schedule and missed-contribution workflow");
+        addSoftDeleteColumns(connection, "community_savings_profiles");
+        addSoftDeleteColumns(connection, "community_savings_transactions");
+        addSoftDeleteColumns(connection, "chipeleganyu_contributions");
+        addSoftDeleteColumns(connection, "bank_nkhonde_share_periods");
+        addSoftDeleteColumns(connection, "bank_nkhonde_loans");
+        addSoftDeleteColumns(connection, "bank_nkhonde_repayments");
+        normalizeSavingsGroupCurrencies(connection);
+        markSavingsGroupLedgerAccounts(connection);
+        recordSchemaMigration(connection, 26, "savings-groups-internal-ledgers", "Savings Group backing accounts marked as internal system ledgers");
+        recordSchemaMigration(connection, 27, "savings-groups-canonical-currencies", "Savings Group currencies normalized to canonical ISO codes where unambiguous");
+        recordSchemaMigration(connection, 28, "personal-bank-nkhonde-workspace", "Personal Bank Nkhonde shares, missed periods, loans and repayments");
+        recordSchemaMigration(connection, 29, "accounts-system-ledger-backfill-v7", "Backfill legacy Savings Group ledger account markers before Budget and dashboard queries");
+    }
+
+    private void initializeBudgetPlanningTables(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "budgets", "budget_type", "TEXT DEFAULT 'Monthly'");
+        addColumnIfMissing(connection, "budgets", "start_date", "TEXT");
+        addColumnIfMissing(connection, "budgets", "end_date", "TEXT");
+        addColumnIfMissing(connection, "budgets", "currency", "TEXT DEFAULT 'MWK'");
+        addColumnIfMissing(connection, "budgets", "expected_income", "REAL DEFAULT 0");
+        addColumnIfMissing(connection, "budgets", "planned_savings", "REAL DEFAULT 0");
+        addColumnIfMissing(connection, "budgets", "overall_spending_limit", "REAL DEFAULT 0");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS budget_revisions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        budget_id INTEGER NOT NULL,
+                        budget_name TEXT NOT NULL,
+                        budget_month TEXT NOT NULL,
+                        category_name TEXT,
+                        previous_amount REAL NOT NULL,
+                        new_amount REAL NOT NULL,
+                        reason TEXT NOT NULL,
+                        changed_by TEXT,
+                        changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (budget_id) REFERENCES budgets(id)
+                    )
+                    """);
+        }
     }
 
     private void migrateProjectActivitiesTable(Connection connection) throws SQLException {
@@ -673,6 +3037,125 @@ public class DatabaseHandler {
         addColumnIfMissing(connection, "project_activities", "reason", "TEXT");
     }
 
+    private void initializeProjectWorkflowTables(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "projects", "project_type", "TEXT DEFAULT 'Other'");
+        addColumnIfMissing(connection, "projects", "project_owner", "TEXT");
+        addColumnIfMissing(connection, "projects", "priority", "TEXT DEFAULT 'Medium'");
+        addColumnIfMissing(connection, "projects", "currency", "TEXT DEFAULT 'MWK'");
+        addColumnIfMissing(connection, "projects", "funding_source", "TEXT");
+        addColumnIfMissing(connection, "projects", "funding_account_id", "INTEGER");
+        addColumnIfMissing(connection, "projects", "linked_goal_id", "INTEGER");
+        addColumnIfMissing(connection, "projects", "notes", "TEXT");
+        addColumnIfMissing(connection, "project_activities", "activity_type", "TEXT DEFAULT 'Other'");
+        addColumnIfMissing(connection, "project_activities", "actual_completion_date", "TEXT");
+        addColumnIfMissing(connection, "project_activities", "responsible_person", "TEXT");
+        addColumnIfMissing(connection, "project_activities", "priority", "TEXT DEFAULT 'Medium'");
+        addColumnIfMissing(connection, "project_activities", "progress", "REAL DEFAULT 0");
+        addColumnIfMissing(connection, "project_activities", "evidence_reference", "TEXT");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS project_milestones (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER NOT NULL,
+                        milestone_name TEXT NOT NULL,
+                        target_date TEXT,
+                        completion_date TEXT,
+                        status TEXT DEFAULT 'Not Started',
+                        notes TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS project_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER NOT NULL,
+                        event_type TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        created_by TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                    """);
+        }
+    }
+
+    private void initializeAssetsTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS assets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        asset_name TEXT NOT NULL,
+                        asset_category TEXT NOT NULL,
+                        acquisition_method TEXT NOT NULL DEFAULT 'Purchased',
+                        purchase_date TEXT,
+                        purchase_cost REAL NOT NULL DEFAULT 0,
+                        capitalized_costs REAL NOT NULL DEFAULT 0,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        account_id INTEGER,
+                        budget_id INTEGER,
+                        project_id INTEGER,
+                        project_activity_id INTEGER,
+                        purchase_transaction_id INTEGER,
+                        payment_treatment TEXT NOT NULL DEFAULT 'PURCHASED_BEFORE_PFMIS',
+                        supplier TEXT,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        serial_number TEXT,
+                        location TEXT,
+                        asset_condition TEXT NOT NULL DEFAULT 'Good',
+                        quantity REAL NOT NULL DEFAULT 1,
+                        current_value REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        supporting_document TEXT,
+                        notes TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (budget_id) REFERENCES budgets(id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id),
+                        FOREIGN KEY (project_activity_id) REFERENCES project_activities(id),
+                        FOREIGN KEY (purchase_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS asset_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        asset_id INTEGER NOT NULL,
+                        event_type TEXT NOT NULL,
+                        event_date TEXT NOT NULL,
+                        amount REAL NOT NULL DEFAULT 0,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        counterparty TEXT,
+                        transaction_id INTEGER,
+                        payment_status TEXT,
+                        reason TEXT,
+                        reference_number TEXT,
+                        notes TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (asset_id) REFERENCES assets(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(asset_category)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_asset_events_asset ON asset_events(asset_id, event_date)");
+        }
+        recordSchemaMigration(connection, 20, "asset-lifecycle-register", "Asset lifecycle register and history");
+        migrateAssetsTable(connection);
+    }
+
+    private void migrateAssetsTable(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "assets", "capitalized_costs", "REAL NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, "assets", "budget_id", "INTEGER");
+        addColumnIfMissing(connection, "assets", "project_activity_id", "INTEGER");
+        addColumnIfMissing(connection, "assets", "purchase_transaction_id", "INTEGER");
+        addColumnIfMissing(connection, "assets", "payment_treatment", "TEXT NOT NULL DEFAULT 'PURCHASED_BEFORE_PFMIS'");
+        addColumnIfMissing(connection, "assets", "supporting_document", "TEXT");
+        addColumnIfMissing(connection, "assets", "updated_at", "TEXT");
+    }
+
     private void createValidTransactionsView(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("DROP VIEW IF EXISTS valid_transactions");
@@ -680,12 +3163,27 @@ public class DatabaseHandler {
                     CREATE VIEW valid_transactions AS
                     SELECT *
                     FROM transactions
-                    WHERE COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    WHERE upper(COALESCE(source, '')) <> 'CORRECTION'
+                      AND COALESCE(is_deleted, 0) = 0
+                      AND (
+                          COALESCE(transaction_status, 'COMPLETED') IN ('COMPLETED', 'CLEARED', 'PARTIALLY_CLEARED')
+                          OR (
+                              COALESCE(transaction_status, 'COMPLETED') = 'OPEN'
+                              AND transaction_type = 'LOAN'
+                              AND transaction_purpose IN ('MONEY_LENT', 'MONEY_BORROWED')
+                          )
+                      )
                     """);
         }
     }
 
     private void initializeSchemaMetadata(Connection connection) throws SQLException {
+        ensureSchemaMetadataTables(connection);
+        recordSchemaMigration(connection, 1, "initial-additive-schema", "Initial additive PFMIS schema management");
+        repairLegacyDuplicateMigrationVersions(connection);
+    }
+
+    private void ensureSchemaMetadataTables(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS schema_version (
@@ -695,9 +3193,55 @@ public class DatabaseHandler {
                     )
                     """);
             statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (1, 'Initial additive PFMIS schema management')
+                    CREATE TABLE IF NOT EXISTS schema_migration_history (
+                        migration_key TEXT PRIMARY KEY,
+                        version INTEGER NOT NULL,
+                        description TEXT NOT NULL,
+                        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
                     """);
+        }
+    }
+
+    private void recordSchemaMigration(
+            Connection connection,
+            int version,
+            String migrationKey,
+            String description
+    ) throws SQLException {
+        ensureSchemaMetadataTables(connection);
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT OR IGNORE INTO schema_version (version, description)
+                VALUES (?, ?)
+                """)) {
+            statement.setInt(1, version);
+            statement.setString(2, description);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO schema_migration_history (migration_key, version, description)
+                VALUES (?, ?, ?)
+                ON CONFLICT(migration_key) DO UPDATE SET
+                    version = excluded.version,
+                    description = excluded.description
+                """)) {
+            statement.setString(1, migrationKey);
+            statement.setInt(2, version);
+            statement.setString(3, description);
+            statement.executeUpdate();
+        }
+    }
+
+    private void repairLegacyDuplicateMigrationVersions(Connection connection) throws SQLException {
+        if (tableExists(connection, "currencies")) {
+            recordSchemaMigration(connection, 4, "workspace-currency-registry", "Workspace currency registry");
+        }
+        if (tableExists(connection, "report_position_items")
+                && tableExists(connection, "scheduled_obligations")
+                && tableExists(connection, "recurring_transaction_plans")
+                && tableExists(connection, "account_reconciliations")
+                && tableExists(connection, "loan_schedules")) {
+            recordSchemaMigration(connection, 10, "report-input-tables", "Report input tables for reconciliation, obligations, recurring plans, position items and loan schedules");
         }
     }
 
@@ -729,11 +3273,8 @@ public class DatabaseHandler {
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
-            statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (3, 'System event log')
-                    """);
         }
+        recordSchemaMigration(connection, 3, "system-event-log", "System event log");
     }
 
     private void initializeAiInteractionLog(Connection connection) throws SQLException {
@@ -748,11 +3289,8 @@ public class DatabaseHandler {
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
-            statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                VALUES (2, 'Smart Assist provider and interaction audit')
-                    """);
         }
+        recordSchemaMigration(connection, 2, "smart-assist-provider-audit", "Smart Assist provider and interaction audit");
     }
 
     private void initializeReportInputTables(Connection connection) throws SQLException {
@@ -844,9 +3382,372 @@ public class DatabaseHandler {
                         FOREIGN KEY (person_id) REFERENCES people(id)
                     )
                     """);
+        }
+        recordSchemaMigration(connection, 10, "report-input-tables", "Report input tables for reconciliation, obligations, recurring plans, position items and loan schedules");
+    }
+
+    private void initializeCentralLoansTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
             statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (4, 'Report input tables for reconciliation, obligations, recurring plans, position items and loan schedules')
+                    CREATE TABLE IF NOT EXISTS loans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        loan_number TEXT NOT NULL UNIQUE,
+                        loan_name TEXT NOT NULL,
+                        lender_type TEXT NOT NULL,
+                        lender_name TEXT NOT NULL,
+                        savings_group_id INTEGER,
+                        principal_amount REAL NOT NULL CHECK (principal_amount > 0),
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        interest_method TEXT NOT NULL DEFAULT 'NO_INTEREST',
+                        interest_rate REAL NOT NULL DEFAULT 0 CHECK (interest_rate >= 0),
+                        fixed_interest_amount REAL NOT NULL DEFAULT 0 CHECK (fixed_interest_amount >= 0),
+                        fees REAL NOT NULL DEFAULT 0 CHECK (fees >= 0),
+                        total_interest REAL NOT NULL DEFAULT 0 CHECK (total_interest >= 0),
+                        total_repayable REAL NOT NULL DEFAULT 0 CHECK (total_repayable >= 0),
+                        total_paid REAL NOT NULL DEFAULT 0 CHECK (total_paid >= 0),
+                        outstanding_balance REAL NOT NULL DEFAULT 0 CHECK (outstanding_balance >= 0),
+                        principal_outstanding REAL NOT NULL DEFAULT 0 CHECK (principal_outstanding >= 0),
+                        interest_outstanding REAL NOT NULL DEFAULT 0 CHECK (interest_outstanding >= 0),
+                        fees_outstanding REAL NOT NULL DEFAULT 0 CHECK (fees_outstanding >= 0),
+                        penalties_outstanding REAL NOT NULL DEFAULT 0 CHECK (penalties_outstanding >= 0),
+                        repayment_frequency TEXT NOT NULL DEFAULT 'MONTHLY',
+                        repayment_method TEXT NOT NULL DEFAULT 'CASH_OR_TRANSFER',
+                        number_of_installments INTEGER NOT NULL DEFAULT 1 CHECK (number_of_installments > 0),
+                        start_date TEXT NOT NULL,
+                        first_payment_date TEXT NOT NULL,
+                        expected_end_date TEXT,
+                        proceeds_account_id INTEGER NOT NULL,
+                        repayment_account_id INTEGER NOT NULL,
+                        repayment_mode TEXT NOT NULL DEFAULT 'MANUAL',
+                        automatic_payment_day INTEGER,
+                        automatic_amount REAL,
+                        automatic_start_date TEXT,
+                        automatic_end_date TEXT,
+                        proceeds_transaction_id INTEGER,
+                        source_module TEXT NOT NULL DEFAULT 'LOANS',
+                        source_record_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        notes TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (savings_group_id) REFERENCES community_savings_profiles(id),
+                        FOREIGN KEY (proceeds_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (repayment_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (proceeds_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS loan_installments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        loan_id INTEGER NOT NULL,
+                        installment_number INTEGER NOT NULL,
+                        due_date TEXT NOT NULL,
+                        principal_due REAL NOT NULL DEFAULT 0 CHECK (principal_due >= 0),
+                        interest_due REAL NOT NULL DEFAULT 0 CHECK (interest_due >= 0),
+                        fees_due REAL NOT NULL DEFAULT 0 CHECK (fees_due >= 0),
+                        penalty_due REAL NOT NULL DEFAULT 0 CHECK (penalty_due >= 0),
+                        total_due REAL NOT NULL DEFAULT 0 CHECK (total_due >= 0),
+                        amount_paid REAL NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
+                        remaining_due REAL NOT NULL DEFAULT 0 CHECK (remaining_due >= 0),
+                        status TEXT NOT NULL DEFAULT 'SCHEDULED',
+                        paid_date TEXT,
+                        transaction_id INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE,
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id),
+                        UNIQUE (loan_id, installment_number)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS loan_payments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        loan_id INTEGER NOT NULL,
+                        installment_id INTEGER,
+                        account_id INTEGER NOT NULL,
+                        payment_date TEXT NOT NULL,
+                        principal_paid REAL NOT NULL DEFAULT 0 CHECK (principal_paid >= 0),
+                        interest_paid REAL NOT NULL DEFAULT 0 CHECK (interest_paid >= 0),
+                        fees_paid REAL NOT NULL DEFAULT 0 CHECK (fees_paid >= 0),
+                        penalty_paid REAL NOT NULL DEFAULT 0 CHECK (penalty_paid >= 0),
+                        total_paid REAL NOT NULL DEFAULT 0 CHECK (total_paid >= 0),
+                        transaction_id INTEGER,
+                        reference TEXT,
+                        status TEXT NOT NULL DEFAULT 'COMPLETED',
+                        notes TEXT,
+                        idempotency_key TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE,
+                        FOREIGN KEY (installment_id) REFERENCES loan_installments(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id),
+                        UNIQUE (idempotency_key)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS loan_audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        loan_id INTEGER,
+                        action TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        entity_id INTEGER,
+                        before_value TEXT,
+                        after_value TEXT,
+                        created_by INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loans_lender_type ON loans(lender_type)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loans_savings_group ON loans(savings_group_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loan_installments_due_status ON loan_installments(due_date, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loan_installments_loan_status ON loan_installments(loan_id, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_loan_payments_loan_date ON loan_payments(loan_id, payment_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(transaction_status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_loan ON transactions(loan_id, loan_installment_id)");
+        }
+        recordSchemaMigration(connection, 30, "central-borrowed-loans", "Central borrowed-loan liabilities, installments, payments and loan-linked transactions");
+        refreshCentralLoanStatuses(connection);
+    }
+
+    private void initializeDataIntakeTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS data_manual_inputs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        input_type TEXT NOT NULL,
+                        reporting_period TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        input_value TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        notes TEXT,
+                        created_by TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS data_import_batches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        batch_key TEXT NOT NULL UNIQUE,
+                        data_type TEXT NOT NULL,
+                        original_filename TEXT NOT NULL,
+                        file_checksum TEXT,
+                        workspace_name TEXT,
+                        imported_by TEXT,
+                        total_rows INTEGER NOT NULL DEFAULT 0,
+                        valid_rows INTEGER NOT NULL DEFAULT 0,
+                        duplicate_rows INTEGER NOT NULL DEFAULT 0,
+                        rejected_rows INTEGER NOT NULL DEFAULT 0,
+                        imported_rows INTEGER NOT NULL DEFAULT 0,
+                        imported_total REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'Ready',
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        completed_at TEXT
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS data_import_rejected_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        batch_id INTEGER NOT NULL,
+                        row_number INTEGER NOT NULL,
+                        record_text TEXT,
+                        problem TEXT NOT NULL,
+                        original_value TEXT,
+                        status TEXT NOT NULL DEFAULT 'Needs correction',
+                        corrected_date TEXT,
+                        corrected_description TEXT,
+                        corrected_amount REAL,
+                        corrected_account TEXT,
+                        corrected_category TEXT,
+                        corrected_payment_method TEXT,
+                        corrected_reference TEXT,
+                        corrected_type TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (batch_id) REFERENCES data_import_batches(id) ON DELETE CASCADE
+                    )
+                    """);
+        }
+        recordSchemaMigration(connection, 7, "data-intake-tables", "Data intake manual inputs, import batches and rejected rows");
+    }
+
+    private void initializeIncomeWorkflowTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS income_drafts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        category_id INTEGER,
+                        project_id INTEGER,
+                        person_id INTEGER,
+                        expected_income_id INTEGER,
+                        amount REAL NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        income_date TEXT NOT NULL,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        description TEXT,
+                        attachment_path TEXT,
+                        status TEXT NOT NULL DEFAULT 'Draft',
+                        posted_transaction_id INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id),
+                        FOREIGN KEY (person_id) REFERENCES people(id),
+                        FOREIGN KEY (expected_income_id) REFERENCES expected_income(id),
+                        FOREIGN KEY (posted_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS expected_income (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        expected_date TEXT NOT NULL,
+                        expected_amount REAL NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        account_id INTEGER NOT NULL,
+                        category_id INTEGER,
+                        person_id INTEGER,
+                        reference_number TEXT,
+                        repeat_frequency TEXT NOT NULL DEFAULT 'One time',
+                        end_date TEXT,
+                        confidence TEXT NOT NULL DEFAULT 'Likely',
+                        notes TEXT,
+                        status TEXT NOT NULL DEFAULT 'Upcoming',
+                        linked_transaction_id INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id),
+                        FOREIGN KEY (person_id) REFERENCES people(id),
+                        FOREIGN KEY (linked_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+        }
+        recordSchemaMigration(connection, 8, "income-workflow-tables", "Income drafts and expected income workflow");
+    }
+
+    private void initializeTransactionLedgerTables(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS transfer_drafts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        from_account_id INTEGER NOT NULL,
+                        to_account_id INTEGER NOT NULL,
+                        amount_sent REAL NOT NULL,
+                        amount_received REAL NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        exchange_rate REAL,
+                        transfer_fee REAL NOT NULL DEFAULT 0,
+                        fee_category_id INTEGER,
+                        transfer_date TEXT NOT NULL,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        description TEXT,
+                        status TEXT NOT NULL DEFAULT 'Draft',
+                        posted_outgoing_transaction_id INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (fee_category_id) REFERENCES categories(id),
+                        FOREIGN KEY (posted_outgoing_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS scheduled_transfers (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        transfer_name TEXT NOT NULL,
+                        from_account_id INTEGER NOT NULL,
+                        to_account_id INTEGER NOT NULL,
+                        amount REAL NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'MWK',
+                        transfer_fee REAL NOT NULL DEFAULT 0,
+                        fee_category_id INTEGER,
+                        first_transfer_date TEXT NOT NULL,
+                        next_due_date TEXT NOT NULL,
+                        frequency TEXT NOT NULL DEFAULT 'One time',
+                        end_date TEXT,
+                        reminder_period TEXT NOT NULL DEFAULT 'Same day',
+                        transfer_method TEXT,
+                        confirmation_required INTEGER NOT NULL DEFAULT 1,
+                        notes TEXT,
+                        status TEXT NOT NULL DEFAULT 'Upcoming',
+                        last_transaction_id INTEGER,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (fee_category_id) REFERENCES categories(id),
+                        FOREIGN KEY (last_transaction_id) REFERENCES transactions(id)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS transaction_correction_drafts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        original_transaction_id INTEGER NOT NULL,
+                        account_id INTEGER NOT NULL,
+                        category_id INTEGER,
+                        project_id INTEGER,
+                        project_activity_id INTEGER,
+                        person_id INTEGER,
+                        transaction_type TEXT NOT NULL,
+                        transaction_purpose TEXT,
+                        amount REAL NOT NULL,
+                        transaction_date TEXT NOT NULL,
+                        description TEXT,
+                        payment_method TEXT,
+                        reference_number TEXT,
+                        reason TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'Draft',
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT,
+                        FOREIGN KEY (original_transaction_id) REFERENCES transactions(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id),
+                        FOREIGN KEY (project_activity_id) REFERENCES project_activities(id),
+                        FOREIGN KEY (person_id) REFERENCES people(id)
+                    )
+                    """);
+        }
+        recordSchemaMigration(connection, 9, "transaction-ledger-transfer-workflow", "Transaction ledger transfer drafts and scheduled transfers");
+        recordSchemaMigration(connection, 21, "transaction-correction-drafts", "Transaction correction drafts outside posted ledger");
+        migrateLegacyCorrectionDraftRows(connection);
+    }
+
+    private void migrateLegacyCorrectionDraftRows(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO transaction_correction_drafts (
+                        original_transaction_id, account_id, category_id, project_id, project_activity_id, person_id,
+                        transaction_type, transaction_purpose, amount, transaction_date, description,
+                        payment_method, reference_number, reason, status, created_at, updated_at
+                    )
+                    SELECT COALESCE(related_transaction_id, id), account_id, category_id, project_id, project_activity_id, person_id,
+                           transaction_type, transaction_purpose, amount, transaction_date, description,
+                           payment_method, reference_number,
+                           'Migrated from legacy live correction draft transaction #' || id,
+                           'Draft', created_at, CURRENT_TIMESTAMP
+                    FROM transactions legacy
+                    WHERE upper(COALESCE(source, '')) = 'CORRECTION'
+                      AND upper(COALESCE(transaction_status, 'OPEN')) IN ('OPEN', 'DRAFT')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM transaction_correction_drafts draft
+                          WHERE draft.original_transaction_id = COALESCE(legacy.related_transaction_id, legacy.id)
+                            AND draft.created_at = legacy.created_at
+                      )
+                    """);
+            statement.execute("""
+                    UPDATE transactions
+                    SET transaction_status = 'CANCELLED',
+                        description = trim(COALESCE(description, '') || ' (migrated to transaction_correction_drafts)')
+                    WHERE upper(COALESCE(source, '')) = 'CORRECTION'
+                      AND upper(COALESCE(transaction_status, 'OPEN')) IN ('OPEN', 'DRAFT')
                     """);
         }
     }
@@ -870,12 +3771,43 @@ public class DatabaseHandler {
                         UNIQUE(policy_area, item_name)
                     )
                     """);
-            statement.execute("""
-                    INSERT OR IGNORE INTO schema_version (version, description)
-                    VALUES (6, 'Setup policy registry for smart rules, profile, alerts, automation and governance')
-                    """);
         }
+        recordSchemaMigration(connection, 6, "setup-policy-registry", "Setup policy registry for smart rules, profile, alerts, automation and governance");
         seedSetupPolicyDefaults(connection, null, false);
+        correctFutureFeaturePolicyStatuses(connection);
+    }
+
+    private void correctFutureFeaturePolicyStatuses(Connection connection) throws SQLException {
+        String[][] plannedPolicies = {
+                {"Automation Schedules", "Daily financial analysis", "PLANNED: scheduler entry only; no background analysis job is implemented."},
+                {"Automation Schedules", "Weekly financial briefing", "PLANNED: proactive briefing scheduler is not implemented."},
+                {"Automation Schedules", "Month-end summary", "PLANNED: month-end automated summary workflow is not implemented."},
+                {"Automation Schedules", "Data-quality scan", "PLANNED: manual checks exist; scheduled scan is not implemented."},
+                {"Session and Auto-Lock Settings", "Inactivity timeout", "CONFIGURATION_ONLY: future session timeout enforcement is not implemented."},
+                {"Session and Auto-Lock Settings", "Automatic locking", "CONFIGURATION_ONLY: screen-lock enforcement is not implemented."},
+                {"Import and Export", "Workspace export", "PLANNED: full workspace export workflow is not implemented."}
+        };
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE setup_policy_records
+                SET enabled = 0,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE policy_area = ?
+                  AND item_name = ?
+                  AND (
+                      notes LIKE 'Future%'
+                      OR notes LIKE 'Configuration placeholder%'
+                      OR notes = 'Security preference.'
+                  )
+                """)) {
+            for (String[] policy : plannedPolicies) {
+                statement.setString(1, policy[2]);
+                statement.setString(2, policy[0]);
+                statement.setString(3, policy[1]);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
     }
 
     private void seedSetupPolicyDefaults(Connection connection, String requestedArea, boolean overwriteExisting) throws SQLException {
@@ -943,19 +3875,19 @@ public class DatabaseHandler {
                 new String[]{"Alerts and Notifications", "Backup overdue", "Alert", "No verified backup recorded recently", "7 days", "WARNING", "Create a backup before major edits or imports.", "Backup and Restore", "Enabled", "Backup guardian rule."},
                 new String[]{"Alerts and Notifications", "AI service failure", "Alert", "Local AI unavailable", "Immediate", "INFO", "Continue deterministic checks and allow financial entry.", "AI Configuration", "Enabled", "AI must not block core accounting."},
 
-                new String[]{"Automation Schedules", "Daily financial analysis", "Schedule", "Run deterministic checks daily", "Daily", "INFO", "Refresh dashboard warnings and data quality status.", "Dashboard", "Enabled", "Future scheduler entry."},
-                new String[]{"Automation Schedules", "Weekly financial briefing", "Schedule", "Summarize cash flow, budget and obligations", "Weekly", "INFO", "Prepare a weekly decision-support summary.", "Reports", "Enabled", "Future proactive monitoring entry."},
-                new String[]{"Automation Schedules", "Month-end summary", "Schedule", "Close monthly summary and compare prior month", "Monthly", "INFO", "Generate monthly interpretation and next actions.", "Reports", "Enabled", "Future month-end workflow."},
+                new String[]{"Automation Schedules", "Daily financial analysis", "Schedule", "Run deterministic checks daily", "Daily", "INFO", "Refresh dashboard warnings and data quality status.", "Dashboard", "Disabled", "PLANNED: scheduler entry only; no background analysis job is implemented."},
+                new String[]{"Automation Schedules", "Weekly financial briefing", "Schedule", "Summarize cash flow, budget and obligations", "Weekly", "INFO", "Prepare a weekly decision-support summary.", "Reports", "Disabled", "PLANNED: proactive briefing scheduler is not implemented."},
+                new String[]{"Automation Schedules", "Month-end summary", "Schedule", "Close monthly summary and compare prior month", "Monthly", "INFO", "Generate monthly interpretation and next actions.", "Reports", "Disabled", "PLANNED: month-end automated summary workflow is not implemented."},
                 new String[]{"Automation Schedules", "Automatic backup", "Schedule", "Create safety backup on schedule", "Daily", "WARNING", "Keep daily verified backup for workspace recovery.", "Backup and Restore", "Enabled", "Already supported by startup backup service."},
-                new String[]{"Automation Schedules", "Data-quality scan", "Schedule", "Scan missing categories, duplicates and future dates", "Daily", "WARNING", "Raise data quality warnings before reports are trusted.", "Data Quality", "Enabled", "Future scheduled scan entry."},
+                new String[]{"Automation Schedules", "Data-quality scan", "Schedule", "Scan missing categories, duplicates and future dates", "Daily", "WARNING", "Raise data quality warnings before reports are trusted.", "Data Quality", "Disabled", "PLANNED: manual checks exist; scheduled scan is not implemented."},
 
                 new String[]{"Report Preferences", "Default reporting period", "Preference", "Initial report date range", "Current month", "INFO", "Open reports with the expected period selected.", "Reports", "Enabled", "User-facing report default."},
                 new String[]{"Report Preferences", "Include smart conclusion", "Preference", "Append interpretation to analytical reports", "Yes", "INFO", "Show conclusion, evidence, risks and recommended actions.", "Reports", "Enabled", "Required by decision-support reports."},
                 new String[]{"Report Preferences", "Include evidence section", "Preference", "Show linked records supporting conclusions", "Yes", "INFO", "Expose why the conclusion was reached.", "Reports", "Enabled", "Supports explainability."},
                 new String[]{"Report Preferences", "PDF page size", "Preference", "Default export page size", "A4", "INFO", "Use consistent report exports.", "Reports", "Enabled", "Export preference."},
 
-                new String[]{"Session and Auto-Lock Settings", "Inactivity timeout", "Security", "Lock after inactivity", "15 minutes", "WARNING", "Require sign-in after idle periods.", "My Account", "Enabled", "Configuration placeholder for future session enforcement."},
-                new String[]{"Session and Auto-Lock Settings", "Automatic locking", "Security", "Lock on sensitive screens", "Enabled", "WARNING", "Protect financial and user-management data.", "My Account", "Enabled", "Security preference."},
+                new String[]{"Session and Auto-Lock Settings", "Inactivity timeout", "Security", "Lock after inactivity", "15 minutes", "WARNING", "Require sign-in after idle periods.", "My Account", "Disabled", "CONFIGURATION_ONLY: future session timeout enforcement is not implemented."},
+                new String[]{"Session and Auto-Lock Settings", "Automatic locking", "Security", "Lock on sensitive screens", "Enabled", "WARNING", "Protect financial and user-management data.", "My Account", "Disabled", "CONFIGURATION_ONLY: screen-lock enforcement is not implemented."},
                 new String[]{"Session and Auto-Lock Settings", "Recovery information", "Security", "Email must be available for reset", "Required", "WARNING", "Keep recovery email current.", "My Account", "Enabled", "Supports email password reset."},
 
                 new String[]{"Workspace Management", "Workspace owner", "Governance", "Signed-in owner controls personal database", "Workspace Owner", "INFO", "Keep owner and super administrator responsibilities separate.", "Administration", "Enabled", "Normal users own their records but not global users."},
@@ -969,7 +3901,7 @@ public class DatabaseHandler {
 
                 new String[]{"Import and Export", "Transaction import template", "Import", "CSV columns must be mapped", "Required", "INFO", "Preview and validate imported rows before commit.", "Import and Export", "Enabled", "Prevents invalid data from entering the workspace."},
                 new String[]{"Import and Export", "Duplicate detection", "Import", "Imported rows match existing transactions", "Required", "WARNING", "Quarantine duplicate candidates before commit.", "Import and Export", "Enabled", "Import safety rule."},
-                new String[]{"Import and Export", "Workspace export", "Export", "Export complete or selected workspace data", "CSV, XLSX, JSON", "INFO", "Support personal-data export and report evidence packages.", "Import and Export", "Enabled", "Future export workflow."},
+                new String[]{"Import and Export", "Workspace export", "Export", "Export complete or selected workspace data", "CSV, XLSX, JSON", "INFO", "Support personal-data export and report evidence packages.", "Import and Export", "Disabled", "PLANNED: full workspace export workflow is not implemented."},
 
                 new String[]{"Archive and Restore", "Deactivate used master data", "Deletion Policy", "Category, currency or payment method is referenced", "Archive only", "WARNING", "Deactivate or merge instead of hard deleting used records.", "Archive and Restore", "Enabled", "Protects historical reports."},
                 new String[]{"Archive and Restore", "Deletion reason required", "Deletion Policy", "Permanent deletion requested", "Required", "CRITICAL", "Record reason, backup first and audit the outcome.", "Archive and Restore", "Enabled", "Controlled deletion workflow."},
@@ -991,8 +3923,13 @@ public class DatabaseHandler {
             statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_category_month ON transactions(category_id, transaction_date)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_transactions_project_activity ON transactions(project_activity_id)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_project_activities_project ON project_activities(project_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_projects_status_type ON projects(status, project_type)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_project_milestones_project ON project_milestones(project_id)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_project_history_project ON project_history(project_id, created_at)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_budgets_month ON budgets(budget_month)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_budgets_category_month ON budgets(category_id, budget_month)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_budgets_plan_period ON budgets(budget_name, budget_month)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_budget_revisions_plan ON budget_revisions(budget_name, budget_month)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_household_budget_members_month ON household_budget_members(budget_month)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_household_budget_members_month_name ON household_budget_members(budget_month, person_name)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_household_budget_members_duration ON household_budget_members(duration_scope, budget_month)");
@@ -1006,7 +3943,84 @@ public class DatabaseHandler {
             statement.execute("CREATE INDEX IF NOT EXISTS idx_reconciliations_account_date ON account_reconciliations(account_id, reconciliation_date)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_loan_schedules_due ON loan_schedules(due_date, status)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_setup_policy_area ON setup_policy_records(policy_area, enabled)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_data_manual_inputs_period ON data_manual_inputs(reporting_period, created_at)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_data_import_batches_created ON data_import_batches(created_at)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_data_import_batches_status ON data_import_batches(status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_data_import_rejected_batch ON data_import_rejected_records(batch_id, status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_income_drafts_status ON income_drafts(status)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_income_drafts_date ON income_drafts(income_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_expected_income_status_date ON expected_income(status, expected_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transfer_drafts_status_date ON transfer_drafts(status, transfer_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_transfers_status_due ON scheduled_transfers(status, next_due_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transaction_correction_drafts_status_date ON transaction_correction_drafts(status, transaction_date)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_transaction_correction_drafts_original ON transaction_correction_drafts(original_transaction_id)");
         }
+        createAccountIdentityIndexes(connection);
+    }
+
+    private void createAccountIdentityIndexes(Connection connection) throws SQLException {
+        String duplicates = firstDuplicateAccountNumberIdentity(connection);
+        if (!duplicates.isBlank()) {
+            recordSystemLog(
+                    connection,
+                    "Database",
+                    "Account identity index skipped",
+                    "WARNING",
+                    "Provider/account-number uniqueness was not enforced because existing duplicate account identifiers were found: " + duplicates
+            );
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_accounts_provider_account_number_active
+                    ON accounts (
+                        lower(trim(account_type)),
+                        lower(trim(COALESCE(bank_provider_name, ''))),
+                        lower(replace(replace(replace(COALESCE(account_number, ''), ' ', ''), '-', ''), '.', ''))
+                    )
+                    WHERE COALESCE(is_deleted, 0) = 0
+                      AND COALESCE(is_system_account, 0) = 0
+                      AND trim(COALESCE(account_number, '')) <> ''
+                    """);
+        }
+    }
+
+    private String firstDuplicateAccountNumberIdentity(Connection connection) throws SQLException {
+        String sql = """
+                SELECT lower(trim(account_type)) AS account_type_key,
+                       lower(trim(COALESCE(bank_provider_name, ''))) AS provider_key,
+                       lower(replace(replace(replace(COALESCE(account_number, ''), ' ', ''), '-', ''), '.', '')) AS number_key,
+                       COUNT(*) AS duplicate_count
+                FROM accounts
+                WHERE COALESCE(is_deleted, 0) = 0
+                  AND COALESCE(is_system_account, 0) = 0
+                  AND trim(COALESCE(account_number, '')) <> ''
+                GROUP BY account_type_key, provider_key, number_key
+                HAVING COUNT(*) > 1
+                LIMIT 1
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            if (!resultSet.next()) {
+                return "";
+            }
+            return safeText(resultSet.getString("account_type_key"), "-")
+                    + "/"
+                    + safeText(resultSet.getString("provider_key"), "-")
+                    + "/"
+                    + maskIdentifier(resultSet.getString("number_key"));
+        }
+    }
+
+    private String maskIdentifier(String value) {
+        String clean = value == null ? "" : value.trim();
+        if (clean.isBlank()) {
+            return "-";
+        }
+        if (clean.length() <= 4) {
+            return "****" + clean;
+        }
+        return "****" + clean.substring(clean.length() - 4);
     }
 
     private void seedCategories(Connection connection) throws SQLException {
@@ -1062,19 +4076,36 @@ public class DatabaseHandler {
         List<Account> accounts = new ArrayList<>();
         String sql = """
                 SELECT a.id, a.account_name, a.account_type, a.currency, a.bank_provider_name,
-                       a.account_number, a.opening_balance, a.status, a.notes, a.created_at,
-                       a.opening_balance + COALESCE(SUM(
+                       a.account_number, a.opening_balance, a.opening_balance_date,
+                       a.minimum_balance, a.account_purpose, a.branch_name, a.status, a.notes, a.created_at,
+                       COALESCE(a.account_category, 'ASSET') AS account_category,
+                       COALESCE(a.account_subtype, '') AS account_subtype,
+                       a.community_group_id,
+                       COALESCE(a.is_system_account, 0) AS is_system_account,
+                       CASE
+                           WHEN a.opening_balance_date IS NULL
+                             OR trim(a.opening_balance_date) = ''
+                              OR date(a.opening_balance_date) <= date('now', 'localtime')
+                           THEN a.opening_balance
+                           ELSE 0
+                       END + COALESCE(SUM(
                            CASE
                               WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
                               ELSE 0
-                          END
+                           END
                        ), 0) AS current_balance
                 FROM accounts a
-                LEFT JOIN transactions t ON t.account_id = a.id
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
+                WHERE COALESCE(a.is_deleted, 0) = 0
+                  AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
                 """;
@@ -1090,10 +4121,18 @@ public class DatabaseHandler {
                         resultSet.getString("bank_provider_name"),
                         resultSet.getString("account_number"),
                         resultSet.getDouble("opening_balance"),
+                        resultSet.getString("opening_balance_date"),
+                        resultSet.getDouble("minimum_balance"),
+                        resultSet.getString("account_purpose"),
+                        resultSet.getString("branch_name"),
                         resultSet.getDouble("current_balance"),
                         resultSet.getString("status"),
                         resultSet.getString("notes"),
-                        resultSet.getString("created_at")
+                        resultSet.getString("created_at"),
+                        resultSet.getString("account_category"),
+                        resultSet.getString("account_subtype"),
+                        nullableInt(resultSet, "community_group_id"),
+                        resultSet.getInt("is_system_account") == 1
                 ));
             }
         } catch (SQLException exception) {
@@ -1108,17 +4147,27 @@ public class DatabaseHandler {
                 "Bank Account",
                 "Mobile Money",
                 "Savings Account",
+                "Loan Receivable",
                 "Credit Account / Loan",
                 "Project Account",
                 "Other"
         ));
-        String sql = "SELECT DISTINCT account_type FROM accounts WHERE account_type IS NOT NULL AND trim(account_type) <> '' ORDER BY account_type";
+        String sql = """
+                SELECT DISTINCT account_type
+                FROM accounts
+                WHERE COALESCE(is_deleted, 0) = 0
+                  AND COALESCE(is_system_account, 0) = 0
+                  AND account_type IS NOT NULL
+                  AND trim(account_type) <> ''
+                ORDER BY account_type
+                """;
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
                 String accountType = resultSet.getString("account_type");
-                if (!suggestions.contains(accountType)) {
+                if (!isSavingsGroupAccountType(accountType)
+                        && suggestions.stream().noneMatch(existing -> existing.equalsIgnoreCase(accountType))) {
                     suggestions.add(accountType);
                 }
             }
@@ -1273,6 +4322,30 @@ public class DatabaseHandler {
         return DEFAULT_CURRENCY_DISPLAY;
     }
 
+    public String getBaseCurrencyCode() {
+        try (Connection connection = connect()) {
+            return baseCurrencyCode(connection);
+        } catch (SQLException exception) {
+            return DEFAULT_CURRENCY_CODE;
+        }
+    }
+
+    private String baseCurrencyCode(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT currency_code
+                FROM currencies
+                WHERE base_currency = 1
+                ORDER BY id
+                LIMIT 1
+                """);
+             ResultSet resultSet = statement.executeQuery()) {
+            if (resultSet.next()) {
+                return normalizedCurrencyCodeOrDefault(resultSet.getString("currency_code"));
+            }
+        }
+        return DEFAULT_CURRENCY_CODE;
+    }
+
     private boolean currencyExists(Connection connection, String currencyCode) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT 1
@@ -1355,6 +4428,17 @@ public class DatabaseHandler {
                 .toUpperCase(Locale.ENGLISH);
     }
 
+    private String requireIsoCurrencyCode(String currencyCode, String label) {
+        String code = normalizedCurrencyCodeOrDefault(currencyCode);
+        if (code.isBlank()) {
+            throw new IllegalArgumentException(label + " is required.");
+        }
+        if (!code.matches("[A-Z]{3}")) {
+            throw new IllegalArgumentException(label + " must be a three-letter ISO code.");
+        }
+        return code;
+    }
+
     private String normalizedCurrencyStatus(String status) {
         if (status == null || status.isBlank()) {
             return "ACTIVE";
@@ -1375,35 +4459,191 @@ public class DatabaseHandler {
         }
     }
 
-    public void addAccount(
+    public boolean accountIdentityExists(
+            Integer existingAccountId,
+            String name,
+            String type,
+            String bankProviderName,
+            String accountNumber
+    ) {
+        try (Connection connection = connect()) {
+            return findDuplicateAccountId(connection, existingAccountId, name, type, bankProviderName, accountNumber) != null;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check account duplicates", exception);
+        }
+    }
+
+    private Integer findDuplicateAccountId(
+            Connection connection,
+            Integer existingAccountId,
+            String name,
+            String type,
+            String bankProviderName,
+            String accountNumber
+    ) throws SQLException {
+        String cleanName = identityKey(name);
+        String cleanType = identityKey(type);
+        String cleanProvider = identityKey(bankProviderName);
+        String cleanNumber = accountNumberKey(accountNumber);
+        String sql = """
+                SELECT id, account_name, account_type, bank_provider_name, account_number
+                FROM accounts
+                WHERE COALESCE(is_deleted, 0) = 0
+                  AND COALESCE(is_system_account, 0) = 0
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                int id = resultSet.getInt("id");
+                if (existingAccountId != null && existingAccountId == id) {
+                    continue;
+                }
+                String existingName = identityKey(resultSet.getString("account_name"));
+                String existingType = identityKey(resultSet.getString("account_type"));
+                String existingProvider = identityKey(resultSet.getString("bank_provider_name"));
+                String existingNumber = accountNumberKey(resultSet.getString("account_number"));
+                boolean sameSubmittedIdentity = cleanName.equals(existingName)
+                        && cleanType.equals(existingType)
+                        && cleanProvider.equals(existingProvider)
+                        && cleanNumber.equals(existingNumber);
+                boolean sameProviderNumber = !cleanNumber.isBlank()
+                        && cleanType.equals(existingType)
+                        && cleanProvider.equals(existingProvider)
+                        && cleanNumber.equals(existingNumber);
+                if (sameSubmittedIdentity || sameProviderNumber) {
+                    return id;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String identityKey(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ENGLISH).replaceAll("\\s+", " ");
+    }
+
+    private String accountNumberKey(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ENGLISH).replaceAll("[^0-9a-z]", "");
+    }
+
+    public int addAccount(
             String name,
             String type,
             String currency,
             String bankProviderName,
             String accountNumber,
             double openingBalance,
+            String openingBalanceDate,
+            double minimumBalance,
+            String accountPurpose,
+            String branchName,
             String status,
             String notes
     ) {
+        return addAccountWithClassification(
+                name,
+                type,
+                currency,
+                bankProviderName,
+                accountNumber,
+                openingBalance,
+                openingBalanceDate,
+                minimumBalance,
+                accountPurpose,
+                branchName,
+                status,
+                notes,
+                accountCategoryForType(type),
+                accountSubtypeForType(type),
+                null
+        );
+    }
+
+    public int addAccountWithClassification(
+            String name,
+            String type,
+            String currency,
+            String bankProviderName,
+            String accountNumber,
+            double openingBalance,
+            String openingBalanceDate,
+            double minimumBalance,
+            String accountPurpose,
+            String branchName,
+            String status,
+            String notes,
+            String accountCategory,
+            String accountSubtype,
+            Integer communityGroupId
+    ) {
+        if (openingBalance < 0) {
+            throw new IllegalArgumentException("Opening balance cannot be negative. Use a credit or loan workflow for liabilities.");
+        }
+        String cleanName = requireText(name, "Account name");
+        String cleanType = requireText(type, "Account type");
+        rejectUserCreatedSavingsGroupAccountType(cleanType);
+        String cleanCurrency = normalizedCurrencyCodeOrDefault(currency);
+        if (cleanCurrency.isBlank()) {
+            cleanCurrency = DEFAULT_CURRENCY_CODE;
+        }
+        validateProviderRequiredForAccountType(cleanType, bankProviderName);
+        String cleanCategory = normalizedAccountCategory(accountCategory, cleanType);
         String sql = """
                 INSERT INTO accounts (
                     account_name, account_type, currency, bank_provider_name, account_number,
-                    opening_balance, status, notes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    opening_balance, opening_balance_date, minimum_balance, account_purpose, branch_name,
+                    account_category, account_subtype, community_group_id, status, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """;
-        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, name);
-            statement.setString(2, type);
-            statement.setString(3, currency);
-            statement.setString(4, bankProviderName);
-            statement.setString(5, accountNumber);
-            statement.setDouble(6, openingBalance);
-            statement.setString(7, status);
-            statement.setString(8, notes);
-            statement.executeUpdate();
+        int accountId;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            connection.setAutoCommit(false);
+            try {
+                Integer duplicateAccountId = findDuplicateAccountId(connection, null, cleanName, cleanType, bankProviderName, accountNumber);
+                if (duplicateAccountId != null) {
+                    throw new IllegalArgumentException("An active account with the same account identity already exists.");
+                }
+                recordSystemLog(connection, "Accounts", "Account validation passed", "INFO", "Validated new " + cleanType + " account.");
+                statement.setString(1, cleanName);
+                statement.setString(2, cleanType);
+                statement.setString(3, cleanCurrency);
+                statement.setString(4, cleanNullable(bankProviderName));
+                statement.setString(5, cleanNullable(accountNumber));
+                statement.setDouble(6, openingBalance);
+                statement.setString(7, safeText(openingBalanceDate, ""));
+                statement.setDouble(8, Math.max(0, minimumBalance));
+                statement.setString(9, safeText(accountPurpose, ""));
+                statement.setString(10, safeText(branchName, ""));
+                statement.setString(11, cleanCategory);
+                statement.setString(12, cleanNullable(accountSubtype));
+                setNullableInt(statement, 13, communityGroupId);
+                statement.setString(14, normalizedAccountStatus(status));
+                statement.setString(15, notes);
+                statement.executeUpdate();
+                accountId = generatedId(connection, statement);
+                recordSystemLog(connection, "Accounts", "Account inserted", "INFO", "Account " + accountId + " inserted.");
+                if (openingBalance > 0) {
+                    insertOpeningBalanceAuditTransaction(
+                            connection,
+                            accountId,
+                            openingBalance,
+                            safeText(openingBalanceDate, LocalDate.now().toString()),
+                            "Opening balance recorded when the account was created."
+                    );
+                }
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to add account", exception);
         }
+        recordSystemLog("Accounts", "Create Account", "INFO", "Account " + accountId + " created and committed.");
+        return accountId;
     }
 
     public void updateAccount(
@@ -1414,9 +4654,22 @@ public class DatabaseHandler {
             String bankProviderName,
             String accountNumber,
             double openingBalance,
+            String openingBalanceDate,
+            double minimumBalance,
+            String accountPurpose,
+            String branchName,
             String status,
             String notes
     ) {
+        rejectUserCreatedSavingsGroupAccountType(type);
+        try (Connection connection = connect()) {
+            if (isSystemAccount(connection, accountId)) {
+                throw new IllegalArgumentException("Internal Savings Group ledgers cannot be edited from Accounts. Use the Savings Groups module.");
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to validate account edit", exception);
+        }
+        validateProviderRequiredForAccountType(type, bankProviderName);
         String sql = """
                 UPDATE accounts
                 SET account_name = ?,
@@ -1425,25 +4678,68 @@ public class DatabaseHandler {
                     bank_provider_name = ?,
                     account_number = ?,
                     opening_balance = ?,
+                    opening_balance_date = ?,
+                    minimum_balance = ?,
+                    account_purpose = ?,
+                    branch_name = ?,
                     status = ?,
                     notes = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            Integer duplicateAccountId = findDuplicateAccountId(connection, accountId, name, type, bankProviderName, accountNumber);
+            if (duplicateAccountId != null) {
+                throw new IllegalArgumentException("Another active account already uses the same account identity.");
+            }
             statement.setString(1, name);
             statement.setString(2, type);
             statement.setString(3, currency);
             statement.setString(4, bankProviderName);
             statement.setString(5, accountNumber);
             statement.setDouble(6, openingBalance);
-            statement.setString(7, status);
-            statement.setString(8, notes);
-            statement.setInt(9, accountId);
-            statement.executeUpdate();
+            statement.setString(7, safeText(openingBalanceDate, ""));
+            statement.setDouble(8, Math.max(0, minimumBalance));
+            statement.setString(9, safeText(accountPurpose, ""));
+            statement.setString(10, safeText(branchName, ""));
+            statement.setString(11, normalizedAccountStatus(status));
+            statement.setString(12, notes);
+            statement.setInt(13, accountId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid account.");
+            }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to update account", exception);
         }
+        recordSystemLog("Accounts", "Update Account", "INFO", "Account " + accountId + " details updated.");
+    }
+
+    private void validateProviderRequiredForAccountType(String accountType, String bankProviderName) {
+        String lower = safeText(accountType, "").toLowerCase(Locale.ENGLISH);
+        boolean communitySavings = lower.contains("community savings");
+        boolean providerRequired = lower.contains("bank") || (lower.contains("savings") && !communitySavings);
+        if (providerRequired && safeText(bankProviderName, "").isBlank()) {
+            throw new IllegalArgumentException("Bank/provider is required for bank and savings accounts.");
+        }
+    }
+
+    private void rejectUserCreatedSavingsGroupAccountType(String accountType) {
+        if (isSavingsGroupAccountType(accountType)) {
+            throw new IllegalArgumentException("Bank Nkhonde and other savings groups must be created from the Savings Groups module.");
+        }
+    }
+
+    private boolean isSavingsGroupAccountType(String accountType) {
+        String clean = safeText(accountType, "").trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return clean.equals("COMMUNITY SAVINGS")
+                || clean.equals("COMMUNITY SAVINGS INTERNAL")
+                || clean.equals("COMMUNITY SAVINGS LOAN")
+                || clean.equals("BANK NKHONDE")
+                || clean.equals("CHIPELEGANYU")
+                || clean.equals("ZIPELEGANYU")
+                || clean.equals("VILLAGE SAVINGS")
+                || clean.equals("VILLAGE SAVINGS GROUP")
+                || clean.contains("SAVINGS GROUP");
     }
 
     public void activateAccount(int accountId) {
@@ -1452,6 +4748,10 @@ public class DatabaseHandler {
 
     public void deactivateAccount(int accountId) {
         updateAccountStatus(accountId, "INACTIVE");
+    }
+
+    public void updateAccountLifecycleStatus(int accountId, String status) {
+        updateAccountStatus(accountId, normalizedAccountStatus(status), false);
     }
 
     private void requireSuperAdminForPhysicalDeletion(String action) {
@@ -1472,30 +4772,4376 @@ public class DatabaseHandler {
     }
 
     public void deleteAccount(int accountId) {
-        requireSuperAdminForPhysicalDeletion("delete account " + accountId);
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement("DELETE FROM accounts WHERE id = ?")) {
-            statement.setInt(1, accountId);
-            statement.executeUpdate();
+        try (Connection connection = connect()) {
+            if (isSystemAccount(connection, accountId)) {
+                throw new IllegalArgumentException("Internal Savings Group ledgers cannot be deleted from Accounts. Archive the Savings Group instead.");
+            }
         } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to delete account. Accounts with transactions should be deactivated instead.", exception);
+            throw new IllegalStateException("Failed to validate account deletion", exception);
         }
+        softDeleteRecord("Account", accountId, "Super Administrator account deletion.");
     }
 
     private void updateAccountStatus(int accountId, String status) {
+        updateAccountStatus(accountId, status, false);
+    }
+
+    private void updateInternalAccountStatus(int accountId, String status) {
+        updateAccountStatus(accountId, status, true);
+    }
+
+    private void updateAccountStatus(int accountId, String status, boolean allowSystemAccount) {
+        String normalized = normalizedAccountStatus(status);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement("UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")) {
-            statement.setString(1, status);
+            if (!allowSystemAccount && isSystemAccount(connection, accountId)) {
+                throw new IllegalArgumentException("Internal Savings Group ledgers cannot be managed from Accounts. Use the Savings Groups module.");
+            }
+            if ("CLOSED".equals(normalized)) {
+                validateAccountCanClose(connection, accountId);
+            }
+            statement.setString(1, normalized);
             statement.setInt(2, accountId);
-            statement.executeUpdate();
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid account.");
+            }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to update account status", exception);
         }
+        recordSystemLog("Accounts", "Update Account Status", "INFO", "Account " + accountId + " status set to " + normalized + ".");
+    }
+
+    private boolean isSystemAccount(Connection connection, int accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COALESCE(is_system_account, 0)
+                FROM accounts
+                WHERE id = ? AND COALESCE(is_deleted, 0) = 0
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) == 1;
+            }
+        }
+    }
+
+    private void validateAccountCanClose(Connection connection, int accountId) throws SQLException {
+        String accountName = stringValue(connection, "SELECT account_name FROM accounts WHERE id = ? AND COALESCE(is_deleted, 0) = 0", accountId);
+        if (accountName.isBlank()) {
+            throw new IllegalArgumentException("Select a valid account.");
+        }
+        double balance = currentAccountBalance(connection, accountId);
+        if (Math.abs(balance) >= 0.005) {
+            String currency = stringValue(connection, "SELECT COALESCE(currency, ?) FROM accounts WHERE id = ?", DEFAULT_CURRENCY_CODE, accountId);
+            throw new IllegalArgumentException("This account still has " + formatMoneyForMessage(currency, balance)
+                    + ". Transfer or adjust the remaining balance before closing the account.");
+        }
+        if (!latestReconciliationIsClean(connection, accountId)) {
+            throw new IllegalArgumentException("Reconcile this account before closing it.");
+        }
+        int pendingDependencies = pendingAccountClosureDependencyCount(connection, accountId);
+        if (pendingDependencies > 0) {
+            throw new IllegalArgumentException("This account has " + pendingDependencies
+                    + " pending transfer, obligation, or savings dependency record(s). Resolve them before closing the account.");
+        }
+    }
+
+    private double currentAccountBalance(Connection connection, int accountId) throws SQLException {
+        return doubleValue(connection, """
+                SELECT (
+                    CASE
+                        WHEN a.opening_balance_date IS NULL
+                          OR trim(a.opening_balance_date) = ''
+                              OR date(a.opening_balance_date) <= date('now', 'localtime')
+                        THEN a.opening_balance
+                        ELSE 0
+                    END + COALESCE(SUM(
+                        CASE
+                            WHEN t.transaction_type = 'INCOME' THEN t.amount
+                            WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
+                            WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                            WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                            WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                            WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                            WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                            WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                            WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                            ELSE 0
+                        END
+                    ), 0)
+                ) AS current_balance
+                FROM accounts a
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
+                WHERE a.id = ?
+                  AND COALESCE(a.is_deleted, 0) = 0
+                GROUP BY a.id
+                """, accountId);
+    }
+
+    private boolean latestReconciliationIsClean(Connection connection, int accountId) throws SQLException {
+        String sql = """
+                SELECT difference, status
+                FROM account_reconciliations
+                WHERE account_id = ?
+                  AND COALESCE(is_deleted, 0) = 0
+                ORDER BY date(reconciliation_date) DESC, id DESC
+                LIMIT 1
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next()
+                        && Math.abs(resultSet.getDouble("difference")) < 0.005
+                        && "MATCHED".equalsIgnoreCase(safeText(resultSet.getString("status"), ""));
+            }
+        }
+    }
+
+    private int pendingAccountClosureDependencyCount(Connection connection, int accountId) throws SQLException {
+        int dependencies = 0;
+        if (tableExists(connection, "transfer_drafts")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM transfer_drafts
+                    WHERE (from_account_id = ? OR to_account_id = ?)
+                      AND upper(COALESCE(status, 'DRAFT')) IN ('DRAFT', 'PENDING', 'UPCOMING')
+                    """, accountId, accountId);
+        }
+        if (tableExists(connection, "scheduled_transfers")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM scheduled_transfers
+                    WHERE (from_account_id = ? OR to_account_id = ?)
+                      AND upper(COALESCE(status, 'UPCOMING')) NOT IN ('CANCELLED', 'COMPLETED', 'ARCHIVED')
+                    """, accountId, accountId);
+        }
+        if (tableExists(connection, "scheduled_obligations")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM scheduled_obligations
+                    WHERE account_id = ?
+                      AND upper(COALESCE(status, 'ACTIVE')) NOT IN ('CANCELLED', 'COMPLETED', 'ARCHIVED', 'INACTIVE')
+                    """, accountId);
+        }
+        if (tableExists(connection, "recurring_transaction_plans")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM recurring_transaction_plans
+                    WHERE account_id = ?
+                      AND upper(COALESCE(status, 'ACTIVE')) NOT IN ('CANCELLED', 'ARCHIVED', 'INACTIVE')
+                    """, accountId);
+        }
+        if (tableExists(connection, "community_savings_profiles")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM community_savings_profiles
+                    WHERE account_id = ?
+                      AND COALESCE(is_deleted, 0) = 0
+                      AND upper(COALESCE(status, 'ACTIVE')) NOT IN ('CLOSED', 'ARCHIVED', 'INACTIVE', 'CANCELLED')
+                    """, accountId);
+        }
+        if (tableExists(connection, "chipeleganyu_contributions")) {
+            dependencies += countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM chipeleganyu_contributions
+                    WHERE (account_id = ? OR source_account_id = ?)
+                      AND COALESCE(is_deleted, 0) = 0
+                      AND upper(COALESCE(status, 'UPCOMING')) IN (
+                          'UPCOMING',
+                          'DUE',
+                          'PARTIALLY_PAID',
+                          'MISSED',
+                          'OVERDUE',
+                          'FAILED_AUTOMATIC_DEDUCTION'
+                      )
+                    """, accountId, accountId);
+        }
+        return dependencies;
+    }
+
+    private String formatMoneyForMessage(String currency, double amount) {
+        return safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH)
+                + " "
+                + String.format(Locale.ENGLISH, "%,.2f", amount);
+    }
+
+    private String normalizedAccountStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "ACTIVE";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return switch (normalized) {
+            case "FROZEN" -> "FROZEN";
+            case "CLOSED" -> "CLOSED";
+            case "ARCHIVED" -> "ARCHIVED";
+            case "INACTIVE" -> "INACTIVE";
+            default -> "ACTIVE";
+        };
+    }
+
+    private String normalizedAccountCategory(String category, String accountType) {
+        String clean = category == null ? "" : category.trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if (Set.of("ASSET", "LIABILITY", "EQUITY").contains(clean)) {
+            return clean;
+        }
+        return accountCategoryForType(accountType);
+    }
+
+    private String accountCategoryForType(String accountType) {
+        String normalized = accountType == null ? "" : accountType.trim().toUpperCase(Locale.ENGLISH);
+        if (normalized.contains("LOAN") || normalized.contains("CREDIT")) {
+            if (normalized.contains("RECEIVABLE")) {
+                return "ASSET";
+            }
+            return "LIABILITY";
+        }
+        return "ASSET";
+    }
+
+    private String accountSubtypeForType(String accountType) {
+        String normalized = accountType == null ? "" : accountType.trim().toUpperCase(Locale.ENGLISH);
+        if (normalized.contains("BANK NKHONDE")) {
+            return "BANK_NKHONDE";
+        }
+        if (normalized.contains("CHIPELEGANYU") || normalized.contains("ZIPELEGANYU")) {
+            return "CHIPELEGANYU";
+        }
+        if (normalized.contains("COMMUNITY GROUP LOAN")) {
+            return "COMMUNITY_GROUP_LOAN";
+        }
+        if (normalized.contains("COMMUNITY SAVINGS LOAN")) {
+            return "COMMUNITY_SAVINGS_LOAN";
+        }
+        return "";
+    }
+
+    private void insertOpeningBalanceAuditTransaction(
+            Connection connection,
+            int accountId,
+            double amount,
+            String openingBalanceDate,
+            String description
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, transaction_type, transaction_purpose, transaction_status,
+                    amount, transaction_date, description, source, reference_number
+                ) VALUES (?, 'OPENING_BALANCE', 'OPENING_BALANCE', 'COMPLETED', ?, ?, ?, 'OPENING_BALANCE', ?)
+                """)) {
+            statement.setInt(1, accountId);
+            statement.setDouble(2, amount);
+            statement.setString(3, safeText(openingBalanceDate, LocalDate.now().toString()));
+            statement.setString(4, safeText(description, "Opening balance recorded."));
+            statement.setString(5, "OPENING-" + accountId);
+            statement.executeUpdate();
+        }
+    }
+
+    public int createCommunitySavingsGroup(CommunitySavingsGroupCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Savings group details are required.");
+        }
+        String groupName = requireText(command.groupName(), "Group name");
+        String groupType = normalizedCommunityGroupType(command.groupType());
+        LocalDate startDate = requireDate(command.startDate(), "Actual group start date");
+        LocalDate cycleStart = command.currentCycleStartDate() == null ? startDate : command.currentCycleStartDate();
+        LocalDate expectedEnd = command.expectedEndDate();
+        if (expectedEnd != null && expectedEnd.isBefore(startDate)) {
+            throw new IllegalArgumentException("Cycle end date cannot be before the actual group start date.");
+        }
+        String currency = requireIsoCurrencyCode(command.currency(), "Currency");
+        int userId = currentUserIdOrNull();
+        int workspaceId = currentWorkspaceIdOrNull();
+        int groupId;
+        int accountId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement groupInsert = connection.prepareStatement("""
+                    INSERT INTO community_savings_groups (
+                        user_id, workspace_id, group_name, group_type, currency, description,
+                        start_date, current_cycle_start_date, expected_end_date, historical_entry_start_date,
+                        contribution_frequency, standard_contribution_amount, membership_number,
+                        contact_person, contact_phone, meeting_frequency, meeting_day, location,
+                        social_fund_amount, penalty_rules, opening_balance, opening_social_fund_balance,
+                        existing_outstanding_loans, existing_member_contributions, existing_penalties,
+                        previous_payouts, previous_share_outs, reconciliation_date, source_document_notes,
+                        share_value, minimum_shares, maximum_shares, loan_interest_method, loan_interest_rate,
+                        payout_method, status, notes, created_by, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                setNullableInt(groupInsert, 1, userId);
+                setNullableInt(groupInsert, 2, workspaceId);
+                groupInsert.setString(3, groupName);
+                groupInsert.setString(4, groupType);
+                groupInsert.setString(5, currency);
+                groupInsert.setString(6, safeText(command.description(), ""));
+                groupInsert.setString(7, startDate.toString());
+                groupInsert.setString(8, cycleStart.toString());
+                groupInsert.setString(9, dateString(expectedEnd));
+                groupInsert.setString(10, dateString(command.historicalEntryStartDate()));
+                groupInsert.setString(11, safeText(command.contributionFrequency(), "Monthly"));
+                groupInsert.setDouble(12, Math.max(0, command.standardContributionAmount()));
+                groupInsert.setString(13, safeText(command.membershipNumber(), ""));
+                groupInsert.setString(14, safeText(command.contactPerson(), ""));
+                groupInsert.setString(15, safeText(command.contactPhone(), ""));
+                groupInsert.setString(16, safeText(command.meetingFrequency(), ""));
+                groupInsert.setString(17, safeText(command.meetingDay(), ""));
+                groupInsert.setString(18, safeText(command.location(), ""));
+                groupInsert.setDouble(19, Math.max(0, command.socialFundAmount()));
+                groupInsert.setString(20, safeText(command.penaltyRules(), ""));
+                groupInsert.setDouble(21, Math.max(0, command.openingBalance()));
+                groupInsert.setDouble(22, Math.max(0, command.openingSocialFundBalance()));
+                groupInsert.setDouble(23, Math.max(0, command.existingOutstandingLoans()));
+                groupInsert.setDouble(24, Math.max(0, command.existingMemberContributions()));
+                groupInsert.setDouble(25, Math.max(0, command.existingPenalties()));
+                groupInsert.setDouble(26, Math.max(0, command.previousPayouts()));
+                groupInsert.setDouble(27, Math.max(0, command.previousShareOuts()));
+                groupInsert.setString(28, dateString(command.reconciliationDate()));
+                groupInsert.setString(29, safeText(command.sourceDocumentNotes(), ""));
+                groupInsert.setDouble(30, Math.max(0, command.shareValue()));
+                groupInsert.setInt(31, Math.max(0, command.minimumShares()));
+                groupInsert.setInt(32, Math.max(0, command.maximumShares()));
+                groupInsert.setString(33, safeText(command.loanInterestMethod(), ""));
+                groupInsert.setDouble(34, Math.max(0, command.loanInterestRate()));
+                groupInsert.setString(35, safeText(command.payoutMethod(), ""));
+                groupInsert.setString(36, safeText(command.notes(), ""));
+                setNullableInt(groupInsert, 37, userId);
+                setNullableInt(groupInsert, 38, userId);
+                groupInsert.executeUpdate();
+                groupId = generatedId(connection, groupInsert);
+                accountId = insertClassifiedAccount(
+                        connection,
+                        groupName + " Savings",
+                        "COMMUNITY_SAVINGS",
+                        currency,
+                        groupType,
+                        "",
+                        Math.max(0, command.openingBalance()),
+                        startDate.toString(),
+                        0,
+                        "Community savings group linked account",
+                        "",
+                        "ACTIVE",
+                        "Linked Community Savings account for " + groupType + ".",
+                        "ASSET",
+                        communitySavingsSubtype(groupType),
+                        groupId
+                );
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE community_savings_groups
+                        SET linked_account_id = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+                        WHERE id = ?
+                        """)) {
+                    update.setInt(1, accountId);
+                    setNullableInt(update, 2, userId);
+                    update.setInt(3, groupId);
+                    update.executeUpdate();
+                }
+                recordSystemLog(
+                        connection,
+                        "Community Savings",
+                        "Group Created",
+                        "INFO",
+                        "Community Savings group " + groupId + " created as " + groupType
+                                + " with linked account " + accountId + "."
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to create community savings group", exception);
+        }
+        return groupId;
+    }
+
+    public int addCommunitySavingsMember(int groupId, String memberName, String memberNumber, String phoneNumber,
+                                         Integer payoutPosition, LocalDate joinedDate, String notes) {
+        CommunitySavingsGroupSummary group = requireCommunityGroup(groupId);
+        int userId = currentUserIdOrNull();
+        int memberId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO community_savings_members (
+                        group_id, member_name, member_number, phone_number, payout_position,
+                        membership_status, joined_date, notes, created_by, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                statement.setInt(1, groupId);
+                statement.setString(2, requireText(memberName, "Member name"));
+                statement.setString(3, cleanNullable(memberNumber));
+                statement.setString(4, cleanNullable(phoneNumber));
+                setNullableInt(statement, 5, payoutPosition);
+                statement.setString(6, dateString(joinedDate == null ? group.startDate() : joinedDate));
+                statement.setString(7, safeText(notes, ""));
+                setNullableInt(statement, 8, userId);
+                setNullableInt(statement, 9, userId);
+                statement.executeUpdate();
+                memberId = generatedId(connection, statement);
+                if ("Zipeleganyu".equalsIgnoreCase(group.groupType()) && payoutPosition != null && payoutPosition > 0) {
+                    upsertPayoutOrder(
+                            connection,
+                            groupId,
+                            memberId,
+                            payoutPosition,
+                            "",
+                            null,
+                            Math.max(0, group.standardContributionAmount()),
+                            "WAITING",
+                            "Initial payout order created with member."
+                    );
+                }
+                recordSystemLog(connection, "Community Savings", "Member Added", "INFO",
+                        "Member " + memberId + " added to group " + groupId + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to add community savings member", exception);
+        }
+        return memberId;
+    }
+
+    public List<CommunitySavingsGroupSummary> listCommunitySavingsGroups() {
+        return listCommunitySavingsGroups(null);
+    }
+
+    public List<CommunitySavingsGroupSummary> listCommunitySavingsGroups(String groupTypeFilter) {
+        List<CommunitySavingsGroupSummary> groups = new ArrayList<>();
+        String sql = """
+                SELECT g.id, COALESCE(g.linked_account_id, 0) AS linked_account_id, g.group_name,
+                       g.group_type, g.currency, g.status, g.start_date, g.expected_end_date,
+                       g.standard_contribution_amount, g.share_value,
+                       COALESCE(a.account_name, '') AS linked_account_name,
+                       COALESCE((
+                           CASE
+                        WHEN a.opening_balance_date IS NULL OR trim(a.opening_balance_date) = '' OR date(a.opening_balance_date) <= date('now', 'localtime')
+                               THEN a.opening_balance ELSE 0
+                           END + (
+                               SELECT COALESCE(SUM(CASE
+                                   WHEN t.transaction_type IN ('INCOME', 'ASSET_SALE') THEN t.amount
+                                   WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                                   WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                                   WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                                   WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                                   WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                                   ELSE 0
+                               END), 0)
+                               FROM valid_transactions t
+                               WHERE t.account_id = a.id
+                           )
+                       ), 0) AS account_balance,
+                       COALESCE((SELECT SUM(amount_paid) FROM community_contributions c WHERE c.group_id = g.id AND COALESCE(c.is_deleted, 0) = 0), 0) AS total_contributed,
+                       COALESCE(g.opening_social_fund_balance, 0)
+                         + COALESCE((SELECT SUM(social_fund_amount) FROM community_contributions c WHERE c.group_id = g.id AND COALESCE(c.is_deleted, 0) = 0), 0) AS social_fund_balance,
+                       COALESCE((SELECT SUM(l.principal_amount + l.expected_interest
+                                  - COALESCE((SELECT SUM(r.principal_paid + r.interest_paid) FROM community_loan_repayments r WHERE r.loan_id = l.id AND COALESCE(r.is_deleted, 0) = 0), 0))
+                                 FROM community_group_loans l
+                                 WHERE l.group_id = g.id AND COALESCE(l.is_deleted, 0) = 0 AND upper(l.status) NOT IN ('PAID', 'CANCELLED', 'WRITTEN_OFF')), 0) AS outstanding_loans,
+                       COALESCE(g.existing_penalties, 0)
+                         + COALESCE((SELECT SUM(penalty_amount) FROM community_contributions c WHERE c.group_id = g.id AND COALESCE(c.is_deleted, 0) = 0), 0)
+                         - COALESCE((SELECT SUM(penalty_paid) FROM community_loan_repayments r JOIN community_group_loans l ON l.id = r.loan_id WHERE l.group_id = g.id AND COALESCE(r.is_deleted, 0) = 0), 0) AS penalties_outstanding,
+                       COALESCE((SELECT SUM(actual_amount) FROM community_payouts p WHERE p.group_id = g.id AND COALESCE(p.is_deleted, 0) = 0), 0) AS payouts_total
+                FROM community_savings_groups g
+                LEFT JOIN accounts a ON a.id = g.linked_account_id
+                WHERE COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR g.group_type = ?)
+                ORDER BY CASE WHEN upper(g.status) = 'ACTIVE' THEN 0 ELSE 1 END, g.group_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            String filter = groupTypeFilter == null || groupTypeFilter.isBlank() ? null : normalizedCommunityGroupType(groupTypeFilter);
+            statement.setString(1, filter);
+            statement.setString(2, filter);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    groups.add(readCommunityGroupSummary(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community savings groups", exception);
+        }
+        return groups;
+    }
+
+    public CommunitySavingsOverview getCommunitySavingsOverview() {
+        List<CommunitySavingsGroupSummary> groups = listCommunitySavingsGroups();
+        LocalDate today = LocalDate.now();
+        int activeGroups = 0;
+        double totalContributed = 0;
+        double currentBalance = 0;
+        double bankBalance = 0;
+        double zipeBalance = 0;
+        double outstandingLoans = 0;
+        double penalties = 0;
+        double socialFund = 0;
+        double payouts = 0;
+        int nearCompletion = 0;
+        for (CommunitySavingsGroupSummary group : groups) {
+            if ("ACTIVE".equalsIgnoreCase(group.status())) {
+                activeGroups++;
+            }
+            totalContributed += group.totalContributed();
+            currentBalance += group.accountBalance();
+            outstandingLoans += group.outstandingLoans();
+            penalties += Math.max(0, group.penaltiesOutstanding());
+            socialFund += group.socialFundBalance();
+            payouts += group.payoutsTotal();
+            if ("Bank Nkhonde".equalsIgnoreCase(group.groupType())) {
+                bankBalance += group.accountBalance();
+            } else if ("Zipeleganyu".equalsIgnoreCase(group.groupType())) {
+                zipeBalance += group.accountBalance();
+            }
+            if (group.expectedEndDate() != null && !group.expectedEndDate().isBefore(today)
+                    && !group.expectedEndDate().isAfter(today.plusDays(45))) {
+                nearCompletion++;
+            }
+        }
+        int upcomingContributions = communityCount("""
+                SELECT COUNT(*)
+                FROM community_savings_groups
+                WHERE upper(status) = 'ACTIVE'
+                  AND expected_end_date IS NOT NULL
+                    AND date(expected_end_date) >= date('now', 'localtime')
+                """);
+        int upcomingPayouts = communityCount("""
+                SELECT COUNT(*)
+                FROM community_payout_orders
+                WHERE upper(status) IN ('WAITING', 'DUE', 'PARTIALLY_FUNDED', 'DELAYED')
+                  AND expected_date IS NOT NULL
+                    AND date(expected_date) BETWEEN date('now', 'localtime') AND date('now', 'localtime', '+30 day')
+                """);
+        int overdueRepayments = communityCount("""
+                SELECT COUNT(*)
+                FROM community_group_loans
+                WHERE upper(status) IN ('ACTIVE', 'PARTIALLY_PAID', 'OVERDUE')
+                  AND due_date IS NOT NULL
+                    AND date(due_date) < date('now', 'localtime')
+                """);
+        return new CommunitySavingsOverview(
+                activeGroups,
+                totalContributed,
+                currentBalance,
+                bankBalance,
+                zipeBalance,
+                outstandingLoans,
+                outstandingLoans,
+                overdueRepayments,
+                upcomingContributions,
+                upcomingPayouts,
+                payouts,
+                penalties,
+                socialFund,
+                nearCompletion
+        );
+    }
+
+    public List<CommunitySavingsMemberRecord> listCommunitySavingsMembers(int groupId) {
+        List<CommunitySavingsMemberRecord> members = new ArrayList<>();
+        String sql = """
+                SELECT id, group_id, member_name, member_number, phone_number, payout_position,
+                       membership_status, joined_date, notes
+                FROM community_savings_members
+                WHERE group_id = ?
+                ORDER BY COALESCE(payout_position, 999999), member_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, groupId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    members.add(new CommunitySavingsMemberRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("group_id"),
+                            resultSet.getString("member_name"),
+                            resultSet.getString("member_number"),
+                            resultSet.getString("phone_number"),
+                            resultSet.getInt("payout_position"),
+                            resultSet.getString("membership_status"),
+                            parseDateOrNull(resultSet.getString("joined_date")),
+                            resultSet.getString("notes")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community savings members", exception);
+        }
+        return members;
+    }
+
+    public int recordCommunityContribution(CommunitySavingsContributionCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Contribution details are required.");
+        }
+        CommunitySavingsGroupSummary group = requireCommunityGroup(command.groupId());
+        LocalDate transactionDate = validateCommunityTransactionDate(group, command.transactionDate(), true, command.backdateReason(), command.historicalConfirmation());
+        double shareAmount = Math.max(0, command.amountPaid());
+        if (command.numberOfShares() > 0 && command.shareValue() > 0) {
+            shareAmount = command.numberOfShares() * command.shareValue();
+        }
+        double socialFund = Math.max(0, command.socialFundAmount());
+        double penalty = Math.max(0, command.penaltyAmount());
+        double total = shareAmount + socialFund + penalty;
+        if (total <= 0) {
+            throw new IllegalArgumentException("Contribution total must be greater than zero.");
+        }
+        if (command.paymentAccountId() <= 0 || command.paymentAccountId() == group.linkedAccountId()) {
+            throw new IllegalArgumentException("Select a valid payment account different from the linked Community Savings account.");
+        }
+        boolean backdated = transactionDate.isBefore(LocalDate.now());
+        if (backdated && !command.historicalConfirmation()) {
+            throw new IllegalArgumentException("Confirm that this historical transaction is supported by group records.");
+        }
+        if (hasContributionDuplicate(command.groupId(), command.memberId(), command.contributionPeriod(), transactionDate, shareAmount, command.referenceNumber())
+                && safeText(command.backdateReason(), "").isBlank()) {
+            throw new IllegalArgumentException("A likely duplicate contribution exists. Enter a justification before saving another matching record.");
+        }
+        int userId = currentUserIdOrNull();
+        int contributionId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                int incomingId = insertCommunityTransferPair(
+                        connection,
+                        command.paymentAccountId(),
+                        group.linkedAccountId(),
+                        total,
+                        transactionDate,
+                        "Community savings contribution to " + group.groupName(),
+                        command.paymentMethod(),
+                        communityReference("CS-CON", command.referenceNumber())
+                );
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO community_contributions (
+                            group_id, member_id, account_id, linked_transaction_id, contribution_period, due_date,
+                            transaction_date, number_of_shares, share_value, expected_amount, amount_paid,
+                            social_fund_amount, penalty_amount, payment_method, reference_number, status, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, command.groupId());
+                    setNullableInt(statement, 2, command.memberId());
+                    statement.setInt(3, command.paymentAccountId());
+                    statement.setInt(4, incomingId);
+                    statement.setString(5, yearMonthString(command.contributionPeriod()));
+                    statement.setString(6, dateString(command.dueDate()));
+                    statement.setString(7, transactionDate.toString());
+                    statement.setDouble(8, Math.max(0, command.numberOfShares()));
+                    statement.setDouble(9, Math.max(0, command.shareValue()));
+                    statement.setDouble(10, Math.max(0, command.expectedAmount()));
+                    statement.setDouble(11, shareAmount);
+                    statement.setDouble(12, socialFund);
+                    statement.setDouble(13, penalty);
+                    statement.setString(14, cleanNullable(command.paymentMethod()));
+                    statement.setString(15, cleanNullable(command.referenceNumber()));
+                    statement.setString(16, normalizedContributionStatus(command.status()));
+                    statement.setString(17, safeText(command.notes(), ""));
+                    setNullableInt(statement, 18, userId);
+                    setNullableInt(statement, 19, userId);
+                    statement.setInt(20, backdated ? 1 : 0);
+                    statement.setString(21, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(22, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    contributionId = generatedId(connection, statement);
+                }
+                if (socialFund > 0) {
+                    insertCommunitySocialFund(connection, command.groupId(), command.memberId(), contributionId, command.paymentAccountId(), incomingId, transactionDate, socialFund, command.paymentMethod(), command.referenceNumber(), command.notes(), backdated, command.backdateReason(), userId);
+                }
+                if (penalty > 0) {
+                    insertCommunityPenalty(connection, command.groupId(), command.memberId(), contributionId, command.paymentAccountId(), incomingId, transactionDate, penalty, "Contribution penalty", command.paymentMethod(), command.referenceNumber(), "PAID", command.notes(), backdated, command.backdateReason(), userId);
+                }
+                recordSystemLog(connection, "Community Savings", "Contribution Recorded", "INFO",
+                        "Contribution " + contributionId + " recorded for group " + command.groupId()
+                                + " on " + transactionDate + (backdated ? " as a backdated entry." : "."));
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record community savings contribution", exception);
+        }
+        return contributionId;
+    }
+
+    public List<CommunitySavingsContributionRecord> listCommunityContributions(Integer groupId, int limit) {
+        List<CommunitySavingsContributionRecord> records = new ArrayList<>();
+        String sql = """
+                SELECT c.id, c.group_id, g.group_name, g.group_type, COALESCE(m.member_name, '') AS member_name,
+                       c.transaction_date, c.contribution_period, c.amount_paid, c.social_fund_amount,
+                       c.penalty_amount, c.status, c.is_backdated, c.reference_number
+                FROM community_contributions c
+                JOIN community_savings_groups g ON g.id = c.group_id
+                LEFT JOIN community_savings_members m ON m.id = c.member_id
+                WHERE COALESCE(c.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR c.group_id = ?)
+                ORDER BY date(c.transaction_date) DESC, c.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, groupId);
+            setNullableInt(statement, 2, groupId);
+            statement.setInt(3, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    double share = resultSet.getDouble("amount_paid");
+                    double social = resultSet.getDouble("social_fund_amount");
+                    double penalty = resultSet.getDouble("penalty_amount");
+                    records.add(new CommunitySavingsContributionRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("group_id"),
+                            resultSet.getString("group_name"),
+                            resultSet.getString("group_type"),
+                            resultSet.getString("member_name"),
+                            parseDateOrNull(resultSet.getString("transaction_date")),
+                            resultSet.getString("contribution_period"),
+                            share,
+                            social,
+                            penalty,
+                            share + social + penalty,
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1,
+                            resultSet.getString("reference_number")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community savings contributions", exception);
+        }
+        return records;
+    }
+
+    public int recordCommunityLoan(CommunitySavingsLoanCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Loan details are required.");
+        }
+        CommunitySavingsGroupSummary group = requireCommunityGroup(command.groupId());
+        if ("Zipeleganyu".equalsIgnoreCase(group.groupType())) {
+            throw new IllegalArgumentException("Zipeleganyu groups should use contribution and payout workflows unless this group is configured separately for lending.");
+        }
+        LocalDate loanDate = validateCommunityTransactionDate(group, command.loanDate(), true, command.backdateReason(), command.historicalConfirmation());
+        double principal = Math.max(0, command.principalAmount());
+        if (principal <= 0) {
+            throw new IllegalArgumentException("Loan principal must be greater than zero.");
+        }
+        String direction = normalizedCommunityLoanDirection(command.loanDirection());
+        boolean backdated = loanDate.isBefore(LocalDate.now());
+        if (backdated && !command.historicalConfirmation()) {
+            throw new IllegalArgumentException("Confirm that this historical loan is supported by group records.");
+        }
+        double interestRate = Math.max(0, command.interestRate());
+        double expectedInterest = "FLAT".equalsIgnoreCase(safeText(command.interestMethod(), "Flat"))
+                ? principal * interestRate / 100.0
+                : principal * interestRate / 100.0;
+        double totalPayable = principal + expectedInterest;
+        int userId = currentUserIdOrNull();
+        int loanId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Integer liabilityOrReceivableAccountId;
+                int linkedTransactionId;
+                if ("USER_BORROWED".equals(direction)) {
+                    if (command.accountId() == null || command.accountId() <= 0) {
+                        throw new IllegalArgumentException("Select the account that received the borrowed money.");
+                    }
+                    liabilityOrReceivableAccountId = findOrCreateCommunityLoanAccount(connection, group, true);
+                    linkedTransactionId = insertCommunityLoanLedgerRow(connection, command.accountId(), "MONEY_BORROWED", "OPEN", principal, loanDate,
+                            "Loan received from " + group.groupName(), command.notes(), "COMMUNITY-LOAN-" + command.groupId());
+                    insertCommunityLoanLedgerRow(connection, liabilityOrReceivableAccountId, "COMMUNITY_LOAN_LIABILITY_INCREASE", "OPEN", principal, loanDate,
+                            "Liability opened for loan from " + group.groupName(), command.notes(), "COMMUNITY-LOAN-" + command.groupId());
+                } else {
+                    liabilityOrReceivableAccountId = findOrCreateCommunityLoanAccount(connection, group, false);
+                    linkedTransactionId = insertCommunityLoanLedgerRow(connection, group.linkedAccountId(), "MONEY_LENT", "OPEN", principal, loanDate,
+                            "Group loan issued from " + group.groupName(), command.notes(), "COMMUNITY-LOAN-" + command.groupId());
+                    insertCommunityLoanLedgerRow(connection, liabilityOrReceivableAccountId, "COMMUNITY_LOAN_RECEIVABLE_INCREASE", "OPEN", principal, loanDate,
+                            "Receivable opened for group loan from " + group.groupName(), command.notes(), "COMMUNITY-LOAN-" + command.groupId());
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO community_group_loans (
+                            group_id, member_id, account_id, linked_transaction_id, liability_account_id,
+                            loan_direction, principal_amount, interest_method, interest_rate, expected_interest,
+                            total_payable, loan_date, first_repayment_date, due_date, purpose, status, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, command.groupId());
+                    setNullableInt(statement, 2, command.memberId());
+                    setNullableInt(statement, 3, command.accountId());
+                    statement.setInt(4, linkedTransactionId);
+                    setNullableInt(statement, 5, liabilityOrReceivableAccountId);
+                    statement.setString(6, direction);
+                    statement.setDouble(7, principal);
+                    statement.setString(8, safeText(command.interestMethod(), "Flat"));
+                    statement.setDouble(9, interestRate);
+                    statement.setDouble(10, expectedInterest);
+                    statement.setDouble(11, totalPayable);
+                    statement.setString(12, loanDate.toString());
+                    statement.setString(13, dateString(command.firstRepaymentDate()));
+                    statement.setString(14, dateString(command.dueDate()));
+                    statement.setString(15, safeText(command.purpose(), ""));
+                    statement.setString(16, normalizedCommunityLoanStatus(command.status()));
+                    statement.setString(17, safeText(command.notes(), ""));
+                    setNullableInt(statement, 18, userId);
+                    setNullableInt(statement, 19, userId);
+                    statement.setInt(20, backdated ? 1 : 0);
+                    statement.setString(21, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(22, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    loanId = generatedId(connection, statement);
+                }
+                refreshCommunityLoanStatus(connection, loanId);
+                recordSystemLog(connection, "Community Savings", "Loan Recorded", "INFO",
+                        "Community loan " + loanId + " recorded for group " + command.groupId()
+                                + ". Direction: " + direction + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record community savings loan", exception);
+        }
+        return loanId;
+    }
+
+    public int recordCommunityLoanRepayment(CommunitySavingsRepaymentCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Repayment details are required.");
+        }
+        CommunitySavingsLoanRecord loan = requireCommunityLoan(command.loanId());
+        CommunitySavingsGroupSummary group = requireCommunityGroup(loan.groupId());
+        LocalDate repaymentDate = validateCommunityTransactionDate(group, command.repaymentDate(), true, command.backdateReason(), command.historicalConfirmation());
+        double principal = Math.max(0, command.principalPaid());
+        double interest = Math.max(0, command.interestPaid());
+        double penalty = Math.max(0, command.penaltyPaid());
+        double total = principal + interest + penalty;
+        if (total <= 0) {
+            throw new IllegalArgumentException("Repayment total must be greater than zero.");
+        }
+        int repaymentAccountId = "USER_BORROWED".equalsIgnoreCase(loan.loanDirection())
+                ? command.paymentAccountId()
+                : group.linkedAccountId();
+        boolean backdated = repaymentDate.isBefore(LocalDate.now());
+        if (backdated && !command.historicalConfirmation()) {
+            throw new IllegalArgumentException("Confirm that this historical repayment is supported by group records.");
+        }
+        int userId = currentUserIdOrNull();
+        int repaymentId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Integer linkedLoanAccountId = communityLoanAccountId(connection, command.loanId());
+                int linkedTransactionId;
+                if ("USER_BORROWED".equalsIgnoreCase(loan.loanDirection())) {
+                    if (command.paymentAccountId() <= 0) {
+                        throw new IllegalArgumentException("Select the account used to make the repayment.");
+                    }
+                    linkedTransactionId = principal > 0
+                            ? insertCommunityLoanLedgerRow(connection, command.paymentAccountId(), "BORROWED_REPAID", "COMPLETED", principal, repaymentDate,
+                            "Community loan principal repayment", command.notes(), command.referenceNumber())
+                            : 0;
+                    if (linkedLoanAccountId != null && principal > 0) {
+                        insertCommunityLoanLedgerRow(connection, linkedLoanAccountId, "COMMUNITY_LOAN_LIABILITY_DECREASE", "COMPLETED", principal, repaymentDate,
+                                "Community loan liability reduced", command.notes(), command.referenceNumber());
+                    }
+                    if (interest > 0) {
+                        insertCommunityExpenseIncomeRow(connection, command.paymentAccountId(), "EXPENSE", "LOAN_INTEREST", interest, repaymentDate,
+                                "Community loan interest paid", "Community Loan Interest", command.paymentMethod(), command.referenceNumber());
+                    }
+                    if (penalty > 0) {
+                        insertCommunityExpenseIncomeRow(connection, command.paymentAccountId(), "EXPENSE", "LOAN_PENALTY", penalty, repaymentDate,
+                                "Community loan penalty paid", "Community Loan Penalty", command.paymentMethod(), command.referenceNumber());
+                    }
+                } else {
+                    linkedTransactionId = principal > 0
+                            ? insertCommunityLoanLedgerRow(connection, group.linkedAccountId(), "LENT_REPAID", "COMPLETED", principal, repaymentDate,
+                            "Community group loan principal collected", command.notes(), command.referenceNumber())
+                            : 0;
+                    if (linkedLoanAccountId != null && principal > 0) {
+                        insertCommunityLoanLedgerRow(connection, linkedLoanAccountId, "COMMUNITY_LOAN_RECEIVABLE_DECREASE", "COMPLETED", principal, repaymentDate,
+                                "Community loan receivable reduced", command.notes(), command.referenceNumber());
+                    }
+                    if (interest > 0) {
+                        insertCommunityExpenseIncomeRow(connection, group.linkedAccountId(), "INCOME", "LOAN_INTEREST", interest, repaymentDate,
+                                "Community loan interest received", "Community Loan Interest", command.paymentMethod(), command.referenceNumber());
+                    }
+                    if (penalty > 0) {
+                        insertCommunityExpenseIncomeRow(connection, group.linkedAccountId(), "INCOME", "LOAN_PENALTY", penalty, repaymentDate,
+                                "Community loan penalty received", "Community Loan Penalty", command.paymentMethod(), command.referenceNumber());
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO community_loan_repayments (
+                            loan_id, account_id, linked_transaction_id, repayment_date, principal_paid,
+                            interest_paid, penalty_paid, total_paid, payment_method, reference_number, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, command.loanId());
+                    setNullableInt(statement, 2, repaymentAccountId > 0 ? repaymentAccountId : null);
+                    if (linkedTransactionId > 0) {
+                        statement.setInt(3, linkedTransactionId);
+                    } else {
+                        statement.setNull(3, java.sql.Types.INTEGER);
+                    }
+                    statement.setString(4, repaymentDate.toString());
+                    statement.setDouble(5, principal);
+                    statement.setDouble(6, interest);
+                    statement.setDouble(7, penalty);
+                    statement.setDouble(8, total);
+                    statement.setString(9, cleanNullable(command.paymentMethod()));
+                    statement.setString(10, cleanNullable(command.referenceNumber()));
+                    statement.setString(11, safeText(command.notes(), ""));
+                    setNullableInt(statement, 12, userId);
+                    setNullableInt(statement, 13, userId);
+                    statement.setInt(14, backdated ? 1 : 0);
+                    statement.setString(15, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(16, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    repaymentId = generatedId(connection, statement);
+                }
+                refreshCommunityLoanStatus(connection, command.loanId());
+                recordSystemLog(connection, "Community Savings", "Loan Repayment Recorded", "INFO",
+                        "Community loan repayment " + repaymentId + " recorded for loan " + command.loanId() + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record community loan repayment", exception);
+        }
+        return repaymentId;
+    }
+
+    public List<CommunitySavingsLoanRecord> listCommunityLoans(Integer groupId, String groupTypeFilter, int limit) {
+        List<CommunitySavingsLoanRecord> loans = new ArrayList<>();
+        String sql = """
+                SELECT l.id, l.group_id, g.group_name, COALESCE(m.member_name, '') AS member_name,
+                       l.loan_direction, l.principal_amount, l.expected_interest,
+                       COALESCE((SELECT SUM(r.principal_paid) FROM community_loan_repayments r WHERE r.loan_id = l.id AND COALESCE(r.is_deleted, 0) = 0), 0) AS principal_paid,
+                       COALESCE((SELECT SUM(r.interest_paid) FROM community_loan_repayments r WHERE r.loan_id = l.id AND COALESCE(r.is_deleted, 0) = 0), 0) AS interest_paid,
+                       COALESCE((SELECT SUM(r.penalty_paid) FROM community_loan_repayments r WHERE r.loan_id = l.id AND COALESCE(r.is_deleted, 0) = 0), 0) AS penalty_paid,
+                       l.loan_date, l.due_date, l.status, l.is_backdated
+                FROM community_group_loans l
+                JOIN community_savings_groups g ON g.id = l.group_id
+                LEFT JOIN community_savings_members m ON m.id = l.member_id
+                WHERE COALESCE(l.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR l.group_id = ?)
+                  AND (? IS NULL OR g.group_type = ?)
+                ORDER BY date(l.loan_date) DESC, l.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            String groupType = groupTypeFilter == null || groupTypeFilter.isBlank() ? null : normalizedCommunityGroupType(groupTypeFilter);
+            setNullableInt(statement, 1, groupId);
+            setNullableInt(statement, 2, groupId);
+            statement.setString(3, groupType);
+            statement.setString(4, groupType);
+            statement.setInt(5, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    double principal = resultSet.getDouble("principal_amount");
+                    double expectedInterest = resultSet.getDouble("expected_interest");
+                    double paid = resultSet.getDouble("principal_paid") + resultSet.getDouble("interest_paid");
+                    loans.add(new CommunitySavingsLoanRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("group_id"),
+                            resultSet.getString("group_name"),
+                            resultSet.getString("member_name"),
+                            resultSet.getString("loan_direction"),
+                            principal,
+                            expectedInterest,
+                            resultSet.getDouble("principal_paid"),
+                            resultSet.getDouble("interest_paid"),
+                            resultSet.getDouble("penalty_paid"),
+                            Math.max(0, principal + expectedInterest - paid),
+                            parseDateOrNull(resultSet.getString("loan_date")),
+                            parseDateOrNull(resultSet.getString("due_date")),
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community savings loans", exception);
+        }
+        return loans;
+    }
+
+    public int recordCommunityPayout(CommunitySavingsPayoutCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Payout details are required.");
+        }
+        CommunitySavingsGroupSummary group = requireCommunityGroup(command.groupId());
+        LocalDate payoutDate = validateCommunityTransactionDate(group, command.payoutDate(), true, command.backdateReason(), command.historicalConfirmation());
+        double actual = Math.max(0, command.actualAmount());
+        double profit = Math.max(0, command.profitComponent());
+        double bonus = Math.max(0, command.bonusComponent());
+        double nonIncomeReturn = Math.max(0, actual - profit - bonus);
+        if (actual <= 0) {
+            throw new IllegalArgumentException("Payout amount must be greater than zero.");
+        }
+        if (command.receivingAccountId() <= 0 || command.receivingAccountId() == group.linkedAccountId()) {
+            throw new IllegalArgumentException("Select a valid receiving account different from the linked Community Savings account.");
+        }
+        boolean backdated = payoutDate.isBefore(LocalDate.now());
+        if (backdated && !command.historicalConfirmation()) {
+            throw new IllegalArgumentException("Confirm that this historical payout is supported by group records.");
+        }
+        int userId = currentUserIdOrNull();
+        int payoutId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                int linkedTransactionId = 0;
+                if (nonIncomeReturn > 0) {
+                    linkedTransactionId = insertCommunityTransferPair(
+                            connection,
+                            group.linkedAccountId(),
+                            command.receivingAccountId(),
+                            nonIncomeReturn,
+                            payoutDate,
+                            "Community savings return from " + group.groupName(),
+                            "",
+                            communityReference("CS-PAYOUT", command.referenceNumber())
+                    );
+                }
+                if (profit + bonus > 0) {
+                    int incomeId = insertCommunityExpenseIncomeRow(
+                            connection,
+                            command.receivingAccountId(),
+                            "INCOME",
+                            "NORMAL",
+                            profit + bonus,
+                            payoutDate,
+                            "Community savings profit or bonus from " + group.groupName(),
+                            "Community Savings Profit",
+                            "",
+                            command.referenceNumber()
+                    );
+                    if (linkedTransactionId == 0) {
+                        linkedTransactionId = incomeId;
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO community_payouts (
+                            group_id, member_id, payout_order_id, account_id, linked_transaction_id,
+                            expected_amount, actual_amount, own_contribution_component, profit_component,
+                            bonus_component, deduction_amount, payout_date, status, reference_number, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, command.groupId());
+                    setNullableInt(statement, 2, command.memberId());
+                    setNullableInt(statement, 3, command.payoutOrderId());
+                    statement.setInt(4, command.receivingAccountId());
+                    if (linkedTransactionId > 0) {
+                        statement.setInt(5, linkedTransactionId);
+                    } else {
+                        statement.setNull(5, java.sql.Types.INTEGER);
+                    }
+                    statement.setDouble(6, Math.max(0, command.expectedAmount()));
+                    statement.setDouble(7, actual);
+                    statement.setDouble(8, Math.max(0, command.ownContributionComponent()));
+                    statement.setDouble(9, profit);
+                    statement.setDouble(10, bonus);
+                    statement.setDouble(11, Math.max(0, command.deductionAmount()));
+                    statement.setString(12, payoutDate.toString());
+                    statement.setString(13, normalizedPayoutStatus(command.status()));
+                    statement.setString(14, cleanNullable(command.referenceNumber()));
+                    statement.setString(15, safeText(command.notes(), ""));
+                    setNullableInt(statement, 16, userId);
+                    setNullableInt(statement, 17, userId);
+                    statement.setInt(18, backdated ? 1 : 0);
+                    statement.setString(19, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(20, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    payoutId = generatedId(connection, statement);
+                }
+                if (command.payoutOrderId() != null) {
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE community_payout_orders
+                            SET actual_date = ?, actual_amount = ?, status = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+                            WHERE id = ?
+                            """)) {
+                        update.setString(1, payoutDate.toString());
+                        update.setDouble(2, actual);
+                        update.setString(3, normalizedPayoutOrderStatus(command.status()));
+                        setNullableInt(update, 4, userId);
+                        update.setInt(5, command.payoutOrderId());
+                        update.executeUpdate();
+                    }
+                }
+                recordSystemLog(connection, "Community Savings", "Payout Recorded", "INFO",
+                        "Community payout " + payoutId + " recorded for group " + command.groupId() + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record community savings payout", exception);
+        }
+        return payoutId;
+    }
+
+    public List<CommunityPayoutOrderRecord> listCommunityPayoutOrders(Integer groupId, int limit) {
+        List<CommunityPayoutOrderRecord> orders = new ArrayList<>();
+        String sql = """
+                SELECT o.id, o.group_id, COALESCE(m.member_name, '') AS member_name, o.position_number,
+                       o.expected_period, o.expected_date, o.expected_amount, o.actual_date,
+                       o.actual_amount, o.status, o.notes
+                FROM community_payout_orders o
+                LEFT JOIN community_savings_members m ON m.id = o.member_id
+                WHERE (? IS NULL OR o.group_id = ?)
+                ORDER BY o.position_number, o.id
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, groupId);
+            setNullableInt(statement, 2, groupId);
+            statement.setInt(3, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    orders.add(new CommunityPayoutOrderRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("group_id"),
+                            resultSet.getString("member_name"),
+                            resultSet.getInt("position_number"),
+                            resultSet.getString("expected_period"),
+                            parseDateOrNull(resultSet.getString("expected_date")),
+                            resultSet.getDouble("expected_amount"),
+                            parseDateOrNull(resultSet.getString("actual_date")),
+                            resultSet.getDouble("actual_amount"),
+                            resultSet.getString("status"),
+                            resultSet.getString("notes")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community payout orders", exception);
+        }
+        return orders;
+    }
+
+    public List<CommunitySavingsPayoutRecord> listCommunityPayouts(Integer groupId, int limit) {
+        List<CommunitySavingsPayoutRecord> payouts = new ArrayList<>();
+        String sql = """
+                SELECT p.id, p.group_id, g.group_name, COALESCE(m.member_name, '') AS member_name,
+                       o.position_number, p.payout_date, p.expected_amount, p.actual_amount,
+                       p.profit_component, p.deduction_amount, p.status, p.is_backdated
+                FROM community_payouts p
+                JOIN community_savings_groups g ON g.id = p.group_id
+                LEFT JOIN community_savings_members m ON m.id = p.member_id
+                LEFT JOIN community_payout_orders o ON o.id = p.payout_order_id
+                WHERE COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR p.group_id = ?)
+                ORDER BY date(p.payout_date) DESC, p.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, groupId);
+            setNullableInt(statement, 2, groupId);
+            statement.setInt(3, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    payouts.add(new CommunitySavingsPayoutRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("group_id"),
+                            resultSet.getString("group_name"),
+                            resultSet.getString("member_name"),
+                            nullableInt(resultSet, "position_number"),
+                            parseDateOrNull(resultSet.getString("payout_date")),
+                            resultSet.getDouble("expected_amount"),
+                            resultSet.getDouble("actual_amount"),
+                            resultSet.getDouble("profit_component"),
+                            resultSet.getDouble("deduction_amount"),
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community payouts", exception);
+        }
+        return payouts;
+    }
+
+    public SavingsGroupOverview getSavingsGroupOverview() {
+        List<SavingsGroupProfileRecord> profiles = listSavingsGroupProfiles();
+        LocalDate today = LocalDate.now();
+        String thisMonth = YearMonth.from(today).toString();
+        String thisYear = String.valueOf(today.getYear());
+        int active = 0;
+        double total = 0;
+        double month = 0;
+        double year = 0;
+        double expectedPayout = 0;
+        int nearingCompletion = 0;
+        String nextDue = "";
+        for (SavingsGroupProfileRecord profile : profiles) {
+            if ("ACTIVE".equalsIgnoreCase(profile.status())) {
+                active++;
+            }
+            total += profile.currentContributionBalance();
+            expectedPayout += Math.max(0, profile.expectedPayoutAmount());
+            if (profile.nextContributionDueDate() != null && !profile.nextContributionDueDate().isBlank()
+                    && (nextDue.isBlank() || profile.nextContributionDueDate().compareTo(nextDue) < 0)) {
+                nextDue = profile.nextContributionDueDate();
+            }
+            LocalDate cycleEnd = parseDateOrNull(profile.expectedCycleEndDate());
+            if (cycleEnd != null && !cycleEnd.isBefore(today) && !cycleEnd.isAfter(today.plusDays(45))) {
+                nearingCompletion++;
+            }
+        }
+        for (SavingsGroupTransactionRecord record : listSavingsGroupTransactions(null, 5000)) {
+            if (!"CONTRIBUTION".equals(record.transactionClassification())) {
+                continue;
+            }
+            if (record.transactionDate() != null && record.transactionDate().startsWith(thisMonth)) {
+                month += record.amount();
+            }
+            if (record.transactionDate() != null && record.transactionDate().startsWith(thisYear)) {
+                year += record.amount();
+            }
+        }
+        return new SavingsGroupOverview(active, total, month, year, nextDue, expectedPayout, nearingCompletion);
+    }
+
+    public List<SavingsGroupProfileRecord> listSavingsGroupProfiles() {
+        return listSavingsGroupProfiles(null);
+    }
+
+    public SavingsGroupProfileRecord getSavingsGroupProfile(int profileId) {
+        return listSavingsGroupProfiles(profileId).stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid Savings Group."));
+    }
+
+    private List<SavingsGroupProfileRecord> listSavingsGroupProfiles(Integer profileId) {
+        List<SavingsGroupProfileRecord> profiles = new ArrayList<>();
+        String sql = """
+                SELECT p.id, p.account_id, a.account_name, COALESCE(p.group_name, '') AS group_name,
+                       p.group_type, a.currency, COALESCE(p.membership_number, '') AS membership_number,
+                       p.contribution_frequency, p.expected_contribution_amount,
+                       COALESCE(p.contribution_day, '') AS contribution_day,
+                       p.actual_start_date, p.expected_cycle_end_date, p.expected_payout_date,
+                       p.expected_payout_amount, p.source_account_id,
+                       COALESCE(src.account_name, '') AS source_account_name,
+                       COALESCE(p.contact_name, '') AS contact_name,
+                       COALESCE(p.contact_phone, '') AS contact_phone,
+                       p.status, a.status AS account_status, COALESCE(p.notes, '') AS notes,
+                       COALESCE((
+                           SELECT SUM(st.original_savings_component)
+                           FROM community_savings_transactions st
+                           JOIN transactions tx ON tx.id = st.transaction_id
+                           WHERE st.account_id = p.account_id
+                             AND st.transaction_classification = 'CONTRIBUTION'
+                             AND COALESCE(st.is_deleted, 0) = 0
+                             AND COALESCE(tx.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                       ), 0) AS total_contributed,
+                       COALESCE((
+                           SELECT SUM(st.original_savings_component)
+                           FROM community_savings_transactions st
+                           JOIN transactions tx ON tx.id = st.transaction_id
+                           WHERE st.account_id = p.account_id
+                             AND st.transaction_classification = 'ORIGINAL_SAVINGS_RETURN'
+                             AND COALESCE(st.is_deleted, 0) = 0
+                             AND COALESCE(tx.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                       ), 0) AS amount_received_back,
+                       COALESCE((
+                           SELECT SUM(st.profit_component + st.bonus_component)
+                           FROM community_savings_transactions st
+                           JOIN transactions tx ON tx.id = st.transaction_id
+                           WHERE st.account_id = p.account_id
+                             AND st.transaction_classification IN ('PROFIT', 'BONUS')
+                             AND COALESCE(st.is_deleted, 0) = 0
+                             AND COALESCE(tx.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                       ), 0) AS profit_or_bonus_received,
+                       CASE
+                           WHEN a.opening_balance_date IS NULL
+                             OR trim(a.opening_balance_date) = ''
+                              OR date(a.opening_balance_date) <= date('now', 'localtime')
+                           THEN a.opening_balance
+                           ELSE 0
+                       END + COALESCE(SUM(
+                           CASE
+                              WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
+                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                              ELSE 0
+                           END
+                       ), 0) AS current_contribution_balance,
+                       p.created_at, p.updated_at
+                FROM community_savings_profiles p
+                JOIN accounts a ON a.id = p.account_id
+                LEFT JOIN accounts src ON src.id = p.source_account_id
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
+                WHERE COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(a.is_deleted, 0) = 0
+                  AND (? IS NULL OR p.id = ?)
+                GROUP BY p.id
+                ORDER BY a.account_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    profiles.add(savingsGroupProfileRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Savings Groups", exception);
+        }
+        return profiles;
+    }
+
+    public int saveSavingsGroupProfile(SavingsGroupProfileCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Savings Group details are required.");
+        }
+        String accountName = requireText(command.accountName(), "Account name");
+        String groupType = normalizedSavingsGroupType(command.groupType());
+        String currency = requireIsoCurrencyCode(command.currency(), "Currency");
+        LocalDate actualStartDate = requireDate(command.actualStartDate(), "Actual start date");
+        String frequency = normalizedSavingsFrequency(command.contributionFrequency());
+        if (command.expectedContributionAmount() <= 0) {
+            throw new IllegalArgumentException("Expected contribution amount must be greater than zero.");
+        }
+        if (command.sourceAccountId() == null || command.sourceAccountId() <= 0) {
+            throw new IllegalArgumentException("Select the usual source account for contributions.");
+        }
+        String profileStatus = normalizedSavingsProfileStatus(command.status());
+        int workspaceId = currentWorkspaceIdOrNull();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                int accountId = command.accountId() == null || command.accountId() <= 0
+                        ? insertSavingsGroupAccount(connection, accountName, currency, groupType, actualStartDate, command.notes())
+                        : command.accountId();
+                requireSavingsGroupAccount(connection, accountId);
+                requireActiveTransferAccount(connection, command.sourceAccountId(), "source");
+                if (accountId == command.sourceAccountId()) {
+                    throw new IllegalArgumentException("The source account must be different from the Savings Group ledger.");
+                }
+                if (command.profileId() == null) {
+                    try (PreparedStatement statement = connection.prepareStatement("""
+                            INSERT INTO community_savings_profiles (
+                                workspace_id, account_id, group_name, group_type, membership_number,
+                                contribution_frequency, expected_contribution_amount, contribution_day,
+                                actual_start_date, expected_cycle_end_date, expected_payout_date,
+                                expected_payout_amount, source_account_id, contact_name, contact_phone,
+                                status, notes, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            """, Statement.RETURN_GENERATED_KEYS)) {
+                        bindSavingsGroupProfile(statement, workspaceId, accountId, command, groupType, frequency, profileStatus, actualStartDate);
+                        statement.executeUpdate();
+                        int profileId = generatedId(connection, statement);
+                        recordSystemLog(connection, "Savings Groups", "Create Savings Group Account", "INFO",
+                                "Personal Savings Group profile " + profileId + " created with internal ledger " + accountId + ".");
+                        connection.commit();
+                        return profileId;
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE community_savings_profiles
+                        SET group_name = ?,
+                            group_type = ?,
+                            membership_number = ?,
+                            contribution_frequency = ?,
+                            expected_contribution_amount = ?,
+                            contribution_day = ?,
+                            actual_start_date = ?,
+                            expected_cycle_end_date = ?,
+                            expected_payout_date = ?,
+                            expected_payout_amount = ?,
+                            source_account_id = ?,
+                            contact_name = ?,
+                            contact_phone = ?,
+                            status = ?,
+                            notes = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND COALESCE(is_deleted, 0) = 0
+                        """)) {
+                    bindSavingsGroupProfileUpdate(statement, command, groupType, frequency, profileStatus, actualStartDate);
+                    statement.setInt(16, command.profileId());
+                    if (statement.executeUpdate() == 0) {
+                        throw new IllegalArgumentException("Select a valid Savings Group to update.");
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE accounts
+                        SET account_name = ?,
+                            currency = ?,
+                            account_type = 'COMMUNITY_SAVINGS_INTERNAL',
+                            account_category = 'ASSET',
+                            account_subtype = ?,
+                            bank_provider_name = ?,
+                            is_system_account = 1,
+                            account_purpose = 'Personal savings group contribution balance',
+                            notes = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, accountName);
+                    statement.setString(2, currency);
+                    statement.setString(3, savingsGroupSubtype(groupType));
+                    statement.setString(4, cleanNullable(command.groupName()));
+                    statement.setString(5, safeText(command.notes(), ""));
+                    statement.setInt(6, accountId);
+                    statement.executeUpdate();
+                }
+                recordSystemLog(connection, "Savings Groups", "Update Savings Group Account", "INFO",
+                        "Personal Savings Group profile " + command.profileId() + " updated.");
+                connection.commit();
+                return command.profileId();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save Savings Group", exception);
+        }
+    }
+
+    public SavingsGroupRuleRecord getSavingsGroupRules(int profileId) {
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(profileId);
+        try (Connection connection = connect()) {
+            return getSavingsGroupRules(connection, profile);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load Savings Group rules", exception);
+        }
+    }
+
+    private SavingsGroupRuleRecord getSavingsGroupRules(Connection connection, SavingsGroupProfileRecord profile) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT profile_id, share_amount, required_shares_per_period, loan_interest_rate,
+                       automatic_contribution_enabled, automatic_start_date, automatic_end_date
+                FROM savings_group_profile_rules
+                WHERE profile_id = ?
+                """)) {
+            int profileId = profile.id();
+            statement.setInt(1, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return new SavingsGroupRuleRecord(
+                            resultSet.getInt("profile_id"),
+                            resultSet.getDouble("share_amount"),
+                            resultSet.getInt("required_shares_per_period"),
+                            resultSet.getDouble("loan_interest_rate"),
+                            resultSet.getInt("automatic_contribution_enabled") == 1,
+                            resultSet.getString("automatic_start_date"),
+                            resultSet.getString("automatic_end_date")
+                    );
+                }
+            }
+        }
+        double defaultShareAmount = isBankNkhondeGroupType(profile.groupType())
+                ? Math.max(0, profile.expectedContributionAmount())
+                : 0;
+        return new SavingsGroupRuleRecord(profile.id(), defaultShareAmount, defaultShareAmount > 0 ? 1 : 0,
+                0, false, null, null);
+    }
+
+    public void saveSavingsGroupRules(SavingsGroupRuleCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Savings Group rules are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        double shareAmount = Math.max(0, command.shareAmount());
+        int requiredShares = Math.max(0, command.requiredSharesPerPeriod());
+        double loanInterestRate = Math.max(0, command.loanInterestRate());
+        if (isBankNkhondeGroupType(profile.groupType()) && shareAmount <= 0) {
+            throw new IllegalArgumentException("Bank Nkhonde share amount must be greater than zero.");
+        }
+        if (isBankNkhondeGroupType(profile.groupType()) && requiredShares <= 0) {
+            throw new IllegalArgumentException("Required Bank Nkhonde shares must be greater than zero.");
+        }
+        if (command.automaticStartDate() != null && command.automaticEndDate() != null
+                && command.automaticEndDate().isBefore(command.automaticStartDate())) {
+            throw new IllegalArgumentException("Automatic contribution end date cannot be before the start date.");
+        }
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO savings_group_profile_rules (
+                         profile_id, share_amount, required_shares_per_period, loan_interest_rate,
+                         automatic_contribution_enabled, automatic_start_date, automatic_end_date, updated_at
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     ON CONFLICT(profile_id) DO UPDATE SET
+                         share_amount = excluded.share_amount,
+                         required_shares_per_period = excluded.required_shares_per_period,
+                         loan_interest_rate = excluded.loan_interest_rate,
+                         automatic_contribution_enabled = excluded.automatic_contribution_enabled,
+                         automatic_start_date = excluded.automatic_start_date,
+                         automatic_end_date = excluded.automatic_end_date,
+                         updated_at = CURRENT_TIMESTAMP
+                     """)) {
+            statement.setInt(1, command.profileId());
+            statement.setDouble(2, shareAmount);
+            statement.setInt(3, requiredShares);
+            statement.setDouble(4, loanInterestRate);
+            statement.setInt(5, command.automaticContributionEnabled() ? 1 : 0);
+            statement.setString(6, dateString(command.automaticStartDate()));
+            statement.setString(7, dateString(command.automaticEndDate()));
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save Savings Group rules", exception);
+        }
+    }
+
+    public int recordSavingsGroupContribution(SavingsGroupContributionCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Contribution details are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        LocalDate date = validateSavingsGroupDate(profile, command.transactionDate(), command.backdateReason(), command.historicalConfirmation());
+        YearMonth period = parseContributionPeriod(command.contributionPeriod());
+        if (command.amount() <= 0) {
+            throw new IllegalArgumentException("Contribution amount must be greater than zero.");
+        }
+        if (command.sourceAccountId() <= 0 || command.sourceAccountId() == profile.accountId()) {
+            throw new IllegalArgumentException("Select a real source account different from the Savings Group ledger.");
+        }
+        boolean duplicate = hasSavingsContributionDuplicate(profile.accountId(), period.toString(), date, command.amount(), command.referenceNumber());
+        if (duplicate && (!UserSession.isSuperAdmin() || safeText(command.backdateReason(), "").isBlank())) {
+            throw new IllegalArgumentException("A similar contribution already exists. Correct the record or ask a Super Administrator to continue with a reason.");
+        }
+        boolean backdated = date.isBefore(LocalDate.now());
+        String reference = savingsGroupReference("SG-CON", command.referenceNumber());
+        int incomingId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Account source = accountSnapshot(command.sourceAccountId());
+                requireActiveTransferAccount(source, "source");
+                Account ledger = internalAccountSnapshot(profile.accountId());
+                requireActiveTransferAccount(ledger, "Savings Group ledger");
+                if (!backdated && source.getCurrentBalance() + 0.005 < command.amount()) {
+                    throw new IllegalArgumentException("The source account does not have enough available funds for this contribution.");
+                }
+                int outgoingId = insertTransferRow(connection, command.sourceAccountId(), null, "TRANSFER_OUT", command.amount(),
+                        date, "Savings Group contribution to " + profile.accountName(), command.paymentMethod(), reference);
+                incomingId = insertTransferRow(connection, profile.accountId(), outgoingId, "TRANSFER_IN", command.amount(),
+                        date, "Savings Group contribution from " + source.getAccountName(), command.paymentMethod(), reference);
+                try (PreparedStatement update = connection.prepareStatement("UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
+                    update.setInt(1, incomingId);
+                    update.setInt(2, outgoingId);
+                    update.executeUpdate();
+                }
+                insertSavingsGroupTransactionMetadata(connection, currentWorkspaceIdOrNull(), profile.accountId(), incomingId,
+                        period.toString(), "CONTRIBUTION", command.amount(), 0, 0, 0, backdated, command.backdateReason());
+                if (isChipeleganyuGroupType(profile.groupType())) {
+                    applyChipeleganyuPaymentToSchedule(
+                            connection,
+                            profile,
+                            period,
+                            date,
+                            majorToMinor(command.amount(), profile.currency()),
+                            command.sourceAccountId(),
+                            incomingId,
+                            command.notes()
+                    );
+                } else if (isBankNkhondeGroupType(profile.groupType())) {
+                    applyBankNkhondeSharePaymentToSchedule(
+                            connection,
+                            profile,
+                            period,
+                            date,
+                            command.amount(),
+                            command.sourceAccountId(),
+                            incomingId,
+                            command.notes()
+                    );
+                }
+                recordSystemLog(connection, "Savings Groups", "Contribution Recorded", "INFO",
+                        "Personal Savings Group contribution " + incomingId + " recorded for account " + profile.accountId()
+                                + " and period " + period + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record Savings Group contribution", exception);
+        }
+        return incomingId;
+    }
+
+    public int ensureChipeleganyuContributionSchedule(int profileId) {
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(profileId);
+        requireChipeleganyuProfile(profile);
+        if (!"Monthly".equalsIgnoreCase(profile.contributionFrequency())) {
+            throw new IllegalArgumentException("Chipeleganyu contribution schedule generation requires Monthly frequency.");
+        }
+        LocalDate start = parseDateOrNull(profile.actualStartDate());
+        LocalDate end = parseDateOrNull(profile.expectedCycleEndDate());
+        if (start == null || end == null) {
+            throw new IllegalArgumentException("Set the Chipeleganyu start date and cycle end date before building the monthly schedule.");
+        }
+        if (end.isBefore(start)) {
+            throw new IllegalArgumentException("Chipeleganyu cycle end date cannot be before the start date.");
+        }
+        YearMonth startMonth = YearMonth.from(start);
+        YearMonth endMonth = YearMonth.from(end);
+        if (startMonth.plusMonths(120).isBefore(endMonth)) {
+            throw new IllegalArgumentException("Chipeleganyu schedule is limited to 120 monthly installments.");
+        }
+        long expectedAmountMinor = majorToMinor(profile.expectedContributionAmount(), profile.currency());
+        if (expectedAmountMinor <= 0) {
+            throw new IllegalArgumentException("Set a positive monthly contribution amount before building the schedule.");
+        }
+        int dueDay = contributionDayOfMonth(profile.contributionDay(), start.getDayOfMonth());
+        int created = 0;
+        int workspaceId = currentWorkspaceIdOrNull();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                for (YearMonth period = startMonth; !period.isAfter(endMonth); period = period.plusMonths(1)) {
+                    LocalDate dueDate = period.atDay(Math.min(dueDay, period.lengthOfMonth()));
+                    String status = statusForDueDate(dueDate).name();
+                    try (PreparedStatement insert = connection.prepareStatement("""
+                            INSERT OR IGNORE INTO chipeleganyu_contributions (
+                                workspace_id, profile_id, account_id, contribution_period, due_date,
+                                expected_amount_minor, amount_paid_minor, source_account_id, status, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
+                            """)) {
+                        insert.setInt(1, workspaceId);
+                        insert.setInt(2, profile.id());
+                        insert.setInt(3, profile.accountId());
+                        insert.setString(4, period.toString());
+                        insert.setString(5, dueDate.toString());
+                        insert.setLong(6, expectedAmountMinor);
+                        setNullableInt(insert, 7, profile.sourceAccountId());
+                        insert.setString(8, status);
+                        created += insert.executeUpdate();
+                    }
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE chipeleganyu_contributions
+                            SET due_date = ?,
+                                expected_amount_minor = ?,
+                                source_account_id = ?,
+                                status = CASE
+                                    WHEN status IN ('UPCOMING', 'DUE', 'OVERDUE') THEN ?
+                                    ELSE status
+                                END,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE profile_id = ?
+                              AND contribution_period = ?
+                              AND amount_paid_minor = 0
+                              AND status IN ('UPCOMING', 'DUE', 'OVERDUE', 'FAILED_AUTOMATIC_DEDUCTION')
+                              AND COALESCE(is_deleted, 0) = 0
+                            """)) {
+                        update.setString(1, dueDate.toString());
+                        update.setLong(2, expectedAmountMinor);
+                        setNullableInt(update, 3, profile.sourceAccountId());
+                        update.setString(4, status);
+                        update.setInt(5, profile.id());
+                        update.setString(6, period.toString());
+                        update.executeUpdate();
+                    }
+                }
+                recordSystemLog(connection, "Savings Groups", "Chipeleganyu Schedule Built", "INFO",
+                        "Chipeleganyu profile " + profile.id() + " schedule checked. New installments: " + created + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to build Chipeleganyu contribution schedule", exception);
+        }
+        return created;
+    }
+
+    public List<ChipeleganyuContributionRecord> listChipeleganyuContributions(Integer profileId) {
+        List<ChipeleganyuContributionRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT c.id, c.profile_id, c.account_id, a.account_name, c.contribution_period,
+                       a.currency, c.due_date, c.expected_amount_minor, c.amount_paid_minor,
+                       c.payment_date, c.source_account_id, COALESCE(src.account_name, '') AS source_account_name,
+                       c.transaction_id, c.status, c.missed_reason, c.may_be_paid_later,
+                       COALESCE(c.notes, '') AS notes, c.confirmation_date, c.created_at, c.updated_at
+                FROM chipeleganyu_contributions c
+                JOIN community_savings_profiles p ON p.id = c.profile_id
+                JOIN accounts a ON a.id = c.account_id
+                LEFT JOIN accounts src ON src.id = c.source_account_id
+                WHERE COALESCE(c.is_deleted, 0) = 0
+                  AND COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(a.is_deleted, 0) = 0
+                  AND p.group_type IN ('Chipeleganyu', 'Zipeleganyu')
+                  AND (? IS NULL OR c.profile_id = ?)
+                ORDER BY c.contribution_period
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(chipeleganyuContributionRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Chipeleganyu contributions", exception);
+        }
+        return rows;
+    }
+
+    public int markChipeleganyuContributionMissed(MarkChipeleganyuMissedContributionCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Missed-contribution details are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        requireChipeleganyuProfile(profile);
+        YearMonth period = parseContributionPeriod(command.contributionPeriod());
+        LocalDate dueDate = requireDate(command.dueDate(), "Contribution due date");
+        LocalDate confirmationDate = requireDate(command.confirmationDate(), "Confirmation date");
+        if (confirmationDate.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException("Confirmation date cannot be in the future.");
+        }
+        if (command.expectedAmountMinor() <= 0) {
+            throw new IllegalArgumentException("Expected contribution amount must be greater than zero.");
+        }
+        String reason = ChipeleganyuMissedReason.fromDatabaseValue(command.reason()).name();
+        int userId = currentUserIdOrNull();
+        int contributionId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                ChipeleganyuContributionRecord existing = findChipeleganyuContribution(connection, profile.id(), period.toString());
+                if (existing == null) {
+                    contributionId = insertMissedChipeleganyuContribution(connection, profile, period, dueDate,
+                            command.expectedAmountMinor(), reason, command.mayBePaidLater(), command.notes(), confirmationDate, userId);
+                } else {
+                    ChipeleganyuContributionStatus status = ChipeleganyuContributionStatus.fromDatabaseValue(existing.status());
+                    if (!status.canBecomeMissedWithoutReversal(existing.amountPaidMinor(), existing.transactionId())) {
+                        throw new IllegalArgumentException("This contribution already has posted money movement. Reverse the posted transaction before marking it as not contributed.");
+                    }
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE chipeleganyu_contributions
+                            SET expected_amount_minor = ?,
+                                amount_paid_minor = 0,
+                                payment_date = NULL,
+                                source_account_id = COALESCE(source_account_id, ?),
+                                transaction_id = NULL,
+                                status = 'MISSED',
+                                missed_reason = ?,
+                                may_be_paid_later = ?,
+                                notes = ?,
+                                confirmation_date = ?,
+                                confirmed_by = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """)) {
+                        update.setLong(1, command.expectedAmountMinor());
+                        setNullableInt(update, 2, profile.sourceAccountId());
+                        update.setString(3, reason);
+                        update.setInt(4, command.mayBePaidLater() ? 1 : 0);
+                        update.setString(5, safeText(command.notes(), ""));
+                        update.setString(6, confirmationDate.toString());
+                        setNullableInt(update, 7, userId);
+                        update.setInt(8, existing.id());
+                        update.executeUpdate();
+                    }
+                    contributionId = existing.id();
+                }
+                recordSystemLog(connection, "Savings Groups", "Chipeleganyu Contribution Missed", "WARNING",
+                        "Chipeleganyu profile " + profile.id() + " period " + period + " marked MISSED. Reason: " + reason + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark Chipeleganyu contribution as missed", exception);
+        }
+        return contributionId;
+    }
+
+    public int settleChipeleganyuContribution(SettleChipeleganyuContributionCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Settlement details are required.");
+        }
+        ChipeleganyuContributionRecord contribution = getChipeleganyuContribution(command.contributionId());
+        ChipeleganyuContributionStatus status = ChipeleganyuContributionStatus.fromDatabaseValue(contribution.status());
+        if (status == ChipeleganyuContributionStatus.WAIVED || status == ChipeleganyuContributionStatus.CANCELLED) {
+            throw new IllegalArgumentException("Waived or cancelled Chipeleganyu contributions cannot be settled.");
+        }
+        long outstanding = Math.max(0, contribution.expectedAmountMinor() - contribution.amountPaidMinor());
+        if (outstanding <= 0 || status == ChipeleganyuContributionStatus.PAID) {
+            throw new IllegalArgumentException("This Chipeleganyu contribution is already fully paid.");
+        }
+        if (command.amountPaidMinor() <= 0 || command.amountPaidMinor() > outstanding) {
+            throw new IllegalArgumentException("Settlement amount must be greater than zero and not exceed the outstanding contribution.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(contribution.profileId());
+        long expectedAfterPayment = contribution.amountPaidMinor() + command.amountPaidMinor();
+        String settlementNote = "Settlement of Chipeleganyu contribution " + contribution.contributionPeriod()
+                + optionalSuffix(". Notes: ", command.notes());
+        int transactionId = recordSavingsGroupContribution(new SavingsGroupContributionCommand(
+                profile.id(),
+                requireDate(command.paymentDate(), "Payment date"),
+                contribution.contributionPeriod(),
+                minorToMajorDouble(command.amountPaidMinor(), profile.currency()),
+                command.sourceAccountId(),
+                command.paymentMethod(),
+                command.referenceNumber(),
+                settlementNote,
+                command.backdateReason(),
+                command.historicalConfirmation()
+        ));
+        recordSystemLog("Savings Groups", "Chipeleganyu Contribution Settled", "INFO",
+                "Chipeleganyu contribution " + contribution.id() + " settled through transaction " + transactionId
+                        + ". New expected paid minor amount: " + expectedAfterPayment + ".");
+        return transactionId;
+    }
+
+    public void recordChipeleganyuAutomaticDeductionFailure(int contributionId, String notes) {
+        ChipeleganyuContributionRecord contribution = getChipeleganyuContribution(contributionId);
+        ChipeleganyuContributionStatus status = ChipeleganyuContributionStatus.fromDatabaseValue(contribution.status());
+        if (status.blocksAutomaticDeduction()) {
+            return;
+        }
+        if (contribution.amountPaidMinor() > 0 || contribution.transactionId() != null) {
+            throw new IllegalArgumentException("A contribution with posted money movement cannot be marked as failed automatic deduction.");
+        }
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE chipeleganyu_contributions
+                     SET status = 'FAILED_AUTOMATIC_DEDUCTION',
+                         notes = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setString(1, safeText(notes, ""));
+            statement.setInt(2, contributionId);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record Chipeleganyu automatic deduction failure", exception);
+        }
+        recordSystemLog("Savings Groups", "Chipeleganyu Automatic Deduction Failed", "WARNING",
+                "Chipeleganyu contribution " + contributionId + " marked FAILED_AUTOMATIC_DEDUCTION.");
+    }
+
+    public boolean shouldAttemptChipeleganyuAutomaticDeduction(int contributionId) {
+        ChipeleganyuContributionRecord contribution = getChipeleganyuContribution(contributionId);
+        ChipeleganyuContributionStatus status = ChipeleganyuContributionStatus.fromDatabaseValue(contribution.status());
+        return !status.blocksAutomaticDeduction();
+    }
+
+    public ChipeleganyuContributionRecord getChipeleganyuContribution(int contributionId) {
+        String sql = """
+                SELECT c.id, c.profile_id, c.account_id, a.account_name, c.contribution_period,
+                       a.currency, c.due_date, c.expected_amount_minor, c.amount_paid_minor,
+                       c.payment_date, c.source_account_id, COALESCE(src.account_name, '') AS source_account_name,
+                       c.transaction_id, c.status, c.missed_reason, c.may_be_paid_later,
+                       COALESCE(c.notes, '') AS notes, c.confirmation_date, c.created_at, c.updated_at
+                FROM chipeleganyu_contributions c
+                JOIN community_savings_profiles p ON p.id = c.profile_id
+                JOIN accounts a ON a.id = c.account_id
+                LEFT JOIN accounts src ON src.id = c.source_account_id
+                WHERE c.id = ?
+                  AND COALESCE(c.is_deleted, 0) = 0
+                  AND COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(a.is_deleted, 0) = 0
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, contributionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return chipeleganyuContributionRecord(resultSet);
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load Chipeleganyu contribution", exception);
+        }
+        throw new IllegalArgumentException("Select a valid Chipeleganyu contribution.");
+    }
+
+    private ChipeleganyuContributionRecord findChipeleganyuContribution(Connection connection, int profileId, String contributionPeriod) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT c.id, c.profile_id, c.account_id, a.account_name, a.currency, c.contribution_period,
+                       c.due_date, c.expected_amount_minor, c.amount_paid_minor,
+                       c.payment_date, c.source_account_id, COALESCE(src.account_name, '') AS source_account_name,
+                       c.transaction_id, c.status, c.missed_reason, c.may_be_paid_later,
+                       COALESCE(c.notes, '') AS notes, c.confirmation_date, c.created_at, c.updated_at
+                FROM chipeleganyu_contributions c
+                JOIN accounts a ON a.id = c.account_id
+                LEFT JOIN accounts src ON src.id = c.source_account_id
+                WHERE c.profile_id = ?
+                  AND c.contribution_period = ?
+                  AND COALESCE(c.is_deleted, 0) = 0
+                """)) {
+            statement.setInt(1, profileId);
+            statement.setString(2, contributionPeriod);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? chipeleganyuContributionRecord(resultSet) : null;
+            }
+        }
+    }
+
+    private ChipeleganyuContributionRecord chipeleganyuContributionRecord(ResultSet resultSet) throws SQLException {
+        long expected = resultSet.getLong("expected_amount_minor");
+        long paid = resultSet.getLong("amount_paid_minor");
+        return new ChipeleganyuContributionRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("profile_id"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("currency"),
+                resultSet.getString("contribution_period"),
+                resultSet.getString("due_date"),
+                expected,
+                paid,
+                Math.max(0, expected - paid),
+                resultSet.getString("payment_date"),
+                nullableInt(resultSet, "source_account_id"),
+                resultSet.getString("source_account_name"),
+                nullableInt(resultSet, "transaction_id"),
+                resultSet.getString("status"),
+                resultSet.getString("missed_reason"),
+                resultSet.getInt("may_be_paid_later") == 1,
+                resultSet.getString("notes"),
+                resultSet.getString("confirmation_date"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private int insertMissedChipeleganyuContribution(Connection connection, SavingsGroupProfileRecord profile,
+                                                     YearMonth period, LocalDate dueDate, long expectedAmountMinor,
+                                                     String reason, boolean mayBePaidLater, String notes,
+                                                     LocalDate confirmationDate, int userId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO chipeleganyu_contributions (
+                    workspace_id, profile_id, account_id, contribution_period, due_date,
+                    expected_amount_minor, amount_paid_minor, source_account_id, status,
+                    missed_reason, may_be_paid_later, notes, confirmation_date, confirmed_by, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'MISSED', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, currentWorkspaceIdOrNull());
+            statement.setInt(2, profile.id());
+            statement.setInt(3, profile.accountId());
+            statement.setString(4, period.toString());
+            statement.setString(5, dueDate.toString());
+            statement.setLong(6, expectedAmountMinor);
+            setNullableInt(statement, 7, profile.sourceAccountId());
+            statement.setString(8, reason);
+            statement.setInt(9, mayBePaidLater ? 1 : 0);
+            statement.setString(10, safeText(notes, ""));
+            statement.setString(11, confirmationDate.toString());
+            setNullableInt(statement, 12, userId);
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private void applyChipeleganyuPaymentToSchedule(Connection connection, SavingsGroupProfileRecord profile,
+                                                    YearMonth period, LocalDate paymentDate, long amountPaidMinor,
+                                                    int sourceAccountId, int transactionId, String notes) throws SQLException {
+        if (amountPaidMinor <= 0) {
+            throw new IllegalArgumentException("Chipeleganyu contribution amount must be greater than zero.");
+        }
+        long expectedAmountMinor = majorToMinor(profile.expectedContributionAmount(), profile.currency());
+        ChipeleganyuContributionRecord existing = findChipeleganyuContribution(connection, profile.id(), period.toString());
+        if (existing == null) {
+            LocalDate dueDate = dueDateForPeriod(profile, period);
+            long expected = Math.max(expectedAmountMinor, amountPaidMinor);
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO chipeleganyu_contributions (
+                        workspace_id, profile_id, account_id, contribution_period, due_date,
+                        expected_amount_minor, amount_paid_minor, payment_date, source_account_id,
+                        transaction_id, status, notes, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """)) {
+                insert.setInt(1, currentWorkspaceIdOrNull());
+                insert.setInt(2, profile.id());
+                insert.setInt(3, profile.accountId());
+                insert.setString(4, period.toString());
+                insert.setString(5, dueDate.toString());
+                insert.setLong(6, expected);
+                insert.setLong(7, amountPaidMinor);
+                insert.setString(8, paymentDate.toString());
+                insert.setInt(9, sourceAccountId);
+                insert.setInt(10, transactionId);
+                insert.setString(11, amountPaidMinor >= expected ? "PAID" : "PARTIALLY_PAID");
+                insert.setString(12, safeText(notes, ""));
+                insert.executeUpdate();
+            }
+            return;
+        }
+        ChipeleganyuContributionStatus currentStatus = ChipeleganyuContributionStatus.fromDatabaseValue(existing.status());
+        if (currentStatus == ChipeleganyuContributionStatus.WAIVED || currentStatus == ChipeleganyuContributionStatus.CANCELLED) {
+            throw new IllegalArgumentException("Waived or cancelled Chipeleganyu contributions cannot receive payments.");
+        }
+        long expected = Math.max(existing.expectedAmountMinor(), expectedAmountMinor);
+        long newPaid = Math.addExact(existing.amountPaidMinor(), amountPaidMinor);
+        if (newPaid > expected) {
+            throw new IllegalArgumentException("This payment exceeds the expected Chipeleganyu contribution for " + period + ".");
+        }
+        String newStatus = newPaid >= expected ? "PAID" : "PARTIALLY_PAID";
+        try (PreparedStatement update = connection.prepareStatement("""
+                UPDATE chipeleganyu_contributions
+                SET expected_amount_minor = ?,
+                    amount_paid_minor = ?,
+                    payment_date = ?,
+                    source_account_id = ?,
+                    transaction_id = ?,
+                    status = ?,
+                    notes = CASE
+                        WHEN ? = '' THEN notes
+                        WHEN notes IS NULL OR trim(notes) = '' THEN ?
+                        ELSE notes || char(10) || ?
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            update.setLong(1, expected);
+            update.setLong(2, newPaid);
+            update.setString(3, paymentDate.toString());
+            update.setInt(4, sourceAccountId);
+            update.setInt(5, transactionId);
+            update.setString(6, newStatus);
+            String cleanNotes = safeText(notes, "");
+            update.setString(7, cleanNotes);
+            update.setString(8, cleanNotes);
+            update.setString(9, cleanNotes);
+            update.setInt(10, existing.id());
+            update.executeUpdate();
+        }
+    }
+
+    public int ensureBankNkhondeShareSchedule(int profileId) {
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(profileId);
+        requireBankNkhondeProfile(profile);
+        if (!"Monthly".equalsIgnoreCase(profile.contributionFrequency())) {
+            throw new IllegalArgumentException("Bank Nkhonde share schedule generation requires Monthly frequency.");
+        }
+        LocalDate start = parseDateOrNull(profile.actualStartDate());
+        LocalDate end = parseDateOrNull(profile.expectedCycleEndDate());
+        if (start == null || end == null) {
+            throw new IllegalArgumentException("Set the Bank Nkhonde start date and end date before building the monthly share schedule.");
+        }
+        if (end.isBefore(start)) {
+            throw new IllegalArgumentException("Bank Nkhonde end date cannot be before the start date.");
+        }
+        YearMonth startMonth = YearMonth.from(start);
+        YearMonth endMonth = YearMonth.from(end);
+        if (startMonth.plusMonths(120).isBefore(endMonth)) {
+            throw new IllegalArgumentException("Bank Nkhonde share schedules are limited to 120 monthly periods.");
+        }
+        double expectedAmount = Math.max(0, profile.expectedContributionAmount());
+        if (expectedAmount <= 0) {
+            throw new IllegalArgumentException("Set a positive Bank Nkhonde monthly share requirement before building the schedule.");
+        }
+        int dueDay = contributionDayOfMonth(profile.contributionDay(), start.getDayOfMonth());
+        int created = 0;
+        int workspaceId = currentWorkspaceIdOrNull();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                for (YearMonth period = startMonth; !period.isAfter(endMonth); period = period.plusMonths(1)) {
+                    LocalDate dueDate = period.atDay(Math.min(dueDay, period.lengthOfMonth()));
+                    String status = bankNkhondeStatusForDueDate(dueDate);
+                    try (PreparedStatement insert = connection.prepareStatement("""
+                            INSERT OR IGNORE INTO bank_nkhonde_share_periods (
+                                workspace_id, profile_id, account_id, contribution_period, due_date,
+                                expected_amount, paid_amount, number_of_shares, source_account_id, status, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, CURRENT_TIMESTAMP)
+                            """)) {
+                        insert.setInt(1, workspaceId);
+                        insert.setInt(2, profile.id());
+                        insert.setInt(3, profile.accountId());
+                        insert.setString(4, period.toString());
+                        insert.setString(5, dueDate.toString());
+                        insert.setDouble(6, expectedAmount);
+                        setNullableInt(insert, 7, profile.sourceAccountId());
+                        insert.setString(8, status);
+                        created += insert.executeUpdate();
+                    }
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE bank_nkhonde_share_periods
+                            SET due_date = ?,
+                                expected_amount = ?,
+                                source_account_id = ?,
+                                status = CASE
+                                    WHEN status IN ('UPCOMING', 'DUE', 'OVERDUE') THEN ?
+                                    ELSE status
+                                END,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE profile_id = ?
+                              AND contribution_period = ?
+                              AND paid_amount = 0
+                              AND status IN ('UPCOMING', 'DUE', 'OVERDUE')
+                              AND COALESCE(is_deleted, 0) = 0
+                            """)) {
+                        update.setString(1, dueDate.toString());
+                        update.setDouble(2, expectedAmount);
+                        setNullableInt(update, 3, profile.sourceAccountId());
+                        update.setString(4, status);
+                        update.setInt(5, profile.id());
+                        update.setString(6, period.toString());
+                        update.executeUpdate();
+                    }
+                }
+                recordSystemLog(connection, "Savings Groups", "Bank Nkhonde Share Schedule Built", "INFO",
+                        "Bank Nkhonde profile " + profile.id() + " share schedule checked. New periods: " + created + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to build Bank Nkhonde share schedule", exception);
+        }
+        return created;
+    }
+
+    public List<BankNkhondeShareRecord> listBankNkhondeShares(Integer profileId) {
+        List<BankNkhondeShareRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT s.id, s.profile_id, s.account_id, a.account_name, a.currency,
+                       s.contribution_period, s.due_date, s.expected_amount, s.paid_amount,
+                       s.number_of_shares, s.payment_date, s.source_account_id,
+                       COALESCE(src.account_name, '') AS source_account_name,
+                       s.transaction_id, s.status, COALESCE(s.notes, '') AS notes,
+                       s.confirmation_date, s.created_at, s.updated_at
+                FROM bank_nkhonde_share_periods s
+                JOIN community_savings_profiles p ON p.id = s.profile_id
+                JOIN accounts a ON a.id = s.account_id
+                LEFT JOIN accounts src ON src.id = s.source_account_id
+                WHERE COALESCE(s.is_deleted, 0) = 0
+                  AND COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(a.is_deleted, 0) = 0
+                  AND lower(p.group_type) = 'bank nkhonde'
+                  AND (? IS NULL OR s.profile_id = ?)
+                ORDER BY s.contribution_period
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(bankNkhondeShareRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Bank Nkhonde shares", exception);
+        }
+        return rows;
+    }
+
+    public int markBankNkhondeShareMissed(MarkBankNkhondeShareMissedCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Missed share-period details are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        requireBankNkhondeProfile(profile);
+        YearMonth period = parseContributionPeriod(command.contributionPeriod());
+        LocalDate dueDate = requireDate(command.dueDate(), "Share due date");
+        LocalDate confirmationDate = requireDate(command.confirmationDate(), "Confirmation date");
+        if (confirmationDate.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException("Confirmation date cannot be in the future.");
+        }
+        double expected = Math.max(0, command.expectedAmount());
+        if (expected <= 0) {
+            expected = Math.max(0, profile.expectedContributionAmount());
+        }
+        if (expected <= 0) {
+            throw new IllegalArgumentException("Expected share amount must be greater than zero.");
+        }
+        int userId = currentUserIdOrNull();
+        int id;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                BankNkhondeShareRecord existing = findBankNkhondeShare(connection, profile.id(), period.toString());
+                if (existing != null && (existing.paidAmount() > 0 || existing.transactionId() != null)) {
+                    throw new IllegalArgumentException("This Bank Nkhonde share period already has posted money movement. Reverse it before marking the period missed.");
+                }
+                if (existing == null) {
+                    try (PreparedStatement insert = connection.prepareStatement("""
+                            INSERT INTO bank_nkhonde_share_periods (
+                                workspace_id, profile_id, account_id, contribution_period, due_date,
+                                expected_amount, paid_amount, number_of_shares, source_account_id, status,
+                                notes, confirmation_date, confirmed_by, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 'MISSED', ?, ?, ?, CURRENT_TIMESTAMP)
+                            """, Statement.RETURN_GENERATED_KEYS)) {
+                        insert.setInt(1, currentWorkspaceIdOrNull());
+                        insert.setInt(2, profile.id());
+                        insert.setInt(3, profile.accountId());
+                        insert.setString(4, period.toString());
+                        insert.setString(5, dueDate.toString());
+                        insert.setDouble(6, expected);
+                        setNullableInt(insert, 7, profile.sourceAccountId());
+                        insert.setString(8, safeText(command.notes(), ""));
+                        insert.setString(9, confirmationDate.toString());
+                        setNullableInt(insert, 10, userId);
+                        insert.executeUpdate();
+                        id = generatedId(connection, insert);
+                    }
+                } else {
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE bank_nkhonde_share_periods
+                            SET due_date = ?,
+                                expected_amount = ?,
+                                paid_amount = 0,
+                                number_of_shares = 0,
+                                payment_date = NULL,
+                                source_account_id = COALESCE(source_account_id, ?),
+                                transaction_id = NULL,
+                                status = 'MISSED',
+                                notes = ?,
+                                confirmation_date = ?,
+                                confirmed_by = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """)) {
+                        update.setString(1, dueDate.toString());
+                        update.setDouble(2, expected);
+                        setNullableInt(update, 3, profile.sourceAccountId());
+                        update.setString(4, safeText(command.notes(), ""));
+                        update.setString(5, confirmationDate.toString());
+                        setNullableInt(update, 6, userId);
+                        update.setInt(7, existing.id());
+                        update.executeUpdate();
+                    }
+                    id = existing.id();
+                }
+                recordSystemLog(connection, "Savings Groups", "Bank Nkhonde Share Missed", "WARNING",
+                        "Bank Nkhonde profile " + profile.id() + " period " + period + " marked MISSED.");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark Bank Nkhonde share period missed", exception);
+        }
+        return id;
+    }
+
+    public int recordBankNkhondeLoan(BankNkhondeLoanCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Bank Nkhonde loan details are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        requireBankNkhondeProfile(profile);
+        LocalDate loanDate = validateSavingsGroupDate(profile, command.loanDate(), command.backdateReason(), command.historicalConfirmation());
+        double principal = Math.max(0, command.principalAmount());
+        if (principal <= 0) {
+            throw new IllegalArgumentException("Loan principal must be greater than zero.");
+        }
+        double interestRate = Math.max(0, command.interestRate());
+        double interest = principal * interestRate / 100.0;
+        double totalDue = principal + interest;
+        if (command.receivingAccountId() <= 0 || command.receivingAccountId() == profile.accountId()) {
+            throw new IllegalArgumentException("Select the real account that received the loan money.");
+        }
+        boolean backdated = loanDate.isBefore(LocalDate.now());
+        int userId = currentUserIdOrNull();
+        int loanId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Account receiving = accountSnapshot(command.receivingAccountId());
+                requireActiveTransferAccount(receiving, "receiving");
+                String reference = savingsGroupReference("BN-LOAN", command.referenceNumber());
+                int linkedTransactionId = insertCommunityLoanLedgerRow(connection, command.receivingAccountId(), "MONEY_BORROWED", "OPEN",
+                        principal, loanDate, "Bank Nkhonde loan received from " + profile.accountName(), command.notes(), reference);
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO bank_nkhonde_loans (
+                            workspace_id, profile_id, receiving_account_id, linked_transaction_id,
+                            principal_amount, interest_rate, interest_amount, total_due,
+                            loan_date, due_date, reference_number, status, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, currentWorkspaceIdOrNull());
+                    statement.setInt(2, profile.id());
+                    statement.setInt(3, command.receivingAccountId());
+                    statement.setInt(4, linkedTransactionId);
+                    statement.setDouble(5, principal);
+                    statement.setDouble(6, interestRate);
+                    statement.setDouble(7, interest);
+                    statement.setDouble(8, totalDue);
+                    statement.setString(9, loanDate.toString());
+                    statement.setString(10, dateString(command.dueDate()));
+                    statement.setString(11, reference);
+                    statement.setString(12, safeText(command.notes(), ""));
+                    setNullableInt(statement, 13, userId);
+                    setNullableInt(statement, 14, userId);
+                    statement.setInt(15, backdated ? 1 : 0);
+                    statement.setString(16, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(17, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    loanId = generatedId(connection, statement);
+                }
+                refreshBankNkhondeLoanStatus(connection, loanId);
+                recordSystemLog(connection, "Savings Groups", "Bank Nkhonde Loan Recorded", "INFO",
+                        "Bank Nkhonde personal loan " + loanId + " recorded for profile " + profile.id() + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record Bank Nkhonde loan", exception);
+        }
+        return loanId;
+    }
+
+    public int recordBankNkhondeRepayment(BankNkhondeRepaymentCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Bank Nkhonde repayment details are required.");
+        }
+        BankNkhondeLoanRecord loan = getBankNkhondeLoan(command.loanId());
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(loan.profileId());
+        LocalDate repaymentDate = validateSavingsGroupDate(profile, command.repaymentDate(), command.backdateReason(), command.historicalConfirmation());
+        double principal = Math.max(0, command.principalComponent());
+        double interest = Math.max(0, command.interestComponent());
+        double total = principal + interest;
+        if (total <= 0) {
+            throw new IllegalArgumentException("Repayment amount must be greater than zero.");
+        }
+        if (total > loan.balance() + 0.005) {
+            throw new IllegalArgumentException("Repayment cannot exceed the outstanding Bank Nkhonde loan balance.");
+        }
+        if (command.sourceAccountId() <= 0 || command.sourceAccountId() == profile.accountId()) {
+            throw new IllegalArgumentException("Select the real account used for this repayment.");
+        }
+        boolean backdated = repaymentDate.isBefore(LocalDate.now());
+        int userId = currentUserIdOrNull();
+        int repaymentId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Account source = accountSnapshot(command.sourceAccountId());
+                requireActiveTransferAccount(source, "source");
+                if (!backdated && source.getCurrentBalance() + 0.005 < total) {
+                    throw new IllegalArgumentException("The source account does not have enough available funds for this repayment.");
+                }
+                String reference = savingsGroupReference("BN-REPAY", command.referenceNumber());
+                int linkedTransactionId = 0;
+                if (principal > 0) {
+                    linkedTransactionId = insertCommunityLoanLedgerRow(connection, command.sourceAccountId(), "BORROWED_REPAID", "COMPLETED",
+                            principal, repaymentDate, "Bank Nkhonde loan principal repayment", command.notes(), reference);
+                }
+                if (interest > 0) {
+                    int interestId = insertCommunityExpenseIncomeRow(connection, command.sourceAccountId(), "EXPENSE", "LOAN_INTEREST",
+                            interest, repaymentDate, "Bank Nkhonde loan interest paid", "Bank Nkhonde Interest",
+                            command.paymentMethod(), reference);
+                    if (linkedTransactionId == 0) {
+                        linkedTransactionId = interestId;
+                    }
+                }
+                double remaining = Math.max(0, loan.balance() - total);
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO bank_nkhonde_repayments (
+                            workspace_id, loan_id, source_account_id, linked_transaction_id, repayment_date,
+                            principal_component, interest_component, total_payment, remaining_balance,
+                            payment_method, reference_number, status, notes,
+                            created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, currentWorkspaceIdOrNull());
+                    statement.setInt(2, command.loanId());
+                    statement.setInt(3, command.sourceAccountId());
+                    setNullableInt(statement, 4, linkedTransactionId > 0 ? linkedTransactionId : null);
+                    statement.setString(5, repaymentDate.toString());
+                    statement.setDouble(6, principal);
+                    statement.setDouble(7, interest);
+                    statement.setDouble(8, total);
+                    statement.setDouble(9, remaining);
+                    statement.setString(10, cleanNullable(command.paymentMethod()));
+                    statement.setString(11, reference);
+                    statement.setString(12, safeText(command.notes(), ""));
+                    setNullableInt(statement, 13, userId);
+                    setNullableInt(statement, 14, userId);
+                    statement.setInt(15, backdated ? 1 : 0);
+                    statement.setString(16, backdated ? requireText(command.backdateReason(), "Reason for backdating") : cleanNullable(command.backdateReason()));
+                    statement.setInt(17, command.historicalConfirmation() ? 1 : 0);
+                    statement.executeUpdate();
+                    repaymentId = generatedId(connection, statement);
+                }
+                refreshBankNkhondeLoanStatus(connection, command.loanId());
+                recordSystemLog(connection, "Savings Groups", "Bank Nkhonde Repayment Recorded", "INFO",
+                        "Bank Nkhonde repayment " + repaymentId + " recorded for loan " + command.loanId() + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record Bank Nkhonde repayment", exception);
+        }
+        return repaymentId;
+    }
+
+    public List<BankNkhondeLoanRecord> listBankNkhondeLoans(Integer profileId) {
+        List<BankNkhondeLoanRecord> loans = new ArrayList<>();
+        String sql = """
+                SELECT l.id, l.profile_id, p.account_id, a.account_name, a.currency,
+                       l.principal_amount, l.interest_rate, l.interest_amount, l.total_due,
+                       COALESCE((SELECT SUM(r.total_payment)
+                                 FROM bank_nkhonde_repayments r
+                                 WHERE r.loan_id = l.id
+                                   AND COALESCE(r.is_deleted, 0) = 0
+                                   AND COALESCE(r.status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')), 0) AS amount_repaid,
+                       l.loan_date, l.due_date, l.receiving_account_id,
+                       COALESCE(rx.account_name, '') AS receiving_account_name,
+                       l.linked_transaction_id, l.reference_number, l.status, l.is_backdated,
+                       COALESCE(l.notes, '') AS notes, l.created_at, l.updated_at
+                FROM bank_nkhonde_loans l
+                JOIN community_savings_profiles p ON p.id = l.profile_id
+                JOIN accounts a ON a.id = p.account_id
+                LEFT JOIN accounts rx ON rx.id = l.receiving_account_id
+                WHERE COALESCE(l.is_deleted, 0) = 0
+                  AND COALESCE(p.is_deleted, 0) = 0
+                  AND lower(p.group_type) = 'bank nkhonde'
+                  AND (? IS NULL OR l.profile_id = ?)
+                ORDER BY date(l.loan_date) DESC, l.id DESC
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    loans.add(bankNkhondeLoanRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Bank Nkhonde loans", exception);
+        }
+        return loans;
+    }
+
+    public BankNkhondeLoanRecord getBankNkhondeLoan(int loanId) {
+        return listBankNkhondeLoans(null).stream()
+                .filter(loan -> loan.id() == loanId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid Bank Nkhonde loan."));
+    }
+
+    public List<BankNkhondeRepaymentRecord> listBankNkhondeRepayments(Integer profileId) {
+        List<BankNkhondeRepaymentRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT r.id, r.loan_id, l.profile_id, COALESCE(l.reference_number, 'Loan ' || l.id) AS loan_reference,
+                       r.repayment_date, r.principal_component, r.interest_component, r.total_payment,
+                       r.source_account_id, COALESCE(src.account_name, '') AS source_account_name,
+                       r.remaining_balance, r.linked_transaction_id, r.reference_number, r.status,
+                       r.is_backdated, COALESCE(r.notes, '') AS notes, r.created_at
+                FROM bank_nkhonde_repayments r
+                JOIN bank_nkhonde_loans l ON l.id = r.loan_id
+                LEFT JOIN accounts src ON src.id = r.source_account_id
+                WHERE COALESCE(r.is_deleted, 0) = 0
+                  AND COALESCE(l.is_deleted, 0) = 0
+                  AND (? IS NULL OR l.profile_id = ?)
+                ORDER BY date(r.repayment_date) DESC, r.id DESC
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new BankNkhondeRepaymentRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("loan_id"),
+                            resultSet.getInt("profile_id"),
+                            resultSet.getString("loan_reference"),
+                            parseDateOrNull(resultSet.getString("repayment_date")),
+                            resultSet.getDouble("principal_component"),
+                            resultSet.getDouble("interest_component"),
+                            resultSet.getDouble("total_payment"),
+                            nullableInt(resultSet, "source_account_id"),
+                            resultSet.getString("source_account_name"),
+                            resultSet.getDouble("remaining_balance"),
+                            nullableInt(resultSet, "linked_transaction_id"),
+                            resultSet.getString("reference_number"),
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1,
+                            resultSet.getString("notes"),
+                            resultSet.getString("created_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Bank Nkhonde repayments", exception);
+        }
+        return rows;
+    }
+
+    private void applyBankNkhondeSharePaymentToSchedule(Connection connection, SavingsGroupProfileRecord profile,
+                                                        YearMonth period, LocalDate paymentDate, double amountPaid,
+                                                        int sourceAccountId, int transactionId, String notes) throws SQLException {
+        if (amountPaid <= 0) {
+            throw new IllegalArgumentException("Bank Nkhonde share amount must be greater than zero.");
+        }
+        SavingsGroupRuleRecord rules = getSavingsGroupRules(connection, profile);
+        double expectedAmount = Math.max(profile.expectedContributionAmount(), amountPaid);
+        double shareAmount = rules.shareAmount() > 0 ? rules.shareAmount() : profile.expectedContributionAmount();
+        double numberOfShares = shareAmount <= 0 ? 0 : amountPaid / shareAmount;
+        BankNkhondeShareRecord existing = findBankNkhondeShare(connection, profile.id(), period.toString());
+        if (existing == null) {
+            LocalDate dueDate = dueDateForPeriod(profile, period);
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO bank_nkhonde_share_periods (
+                        workspace_id, profile_id, account_id, contribution_period, due_date,
+                        expected_amount, paid_amount, number_of_shares, payment_date, source_account_id,
+                        transaction_id, status, notes, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """)) {
+                insert.setInt(1, currentWorkspaceIdOrNull());
+                insert.setInt(2, profile.id());
+                insert.setInt(3, profile.accountId());
+                insert.setString(4, period.toString());
+                insert.setString(5, dueDate.toString());
+                insert.setDouble(6, expectedAmount);
+                insert.setDouble(7, amountPaid);
+                insert.setDouble(8, numberOfShares);
+                insert.setString(9, paymentDate.toString());
+                insert.setInt(10, sourceAccountId);
+                insert.setInt(11, transactionId);
+                insert.setString(12, amountPaid >= expectedAmount ? "PAID" : "PARTIAL");
+                insert.setString(13, safeText(notes, ""));
+                insert.executeUpdate();
+            }
+            return;
+        }
+        double newPaid = existing.paidAmount() + amountPaid;
+        double expected = Math.max(Math.max(existing.expectedAmount(), expectedAmount), newPaid);
+        String newStatus = newPaid >= expected ? "PAID" : "PARTIAL";
+        String cleanNotes = safeText(notes, "");
+        try (PreparedStatement update = connection.prepareStatement("""
+                UPDATE bank_nkhonde_share_periods
+                SET expected_amount = ?,
+                    paid_amount = ?,
+                    number_of_shares = ?,
+                    payment_date = ?,
+                    source_account_id = ?,
+                    transaction_id = ?,
+                    status = ?,
+                    notes = CASE
+                        WHEN ? = '' THEN notes
+                        WHEN notes IS NULL OR trim(notes) = '' THEN ?
+                        ELSE notes || char(10) || ?
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            update.setDouble(1, expected);
+            update.setDouble(2, newPaid);
+            update.setDouble(3, shareAmount <= 0 ? 0 : newPaid / shareAmount);
+            update.setString(4, paymentDate.toString());
+            update.setInt(5, sourceAccountId);
+            update.setInt(6, transactionId);
+            update.setString(7, newStatus);
+            update.setString(8, cleanNotes);
+            update.setString(9, cleanNotes);
+            update.setString(10, cleanNotes);
+            update.setInt(11, existing.id());
+            update.executeUpdate();
+        }
+    }
+
+    private BankNkhondeShareRecord findBankNkhondeShare(Connection connection, int profileId, String contributionPeriod) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT s.id, s.profile_id, s.account_id, a.account_name, a.currency,
+                       s.contribution_period, s.due_date, s.expected_amount, s.paid_amount,
+                       s.number_of_shares, s.payment_date, s.source_account_id,
+                       COALESCE(src.account_name, '') AS source_account_name,
+                       s.transaction_id, s.status, COALESCE(s.notes, '') AS notes,
+                       s.confirmation_date, s.created_at, s.updated_at
+                FROM bank_nkhonde_share_periods s
+                JOIN accounts a ON a.id = s.account_id
+                LEFT JOIN accounts src ON src.id = s.source_account_id
+                WHERE s.profile_id = ?
+                  AND s.contribution_period = ?
+                  AND COALESCE(s.is_deleted, 0) = 0
+                """)) {
+            statement.setInt(1, profileId);
+            statement.setString(2, contributionPeriod);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? bankNkhondeShareRecord(resultSet) : null;
+            }
+        }
+    }
+
+    private BankNkhondeShareRecord bankNkhondeShareRecord(ResultSet resultSet) throws SQLException {
+        return new BankNkhondeShareRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("profile_id"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("currency"),
+                resultSet.getString("contribution_period"),
+                resultSet.getString("due_date"),
+                resultSet.getDouble("expected_amount"),
+                resultSet.getDouble("paid_amount"),
+                resultSet.getDouble("number_of_shares"),
+                resultSet.getString("payment_date"),
+                nullableInt(resultSet, "source_account_id"),
+                resultSet.getString("source_account_name"),
+                nullableInt(resultSet, "transaction_id"),
+                resultSet.getString("status"),
+                resultSet.getString("notes"),
+                resultSet.getString("confirmation_date"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private BankNkhondeLoanRecord bankNkhondeLoanRecord(ResultSet resultSet) throws SQLException {
+        double totalDue = resultSet.getDouble("total_due");
+        double amountRepaid = resultSet.getDouble("amount_repaid");
+        return new BankNkhondeLoanRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("profile_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("currency"),
+                resultSet.getDouble("principal_amount"),
+                resultSet.getDouble("interest_rate"),
+                resultSet.getDouble("interest_amount"),
+                totalDue,
+                amountRepaid,
+                Math.max(0, totalDue - amountRepaid),
+                parseDateOrNull(resultSet.getString("loan_date")),
+                parseDateOrNull(resultSet.getString("due_date")),
+                nullableInt(resultSet, "receiving_account_id"),
+                resultSet.getString("receiving_account_name"),
+                nullableInt(resultSet, "linked_transaction_id"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("status"),
+                resultSet.getInt("is_backdated") == 1,
+                resultSet.getString("notes"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private void refreshBankNkhondeLoanStatus(Connection connection, int loanId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT l.total_due,
+                       COALESCE((SELECT SUM(r.total_payment)
+                                 FROM bank_nkhonde_repayments r
+                                 WHERE r.loan_id = l.id
+                                   AND COALESCE(r.is_deleted, 0) = 0
+                                   AND COALESCE(r.status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')), 0) AS paid,
+                       l.due_date
+                FROM bank_nkhonde_loans l
+                WHERE l.id = ?
+                """)) {
+            statement.setInt(1, loanId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid Bank Nkhonde loan.");
+                }
+                double totalDue = resultSet.getDouble("total_due");
+                double paid = resultSet.getDouble("paid");
+                LocalDate dueDate = parseDateOrNull(resultSet.getString("due_date"));
+                String status;
+                if (paid + 0.005 >= totalDue) {
+                    status = "PAID";
+                } else if (dueDate != null && dueDate.isBefore(LocalDate.now())) {
+                    status = "OVERDUE";
+                } else if (paid > 0) {
+                    status = "PARTIALLY_REPAID";
+                } else {
+                    status = "ACTIVE";
+                }
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE bank_nkhonde_loans
+                        SET status = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    update.setString(1, status);
+                    update.setInt(2, loanId);
+                    update.executeUpdate();
+                }
+            }
+        }
+    }
+
+    public int recordSavingsGroupPayout(SavingsGroupPayoutCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Payout details are required.");
+        }
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(command.profileId());
+        LocalDate date = validateSavingsGroupDate(profile, command.payoutDate(), command.backdateReason(), command.historicalConfirmation());
+        if (command.receivingAccountId() <= 0 || command.receivingAccountId() == profile.accountId()) {
+            throw new IllegalArgumentException("Select a real receiving account different from the Savings Group ledger.");
+        }
+        if (hasSavingsGroupPayout(profile.id())) {
+            throw new IllegalArgumentException("This Savings Group already has a confirmed payout or share-out. Use the correction workflow before posting another final receipt.");
+        }
+        double original = Math.max(0, command.originalSavingsComponent());
+        double profit = Math.max(0, command.profitComponent());
+        double bonus = Math.max(0, command.bonusComponent());
+        double deduction = Math.max(0, command.deductionAmount());
+        if (original + profit + bonus <= 0) {
+            throw new IllegalArgumentException("Enter the original savings, profit or bonus received.");
+        }
+        boolean backdated = date.isBefore(LocalDate.now());
+        String reference = savingsGroupReference("SG-PAY", command.referenceNumber());
+        int linkedId = 0;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Account receiving = accountSnapshot(command.receivingAccountId());
+                requireActiveTransferAccount(receiving, "receiving");
+                Account ledger = internalAccountSnapshot(profile.accountId());
+                requireActiveTransferAccount(ledger, "Savings Group ledger");
+                if (original > 0) {
+                    int outgoingId = insertTransferRow(connection, profile.accountId(), null, "TRANSFER_OUT", original,
+                            date, "Savings Group original savings returned", "", reference);
+                    int incomingId = insertTransferRow(connection, command.receivingAccountId(), outgoingId, "TRANSFER_IN", original,
+                            date, "Original savings returned from " + profile.accountName(), "", reference);
+                    try (PreparedStatement update = connection.prepareStatement("UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
+                        update.setInt(1, incomingId);
+                        update.setInt(2, outgoingId);
+                        update.executeUpdate();
+                    }
+                    insertSavingsGroupTransactionMetadata(connection, currentWorkspaceIdOrNull(), profile.accountId(), outgoingId,
+                            null, "ORIGINAL_SAVINGS_RETURN", original, 0, 0, deduction, backdated, command.backdateReason());
+                    linkedId = outgoingId;
+                }
+                if (profit > 0) {
+                    int incomeId = insertCommunityExpenseIncomeRow(connection, command.receivingAccountId(), "INCOME", "NORMAL",
+                            profit, date, "Savings Group profit from " + profile.accountName()
+                                    + optionalSuffix(". Notes: ", command.notes()),
+                            "Savings Group Profit", "", reference);
+                    insertSavingsGroupTransactionMetadata(connection, currentWorkspaceIdOrNull(), profile.accountId(), incomeId,
+                            null, "PROFIT", 0, profit, 0, 0, backdated, command.backdateReason());
+                    if (linkedId == 0) {
+                        linkedId = incomeId;
+                    }
+                }
+                if (bonus > 0) {
+                    int incomeId = insertCommunityExpenseIncomeRow(connection, command.receivingAccountId(), "INCOME", "NORMAL",
+                            bonus, date, "Savings Group bonus from " + profile.accountName()
+                                    + optionalSuffix(". Notes: ", command.notes()),
+                            "Savings Group Bonus", "", reference);
+                    insertSavingsGroupTransactionMetadata(connection, currentWorkspaceIdOrNull(), profile.accountId(), incomeId,
+                            null, "BONUS", 0, 0, bonus, 0, backdated, command.backdateReason());
+                    if (linkedId == 0) {
+                        linkedId = incomeId;
+                    }
+                }
+                recordSystemLog(connection, "Savings Groups", "Payout Recorded", "INFO",
+                        "Personal Savings Group payout recorded for account " + profile.accountId()
+                                + ". Original savings: " + original + "; Profit: " + profit + "; Bonus: " + bonus + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record Savings Group payout", exception);
+        }
+        return linkedId;
+    }
+
+    public boolean hasSavingsGroupPayout(int profileId) {
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(profileId);
+        String sql = """
+                SELECT COUNT(*)
+                FROM community_savings_transactions st
+                LEFT JOIN transactions tx ON tx.id = st.transaction_id
+                WHERE st.account_id = ?
+                  AND st.transaction_classification IN ('ORIGINAL_SAVINGS_RETURN', 'PROFIT', 'BONUS')
+                  AND COALESCE(st.is_deleted, 0) = 0
+                  AND COALESCE(tx.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, profile.accountId());
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check Savings Group payout status", exception);
+        }
+    }
+
+    public List<SavingsGroupTransactionRecord> listSavingsGroupTransactions(Integer profileId, int limit) {
+        List<SavingsGroupTransactionRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT st.id, st.account_id, a.account_name, p.group_type, st.transaction_id,
+                       tx.transaction_date, st.contribution_period, st.transaction_classification,
+                       CASE
+                         WHEN st.transaction_classification = 'CONTRIBUTION' THEN st.original_savings_component
+                         WHEN st.transaction_classification = 'ORIGINAL_SAVINGS_RETURN' THEN st.original_savings_component
+                         WHEN st.transaction_classification IN ('PROFIT', 'BONUS') THEN st.profit_component + st.bonus_component
+                         ELSE st.original_savings_component + st.profit_component + st.bonus_component
+                       END AS display_amount,
+                       COALESCE(counter.account_name, '') AS counter_account_name,
+                       tx.reference_number, st.created_at, COALESCE(tx.transaction_status, 'COMPLETED') AS status,
+                       st.is_backdated, tx.description
+                FROM community_savings_transactions st
+                JOIN community_savings_profiles p ON p.account_id = st.account_id
+                JOIN accounts a ON a.id = st.account_id
+                LEFT JOIN transactions tx ON tx.id = st.transaction_id
+                LEFT JOIN transactions related ON related.id = tx.related_transaction_id
+                LEFT JOIN accounts counter ON counter.id = COALESCE(related.account_id, tx.account_id)
+                WHERE COALESCE(st.is_deleted, 0) = 0
+                  AND COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(a.is_deleted, 0) = 0
+                  AND (? IS NULL OR p.id = ?)
+                ORDER BY date(tx.transaction_date) DESC, st.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, profileId);
+            setNullableInt(statement, 2, profileId);
+            statement.setInt(3, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new SavingsGroupTransactionRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("account_id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("group_type"),
+                            nullableInt(resultSet, "transaction_id"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("contribution_period"),
+                            resultSet.getString("transaction_classification"),
+                            resultSet.getDouble("display_amount"),
+                            resultSet.getString("counter_account_name"),
+                            resultSet.getString("reference_number"),
+                            resultSet.getString("created_at"),
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1,
+                            resultSet.getString("description")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list Savings Group history", exception);
+        }
+        return rows;
+    }
+
+    public boolean hasSavingsContributionDuplicate(int savingsAccountId, String contributionPeriod, LocalDate transactionDate,
+                                                   double amount, String referenceNumber) {
+        if (transactionDate == null || amount <= 0) {
+            return false;
+        }
+        String reference = safeText(referenceNumber, "");
+        String sql = """
+                SELECT COUNT(*)
+                FROM community_savings_transactions st
+                JOIN transactions tx ON tx.id = st.transaction_id
+                WHERE st.account_id = ?
+                  AND st.transaction_classification = 'CONTRIBUTION'
+                  AND st.contribution_period = ?
+                  AND tx.transaction_date = ?
+                  AND ABS(st.original_savings_component - ?) < 0.005
+                  AND COALESCE(st.is_deleted, 0) = 0
+                  AND COALESCE(tx.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                  AND (
+                        ? = ''
+                     OR lower(trim(COALESCE(tx.reference_number, ''))) = lower(?)
+                  )
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, savingsAccountId);
+            statement.setString(2, contributionPeriod);
+            statement.setString(3, transactionDate.toString());
+            statement.setDouble(4, amount);
+            statement.setString(5, reference);
+            statement.setString(6, reference);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check duplicate Savings Group contribution", exception);
+        }
+    }
+
+    public void updateSavingsGroupStatus(int profileId, String status) {
+        SavingsGroupProfileRecord profile = getSavingsGroupProfile(profileId);
+        String normalized = normalizedSavingsProfileStatus(status);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE community_savings_profiles
+                     SET status = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setString(1, normalized);
+            statement.setInt(2, profileId);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update Savings Group status", exception);
+        }
+        if ("ARCHIVED".equals(normalized) || "CLOSED".equals(normalized)) {
+            updateInternalAccountStatus(profile.accountId(), normalized);
+        } else if ("ACTIVE".equals(normalized)) {
+            updateInternalAccountStatus(profile.accountId(), "ACTIVE");
+        } else if ("PAUSED".equals(normalized)) {
+            updateInternalAccountStatus(profile.accountId(), "FROZEN");
+        }
+        recordSystemLog("Savings Groups", "Update Savings Group Status", "INFO",
+                "Savings Group profile " + profileId + " status set to " + normalized + ".");
+    }
+
+    private SavingsGroupProfileRecord savingsGroupProfileRecord(ResultSet resultSet) throws SQLException {
+        String nextDue = nextContributionDueDate(
+                parseDateOrNull(resultSet.getString("actual_start_date")),
+                parseDateOrNull(resultSet.getString("expected_cycle_end_date")),
+                resultSet.getString("contribution_frequency"),
+                resultSet.getString("contribution_day")
+        );
+        return new SavingsGroupProfileRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("group_name"),
+                resultSet.getString("group_type"),
+                resultSet.getString("currency"),
+                resultSet.getString("membership_number"),
+                resultSet.getString("contribution_frequency"),
+                resultSet.getDouble("expected_contribution_amount"),
+                resultSet.getString("contribution_day"),
+                resultSet.getString("actual_start_date"),
+                resultSet.getString("expected_cycle_end_date"),
+                resultSet.getString("expected_payout_date"),
+                resultSet.getDouble("expected_payout_amount"),
+                nullableInt(resultSet, "source_account_id"),
+                resultSet.getString("source_account_name"),
+                resultSet.getString("contact_name"),
+                resultSet.getString("contact_phone"),
+                resultSet.getString("status"),
+                resultSet.getString("account_status"),
+                resultSet.getString("notes"),
+                resultSet.getDouble("total_contributed"),
+                resultSet.getDouble("amount_received_back"),
+                resultSet.getDouble("profit_or_bonus_received"),
+                resultSet.getDouble("current_contribution_balance"),
+                nextDue,
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private int insertSavingsGroupAccount(Connection connection, String accountName, String currency, String groupType,
+                                          LocalDate actualStartDate, String notes) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO accounts (
+                    account_name, account_type, currency, bank_provider_name, account_number,
+                    opening_balance, opening_balance_date, minimum_balance, account_purpose, branch_name,
+                    account_category, account_subtype, community_group_id, is_system_account, status, notes, updated_at
+                ) VALUES (?, 'COMMUNITY_SAVINGS_INTERNAL', ?, ?, NULL, 0, ?, 0,
+                          'Personal savings group contribution balance', '', 'ASSET', ?, NULL, 1, 'ACTIVE', ?, CURRENT_TIMESTAMP)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, accountName);
+            statement.setString(2, currency);
+            statement.setString(3, groupType);
+            statement.setString(4, actualStartDate.toString());
+            statement.setString(5, savingsGroupSubtype(groupType));
+            statement.setString(6, safeText(notes, ""));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private void requireSavingsGroupAccount(Connection connection, int accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT account_type, account_category, status, COALESCE(is_system_account, 0) AS is_system_account
+                FROM accounts
+                WHERE id = ? AND COALESCE(is_deleted, 0) = 0
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid Community Savings account.");
+                }
+                String type = safeText(resultSet.getString("account_type"), "");
+                String category = safeText(resultSet.getString("account_category"), "ASSET");
+                if (!type.equalsIgnoreCase("Community Savings")
+                        && !type.equalsIgnoreCase("COMMUNITY_SAVINGS")
+                        && !type.equalsIgnoreCase("COMMUNITY_SAVINGS_INTERNAL")) {
+                    throw new IllegalArgumentException("The selected account is not a Community Savings account.");
+                }
+                if (!"ASSET".equalsIgnoreCase(category)) {
+                    throw new IllegalArgumentException("Community Savings must be an Asset account.");
+                }
+                if (resultSet.getInt("is_system_account") != 1) {
+                    try (PreparedStatement update = connection.prepareStatement("""
+                            UPDATE accounts
+                            SET is_system_account = 1,
+                                account_type = 'COMMUNITY_SAVINGS_INTERNAL',
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """)) {
+                        update.setInt(1, accountId);
+                        update.executeUpdate();
+                    }
+                }
+            }
+        }
+    }
+
+    private void bindSavingsGroupProfile(PreparedStatement statement, int workspaceId, int accountId,
+                                         SavingsGroupProfileCommand command, String groupType, String frequency,
+                                         String status, LocalDate actualStartDate) throws SQLException {
+        statement.setInt(1, workspaceId);
+        statement.setInt(2, accountId);
+        statement.setString(3, cleanNullable(command.groupName()));
+        statement.setString(4, groupType);
+        statement.setString(5, cleanNullable(command.membershipNumber()));
+        statement.setString(6, frequency);
+        statement.setDouble(7, Math.max(0, command.expectedContributionAmount()));
+        statement.setString(8, cleanNullable(command.contributionDay()));
+        statement.setString(9, actualStartDate.toString());
+        statement.setString(10, dateString(command.expectedCycleEndDate()));
+        statement.setString(11, dateString(command.expectedPayoutDate()));
+        statement.setDouble(12, Math.max(0, command.expectedPayoutAmount()));
+        setNullableInt(statement, 13, command.sourceAccountId());
+        statement.setString(14, cleanNullable(command.contactName()));
+        statement.setString(15, cleanNullable(command.contactPhone()));
+        statement.setString(16, status);
+        statement.setString(17, safeText(command.notes(), ""));
+    }
+
+    private void bindSavingsGroupProfileUpdate(PreparedStatement statement, SavingsGroupProfileCommand command,
+                                               String groupType, String frequency, String status,
+                                               LocalDate actualStartDate) throws SQLException {
+        statement.setString(1, cleanNullable(command.groupName()));
+        statement.setString(2, groupType);
+        statement.setString(3, cleanNullable(command.membershipNumber()));
+        statement.setString(4, frequency);
+        statement.setDouble(5, Math.max(0, command.expectedContributionAmount()));
+        statement.setString(6, cleanNullable(command.contributionDay()));
+        statement.setString(7, actualStartDate.toString());
+        statement.setString(8, dateString(command.expectedCycleEndDate()));
+        statement.setString(9, dateString(command.expectedPayoutDate()));
+        statement.setDouble(10, Math.max(0, command.expectedPayoutAmount()));
+        setNullableInt(statement, 11, command.sourceAccountId());
+        statement.setString(12, cleanNullable(command.contactName()));
+        statement.setString(13, cleanNullable(command.contactPhone()));
+        statement.setString(14, status);
+        statement.setString(15, safeText(command.notes(), ""));
+    }
+
+    private void insertSavingsGroupTransactionMetadata(Connection connection, int workspaceId, int accountId, int transactionId,
+                                                       String contributionPeriod, String classification, double original,
+                                                       double profit, double bonus, double deduction, boolean backdated,
+                                                       String backdateReason) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_savings_transactions (
+                    workspace_id, account_id, transaction_id, contribution_period, transaction_classification,
+                    original_savings_component, profit_component, bonus_component, deduction_amount,
+                    is_backdated, backdate_reason, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """)) {
+            statement.setInt(1, workspaceId);
+            statement.setInt(2, accountId);
+            statement.setInt(3, transactionId);
+            statement.setString(4, cleanNullable(contributionPeriod));
+            statement.setString(5, classification);
+            statement.setDouble(6, Math.max(0, original));
+            statement.setDouble(7, Math.max(0, profit));
+            statement.setDouble(8, Math.max(0, bonus));
+            statement.setDouble(9, Math.max(0, deduction));
+            statement.setInt(10, backdated ? 1 : 0);
+            statement.setString(11, backdated ? requireText(backdateReason, "Backdating reason") : cleanNullable(backdateReason));
+            statement.executeUpdate();
+        }
+    }
+
+    private LocalDate validateSavingsGroupDate(SavingsGroupProfileRecord profile, LocalDate date, String backdateReason,
+                                               boolean historicalConfirmation) {
+        LocalDate transactionDate = requireDate(date, "Transaction date");
+        LocalDate start = parseDateOrNull(profile.actualStartDate());
+        if (start != null && transactionDate.isBefore(start)) {
+            throw new IllegalArgumentException("Transaction date cannot be before the Savings Group's actual start date.");
+        }
+        if (transactionDate.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException("Completed Savings Group transactions cannot be dated in the future.");
+        }
+        if (Set.of("CLOSED", "ARCHIVED").contains(safeText(profile.status(), "").toUpperCase(Locale.ENGLISH))) {
+            throw new IllegalArgumentException("This Savings Group is " + profile.status() + " and cannot accept new transactions.");
+        }
+        if (transactionDate.isBefore(LocalDate.now()) && (!historicalConfirmation || safeText(backdateReason, "").isBlank())) {
+            throw new IllegalArgumentException("Backdated Savings Group records require a reason and historical-record confirmation.");
+        }
+        return transactionDate;
+    }
+
+    private YearMonth parseContributionPeriod(String value) {
+        try {
+            return YearMonth.parse(requireText(value, "Contribution period").trim());
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException("Contribution period must use yyyy-MM format.");
+        }
+    }
+
+    private String normalizedSavingsGroupType(String value) {
+        String clean = safeText(value, "").trim();
+        if (clean.equalsIgnoreCase("Bank Nkhonde")) {
+            return "Bank Nkhonde";
+        }
+        if (clean.equalsIgnoreCase("Chipeleganyu") || clean.equalsIgnoreCase("Zipeleganyu")) {
+            return "Chipeleganyu";
+        }
+        if (clean.equalsIgnoreCase("Village Savings") || clean.equalsIgnoreCase("Village Savings Group")) {
+            return "Village Savings";
+        }
+        if (clean.equalsIgnoreCase("Other") || clean.equalsIgnoreCase("Other Community Savings")) {
+            return "Other Community Savings";
+        }
+        throw new IllegalArgumentException("Select a Savings Group type.");
+    }
+
+    private String savingsGroupSubtype(String groupType) {
+        return switch (normalizedSavingsGroupType(groupType)) {
+            case "Bank Nkhonde" -> "BANK_NKHONDE";
+            case "Chipeleganyu" -> "CHIPELEGANYU";
+            case "Village Savings" -> "VILLAGE_SAVINGS";
+            default -> "OTHER_COMMUNITY_SAVINGS";
+        };
+    }
+
+    private void requireChipeleganyuProfile(SavingsGroupProfileRecord profile) {
+        if (profile == null || !isChipeleganyuGroupType(profile.groupType())) {
+            throw new IllegalArgumentException("Select a Chipeleganyu savings group profile.");
+        }
+    }
+
+    private boolean isChipeleganyuGroupType(String groupType) {
+        String clean = safeText(groupType, "").trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return "CHIPELEGANYU".equals(clean) || "ZIPELEGANYU".equals(clean);
+    }
+
+    private void requireBankNkhondeProfile(SavingsGroupProfileRecord profile) {
+        if (profile == null || !isBankNkhondeGroupType(profile.groupType())) {
+            throw new IllegalArgumentException("Select a Bank Nkhonde savings group profile.");
+        }
+    }
+
+    private boolean isBankNkhondeGroupType(String groupType) {
+        String clean = safeText(groupType, "").trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return "BANK NKHONDE".equals(clean);
+    }
+
+    private String bankNkhondeStatusForDueDate(LocalDate dueDate) {
+        ChipeleganyuContributionStatus status = statusForDueDate(dueDate);
+        return status == ChipeleganyuContributionStatus.DUE ? "DUE" : status.name();
+    }
+
+    private LocalDate dueDateForPeriod(SavingsGroupProfileRecord profile, YearMonth period) {
+        LocalDate start = parseDateOrNull(profile.actualStartDate());
+        int fallbackDay = start == null ? 1 : start.getDayOfMonth();
+        int dueDay = contributionDayOfMonth(profile.contributionDay(), fallbackDay);
+        return period.atDay(Math.min(dueDay, period.lengthOfMonth()));
+    }
+
+    private int contributionDayOfMonth(String dayText, int fallbackDay) {
+        String clean = safeText(dayText, "").trim();
+        if (!clean.isBlank()) {
+            String digits = clean.replaceAll("[^0-9]", "");
+            if (!digits.isBlank()) {
+                try {
+                    int parsed = Integer.parseInt(digits);
+                    return Math.max(1, Math.min(31, parsed));
+                } catch (NumberFormatException ignored) {
+                    // Keep the fallback below.
+                }
+            }
+        }
+        return Math.max(1, Math.min(31, fallbackDay));
+    }
+
+    private ChipeleganyuContributionStatus statusForDueDate(LocalDate dueDate) {
+        LocalDate today = LocalDate.now();
+        if (dueDate.isAfter(today)) {
+            return ChipeleganyuContributionStatus.UPCOMING;
+        }
+        if (dueDate.isEqual(today)) {
+            return ChipeleganyuContributionStatus.DUE;
+        }
+        return ChipeleganyuContributionStatus.OVERDUE;
+    }
+
+    private long majorToMinor(double amount, String currencyCode) {
+        return Money.parseMajor(BigDecimal.valueOf(Math.max(0, amount)).toPlainString(),
+                requireIsoCurrencyCode(safeText(currencyCode, DEFAULT_CURRENCY_CODE), "Currency")).amountMinor();
+    }
+
+    private double minorToMajorDouble(long amountMinor, String currencyCode) {
+        return Money.ofMinor(amountMinor, requireIsoCurrencyCode(safeText(currencyCode, DEFAULT_CURRENCY_CODE), "Currency"))
+                .toMajor()
+                .doubleValue();
+    }
+
+    private String normalizedSavingsFrequency(String value) {
+        String clean = safeText(value, "").trim();
+        for (String option : List.of("Weekly", "Fortnightly", "Monthly", "Quarterly", "Custom")) {
+            if (option.equalsIgnoreCase(clean)) {
+                return option;
+            }
+        }
+        throw new IllegalArgumentException("Select a valid contribution frequency.");
+    }
+
+    private String normalizedSavingsProfileStatus(String value) {
+        String clean = safeText(value, "Active").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return switch (clean) {
+            case "PAUSED" -> "PAUSED";
+            case "MATURED" -> "MATURED";
+            case "CLOSED" -> "CLOSED";
+            case "ARCHIVED" -> "ARCHIVED";
+            default -> "ACTIVE";
+        };
+    }
+
+    private String savingsGroupReference(String prefix, String referenceNumber) {
+        String clean = cleanNullable(referenceNumber);
+        return clean == null ? prefix + "-" + LocalDateTime.now(ZoneId.systemDefault()).format(FILE_TIMESTAMP_FORMAT) : clean;
+    }
+
+    private String nextContributionDueDate(LocalDate start, LocalDate end, String frequency, String dayText) {
+        if (start == null) {
+            return "";
+        }
+        LocalDate today = LocalDate.now();
+        LocalDate next = start;
+        int days = switch (safeText(frequency, "Monthly")) {
+            case "Weekly" -> 7;
+            case "Fortnightly" -> 14;
+            case "Quarterly" -> 91;
+            case "Custom" -> 30;
+            default -> 30;
+        };
+        while (next.isBefore(today)) {
+            next = next.plusDays(days);
+        }
+        if (end != null && next.isAfter(end)) {
+            return "";
+        }
+        return next.toString();
+    }
+
+    public List<CommunitySavingsHistoricalValidation> validateCommunityHistoricalRows(List<CommunitySavingsHistoricalRowCommand> rows) {
+        List<CommunitySavingsHistoricalValidation> results = new ArrayList<>();
+        if (rows == null || rows.isEmpty()) {
+            return results;
+        }
+        for (int index = 0; index < rows.size(); index++) {
+            CommunitySavingsHistoricalRowCommand row = rows.get(index);
+            try {
+                CommunitySavingsGroupSummary group = requireCommunityGroup(row.groupId());
+                LocalDate date = validateCommunityTransactionDate(group, row.transactionDate(), true, row.backdateReason(), row.historicalConfirmation());
+                String type = normalizedHistoricalTransactionType(row.transactionType());
+                double total = historicalTotal(row);
+                if (total <= 0) {
+                    throw new IllegalArgumentException("Amount must be greater than zero.");
+                }
+                boolean duplicate = hasHistoricalDuplicate(row, date, type);
+                String status = duplicate ? "Warning" : "Valid";
+                String message = duplicate
+                        ? "Likely duplicate found. Review the existing record before saving or provide a justification."
+                        : "Ready to save.";
+                results.add(new CommunitySavingsHistoricalValidation(index + 1, status, message, duplicate, accountingClassification(type)));
+            } catch (RuntimeException exception) {
+                results.add(new CommunitySavingsHistoricalValidation(index + 1, "Invalid", exception.getMessage(), false, "Not checked"));
+            }
+        }
+        return results;
+    }
+
+    public int saveCommunityHistoricalRows(List<CommunitySavingsHistoricalRowCommand> rows) {
+        List<CommunitySavingsHistoricalValidation> validations = validateCommunityHistoricalRows(rows);
+        boolean invalid = validations.stream().anyMatch(validation -> "Invalid".equalsIgnoreCase(validation.status()));
+        if (invalid) {
+            throw new IllegalArgumentException("Validate and correct invalid historical rows before saving.");
+        }
+        int saved = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            CommunitySavingsHistoricalRowCommand row = rows.get(i);
+            CommunitySavingsHistoricalValidation validation = validations.get(i);
+            int historyId;
+            try (Connection connection = connect()) {
+                historyId = insertCommunityHistoricalEntry(connection, row, validation);
+            } catch (SQLException exception) {
+                throw new IllegalStateException("Failed to save historical entry audit row", exception);
+            }
+            int linkedId;
+            try (Connection connection = connect()) {
+                linkedId = saveValidatedHistoricalRow(connection, row);
+            } catch (SQLException exception) {
+                throw new IllegalStateException("Failed to save historical community savings row", exception);
+            }
+            try (Connection connection = connect();
+                 PreparedStatement update = connection.prepareStatement("""
+                         UPDATE community_historical_entries
+                         SET validation_status = 'SAVED',
+                             linked_record_type = ?,
+                             linked_record_id = ?,
+                             updated_at = CURRENT_TIMESTAMP,
+                             updated_by = ?
+                         WHERE id = ?
+                         """)) {
+                update.setString(1, normalizedHistoricalTransactionType(row.transactionType()));
+                update.setInt(2, linkedId);
+                setNullableInt(update, 3, currentUserIdOrNull());
+                update.setInt(4, historyId);
+                update.executeUpdate();
+                saved++;
+            } catch (SQLException exception) {
+                throw new IllegalStateException("Failed to link historical entry audit row", exception);
+            }
+        }
+        try (Connection connection = connect()) {
+            recordSystemLog(connection, "Community Savings", "Historical Records Saved", "WARNING",
+                    saved + " historical Community Savings row(s) saved after validation.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to audit historical community savings records", exception);
+        }
+        return saved;
+    }
+
+    public List<CommunitySavingsReportRow> listCommunitySavingsReportRows(String reportType, Integer groupId, String groupType,
+                                                                          LocalDate startDate, LocalDate endDate,
+                                                                          boolean backdatedOnly, int limit) {
+        List<CommunitySavingsReportRow> rows = new ArrayList<>();
+        String normalizedType = groupType == null || groupType.isBlank() ? null : normalizedCommunityGroupType(groupType);
+        String start = dateString(startDate == null ? LocalDate.of(1900, 1, 1) : startDate);
+        String end = dateString(endDate == null ? LocalDate.of(9999, 12, 31) : endDate);
+        String contributionSql = """
+                SELECT ? AS report_name, g.group_name, g.group_type, COALESCE(m.member_name, '') AS member_name,
+                       c.transaction_date AS record_date, c.contribution_period,
+                       c.amount_paid AS contribution, 0 AS principal, 0 AS interest,
+                       c.penalty_amount AS penalty, c.social_fund_amount AS social_fund,
+                       0 AS payout, 0 AS profit, c.status, c.is_backdated, c.created_at AS recorded_at
+                FROM community_contributions c
+                JOIN community_savings_groups g ON g.id = c.group_id
+                LEFT JOIN community_savings_members m ON m.id = c.member_id
+                WHERE COALESCE(c.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR c.group_id = ?)
+                  AND (? IS NULL OR g.group_type = ?)
+                  AND date(c.transaction_date) BETWEEN date(?) AND date(?)
+                  AND (? = 0 OR c.is_backdated = 1)
+                """;
+        String loanSql = """
+                SELECT ? AS report_name, g.group_name, g.group_type, COALESCE(m.member_name, '') AS member_name,
+                       l.loan_date AS record_date, '' AS contribution_period,
+                       0 AS contribution, l.principal_amount AS principal, l.expected_interest AS interest,
+                       0 AS penalty, 0 AS social_fund, 0 AS payout, 0 AS profit,
+                       l.status, l.is_backdated, l.created_at AS recorded_at
+                FROM community_group_loans l
+                JOIN community_savings_groups g ON g.id = l.group_id
+                LEFT JOIN community_savings_members m ON m.id = l.member_id
+                WHERE COALESCE(l.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR l.group_id = ?)
+                  AND (? IS NULL OR g.group_type = ?)
+                  AND date(l.loan_date) BETWEEN date(?) AND date(?)
+                  AND (? = 0 OR l.is_backdated = 1)
+                """;
+        String payoutSql = """
+                SELECT ? AS report_name, g.group_name, g.group_type, COALESCE(m.member_name, '') AS member_name,
+                       p.payout_date AS record_date, '' AS contribution_period,
+                       0 AS contribution, 0 AS principal, 0 AS interest,
+                       0 AS penalty, 0 AS social_fund, p.actual_amount AS payout,
+                       p.profit_component + p.bonus_component AS profit,
+                       p.status, p.is_backdated, p.created_at AS recorded_at
+                FROM community_payouts p
+                JOIN community_savings_groups g ON g.id = p.group_id
+                LEFT JOIN community_savings_members m ON m.id = p.member_id
+                WHERE COALESCE(p.is_deleted, 0) = 0
+                  AND COALESCE(g.is_deleted, 0) = 0
+                  AND (? IS NULL OR p.group_id = ?)
+                  AND (? IS NULL OR g.group_type = ?)
+                  AND date(p.payout_date) BETWEEN date(?) AND date(?)
+                  AND (? = 0 OR p.is_backdated = 1)
+                """;
+        String sql = contributionSql + "\nUNION ALL\n" + loanSql + "\nUNION ALL\n" + payoutSql + "\nORDER BY date(record_date) DESC LIMIT ?";
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            for (int block = 0; block < 3; block++) {
+                statement.setString(index++, safeText(reportType, "Community Savings Report"));
+                setNullableInt(statement, index++, groupId);
+                setNullableInt(statement, index++, groupId);
+                statement.setString(index++, normalizedType);
+                statement.setString(index++, normalizedType);
+                statement.setString(index++, start);
+                statement.setString(index++, end);
+                statement.setInt(index++, backdatedOnly ? 1 : 0);
+            }
+            statement.setInt(index, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new CommunitySavingsReportRow(
+                            resultSet.getString("report_name"),
+                            resultSet.getString("group_name"),
+                            resultSet.getString("group_type"),
+                            resultSet.getString("member_name"),
+                            resultSet.getString("record_date"),
+                            resultSet.getString("contribution_period"),
+                            resultSet.getDouble("contribution"),
+                            resultSet.getDouble("principal"),
+                            resultSet.getDouble("interest"),
+                            resultSet.getDouble("penalty"),
+                            resultSet.getDouble("social_fund"),
+                            resultSet.getDouble("payout"),
+                            resultSet.getDouble("profit"),
+                            resultSet.getString("status"),
+                            resultSet.getInt("is_backdated") == 1,
+                            resultSet.getString("recorded_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list community savings report rows", exception);
+        }
+        return rows;
+    }
+
+    public void closeCommunitySavingsCycle(int groupId, String reason) {
+        CommunitySavingsGroupSummary group = requireCommunityGroup(groupId);
+        if (group.linkedAccountId() <= 0) {
+            throw new IllegalArgumentException("This Community Savings group has no linked account to reconcile.");
+        }
+        String cleanReason = requireText(reason, "Cycle closure reason");
+        int userId = currentUserIdOrNull();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                String reconciliationDate;
+                double difference;
+                String reconciliationStatus;
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        SELECT reconciliation_date, difference, status
+                        FROM account_reconciliations
+                        WHERE account_id = ?
+                        ORDER BY date(reconciliation_date) DESC, id DESC
+                        LIMIT 1
+                        """)) {
+                    statement.setInt(1, group.linkedAccountId());
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        if (!resultSet.next()) {
+                            throw new IllegalArgumentException("Reconcile the linked Community Savings account before closing the group cycle.");
+                        }
+                        reconciliationDate = resultSet.getString("reconciliation_date");
+                        difference = resultSet.getDouble("difference");
+                        reconciliationStatus = resultSet.getString("status");
+                    }
+                }
+                if (Math.abs(difference) >= LOAN_CLEARANCE_EPSILON
+                        || !"MATCHED".equalsIgnoreCase(safeText(reconciliationStatus, ""))) {
+                    throw new IllegalArgumentException("The latest reconciliation still has an unresolved difference. Reconcile the group before closing the cycle.");
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE community_savings_groups
+                        SET status = 'CYCLE_COMPLETED',
+                            notes = CASE
+                                WHEN notes IS NULL OR trim(notes) = '' THEN ?
+                                ELSE notes || char(10) || ?
+                            END,
+                            updated_by = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    String closureNote = "Cycle completed after matched reconciliation dated "
+                            + reconciliationDate + ". Reason: " + cleanReason;
+                    statement.setString(1, closureNote);
+                    statement.setString(2, closureNote);
+                    setNullableInt(statement, 3, userId);
+                    statement.setInt(4, groupId);
+                    statement.executeUpdate();
+                }
+                recordSystemLog(connection, "Community Savings", "Cycle Closed", "WARNING",
+                        "Community Savings group " + groupId
+                                + " marked Cycle Completed after matched reconciliation "
+                                + reconciliationDate + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to close community savings cycle", exception);
+        }
+    }
+
+    private int insertClassifiedAccount(
+            Connection connection,
+            String name,
+            String type,
+            String currency,
+            String bankProviderName,
+            String accountNumber,
+            double openingBalance,
+            String openingBalanceDate,
+            double minimumBalance,
+            String accountPurpose,
+            String branchName,
+            String status,
+            String notes,
+            String accountCategory,
+            String accountSubtype,
+            Integer communityGroupId
+    ) throws SQLException {
+        boolean systemAccount = communityGroupId != null || isSavingsGroupAccountType(type);
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO accounts (
+                    account_name, account_type, currency, bank_provider_name, account_number,
+                    opening_balance, opening_balance_date, minimum_balance, account_purpose, branch_name,
+                    account_category, account_subtype, community_group_id, is_system_account, status, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, requireText(name, "Account name"));
+            statement.setString(2, requireText(type, "Account type"));
+            statement.setString(3, normalizedCurrency(currency));
+            statement.setString(4, cleanNullable(bankProviderName));
+            statement.setString(5, cleanNullable(accountNumber));
+            statement.setDouble(6, Math.max(0, openingBalance));
+            statement.setString(7, safeText(openingBalanceDate, LocalDate.now().toString()));
+            statement.setDouble(8, Math.max(0, minimumBalance));
+            statement.setString(9, safeText(accountPurpose, ""));
+            statement.setString(10, safeText(branchName, ""));
+            statement.setString(11, normalizedAccountCategory(accountCategory, type));
+            statement.setString(12, cleanNullable(accountSubtype));
+            setNullableInt(statement, 13, communityGroupId);
+            statement.setInt(14, systemAccount ? 1 : 0);
+            statement.setString(15, normalizedAccountStatus(status));
+            statement.setString(16, safeText(notes, ""));
+            statement.executeUpdate();
+            int accountId = generatedId(connection, statement);
+            if (openingBalance > 0) {
+                insertOpeningBalanceAuditTransaction(connection, accountId, openingBalance, safeText(openingBalanceDate, LocalDate.now().toString()),
+                        "Opening balance recorded when the account was created.");
+            }
+            return accountId;
+        }
+    }
+
+    private CommunitySavingsGroupSummary requireCommunityGroup(int groupId) {
+        return listCommunitySavingsGroups().stream()
+                .filter(group -> group.id() == groupId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid Community Savings group."));
+    }
+
+    private CommunitySavingsLoanRecord requireCommunityLoan(int loanId) {
+        return listCommunityLoans(null, null, 1000).stream()
+                .filter(loan -> loan.id() == loanId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid Community Savings loan."));
+    }
+
+    private CommunitySavingsGroupSummary readCommunityGroupSummary(ResultSet resultSet) throws SQLException {
+        return new CommunitySavingsGroupSummary(
+                resultSet.getInt("id"),
+                resultSet.getInt("linked_account_id"),
+                resultSet.getString("group_name"),
+                resultSet.getString("group_type"),
+                resultSet.getString("currency"),
+                resultSet.getString("status"),
+                parseDateOrNull(resultSet.getString("start_date")),
+                parseDateOrNull(resultSet.getString("expected_end_date")),
+                resultSet.getDouble("standard_contribution_amount"),
+                resultSet.getDouble("share_value"),
+                resultSet.getDouble("account_balance"),
+                resultSet.getDouble("total_contributed"),
+                resultSet.getDouble("social_fund_balance"),
+                resultSet.getDouble("outstanding_loans"),
+                resultSet.getDouble("penalties_outstanding"),
+                resultSet.getDouble("payouts_total"),
+                resultSet.getString("linked_account_name")
+        );
+    }
+
+    private LocalDate validateCommunityTransactionDate(CommunitySavingsGroupSummary group, LocalDate date, boolean completed,
+                                                       String backdateReason, boolean historicalConfirmation) {
+        LocalDate transactionDate = requireDate(date, "Transaction date");
+        String status = safeText(group.status(), "ACTIVE").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        boolean hasCorrectionReason = !safeText(backdateReason, "").isBlank();
+        if (completed && Set.of("DRAFT", "CLOSED", "ARCHIVED").contains(status)) {
+            throw new IllegalArgumentException("This Community Savings group is " + group.status() + " and cannot accept ordinary financial transactions.");
+        }
+        if (completed && "SUSPENDED".equals(status) && !hasCorrectionReason) {
+            throw new IllegalArgumentException("Suspended groups require an authorised correction reason before recording financial activity.");
+        }
+        if (completed && "CYCLE_COMPLETED".equals(status) && !hasCorrectionReason) {
+            throw new IllegalArgumentException("This group cycle is completed. Reopen through reconciliation or enter an authorised correction reason.");
+        }
+        if (transactionDate.isBefore(group.startDate())) {
+            throw new IllegalArgumentException("Transaction date cannot be before the group's official start date.");
+        }
+        if (completed && transactionDate.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException("Completed transactions cannot be dated in the future. Use scheduled records for future obligations.");
+        }
+        if (group.expectedEndDate() != null && transactionDate.isAfter(group.expectedEndDate())
+                && !hasCorrectionReason) {
+            throw new IllegalArgumentException("This transaction is outside the group cycle. Enter an authorised correction reason.");
+        }
+        if (transactionDate.isBefore(LocalDate.now()) && !historicalConfirmation) {
+            throw new IllegalArgumentException("Confirm that the backdated entry is supported by group records.");
+        }
+        return transactionDate;
+    }
+
+    private int insertCommunityTransferPair(Connection connection, int fromAccountId, int toAccountId, double amount,
+                                            LocalDate date, String description, String paymentMethod,
+                                            String referenceNumber) throws SQLException {
+        if (fromAccountId == toAccountId) {
+            throw new IllegalArgumentException("Choose two different accounts.");
+        }
+        String reference = communityReference("CS-TRF", referenceNumber);
+        int outgoingId = insertTransferRow(connection, fromAccountId, null, "TRANSFER_OUT", amount, date, description, paymentMethod, reference);
+        int incomingId = insertTransferRow(connection, toAccountId, outgoingId, "TRANSFER_IN", amount, date, description, paymentMethod, reference);
+        try (PreparedStatement update = connection.prepareStatement("UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
+            update.setInt(1, incomingId);
+            update.setInt(2, outgoingId);
+            update.executeUpdate();
+        }
+        return incomingId;
+    }
+
+    private int insertCommunityLoanLedgerRow(Connection connection, int accountId, String purpose, String status, double amount,
+                                             LocalDate date, String description, String notes, String referenceNumber) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, transaction_type, transaction_purpose, transaction_status,
+                    amount, transaction_date, description, source, reference_number
+                ) VALUES (?, 'LOAN', ?, ?, ?, ?, ?, 'COMMUNITY_SAVINGS', ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            statement.setString(2, purpose);
+            statement.setString(3, safeText(status, "COMPLETED"));
+            statement.setDouble(4, Math.max(0, amount));
+            statement.setString(5, date.toString());
+            statement.setString(6, safeText(description, "") + optionalSuffix(" - ", notes));
+            statement.setString(7, communityReference("CS-LOAN", referenceNumber));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertCommunityExpenseIncomeRow(Connection connection, int accountId, String transactionType, String purpose,
+                                                double amount, LocalDate date, String description, String categoryName,
+                                                String paymentMethod, String referenceNumber) throws SQLException {
+        int categoryId = findOrCreateCategoryId(connection, categoryName, transactionType);
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, category_id, transaction_type, transaction_purpose, transaction_status,
+                    amount, transaction_date, description, source, payment_method, reference_number
+                ) VALUES (?, ?, ?, ?, 'COMPLETED', ?, ?, ?, 'COMMUNITY_SAVINGS', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            statement.setInt(2, categoryId);
+            statement.setString(3, transactionType);
+            statement.setString(4, purpose);
+            statement.setDouble(5, Math.max(0, amount));
+            statement.setString(6, date.toString());
+            statement.setString(7, safeText(description, ""));
+            statement.setString(8, cleanNullable(paymentMethod));
+            statement.setString(9, communityReference("CS", referenceNumber));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int findOrCreateCategoryId(Connection connection, String name, String type) throws SQLException {
+        String categoryName = requireText(name, "Category name");
+        String requestedType = normalizedCategoryType(type);
+        try (PreparedStatement find = connection.prepareStatement(
+                "SELECT id, category_type FROM categories WHERE lower(category_name) = lower(?)")) {
+            find.setString(1, categoryName);
+            try (ResultSet resultSet = find.executeQuery()) {
+                if (resultSet.next()) {
+                    int id = resultSet.getInt("id");
+                    String merged = mergedCategoryType(resultSet.getString("category_type"), requestedType);
+                    try (PreparedStatement update = connection.prepareStatement(
+                            "UPDATE categories SET category_type = ? WHERE id = ?")) {
+                        update.setString(1, merged);
+                        update.setInt(2, id);
+                        update.executeUpdate();
+                    }
+                    return id;
+                }
+            }
+        }
+        try (PreparedStatement insert = connection.prepareStatement(
+                "INSERT INTO categories (category_name, category_type) VALUES (?, ?)", Statement.RETURN_GENERATED_KEYS)) {
+            insert.setString(1, categoryName);
+            insert.setString(2, requestedType);
+            insert.executeUpdate();
+            return generatedId(connection, insert);
+        }
+    }
+
+    private int findOrCreateCommunityLoanAccount(Connection connection, CommunitySavingsGroupSummary group, boolean liability) throws SQLException {
+        String category = liability ? "LIABILITY" : "ASSET";
+        String type = liability ? "COMMUNITY_SAVINGS_LOAN" : "LOAN_RECEIVABLE";
+        String subtype = liability ? communitySavingsSubtype(group.groupType()) + "_LOAN" : "COMMUNITY_GROUP_LOAN";
+        String suffix = liability ? " Loan" : " Loan Receivable";
+        try (PreparedStatement find = connection.prepareStatement("""
+                SELECT id
+                FROM accounts
+                WHERE community_group_id = ?
+                  AND account_category = ?
+                  AND account_type = ?
+                  AND COALESCE(account_subtype, '') = ?
+                LIMIT 1
+                """)) {
+            find.setInt(1, group.id());
+            find.setString(2, category);
+            find.setString(3, type);
+            find.setString(4, subtype);
+            try (ResultSet resultSet = find.executeQuery()) {
+                if (resultSet.next()) {
+                    return resultSet.getInt("id");
+                }
+            }
+        }
+        return insertClassifiedAccount(
+                connection,
+                group.groupName() + suffix,
+                type,
+                group.currency(),
+                group.groupType(),
+                "",
+                0,
+                group.startDate().toString(),
+                0,
+                liability ? "Community Savings loan liability" : "Community group loan receivable",
+                "",
+                "ACTIVE",
+                "Automatically linked to Community Savings group " + group.id() + ".",
+                category,
+                subtype,
+                group.id()
+        );
+    }
+
+    private Integer communityLoanAccountId(Connection connection, int loanId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT liability_account_id
+                FROM community_group_loans
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, loanId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? nullableInt(resultSet, "liability_account_id") : null;
+            }
+        }
+    }
+
+    private void refreshCommunityLoanStatus(Connection connection, int loanId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE community_group_loans
+                SET status = CASE
+                        WHEN principal_amount + expected_interest
+                             <= COALESCE((SELECT SUM(principal_paid + interest_paid)
+                                          FROM community_loan_repayments
+                                          WHERE loan_id = community_group_loans.id), 0) + 0.005
+                        THEN 'PAID'
+                    WHEN due_date IS NOT NULL AND date(due_date) < date('now', 'localtime') THEN 'OVERDUE'
+                        WHEN COALESCE((SELECT SUM(principal_paid + interest_paid)
+                                       FROM community_loan_repayments
+                                       WHERE loan_id = community_group_loans.id), 0) > 0
+                        THEN 'PARTIALLY_PAID'
+                        ELSE status
+                    END,
+                    updated_at = CURRENT_TIMESTAMP,
+                    updated_by = ?
+                WHERE id = ?
+                """)) {
+            setNullableInt(statement, 1, currentUserIdOrNull());
+            statement.setInt(2, loanId);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertCommunitySocialFund(Connection connection, int groupId, Integer memberId, int contributionId,
+                                           int accountId, int linkedTransactionId, LocalDate date, double amount,
+                                           String paymentMethod, String referenceNumber, String notes, boolean backdated,
+                                           String backdateReason, Integer userId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_social_fund (
+                    group_id, member_id, contribution_id, account_id, linked_transaction_id, transaction_date,
+                    amount, payment_method, reference_number, status, notes, created_by, updated_by, updated_at,
+                    is_backdated, backdate_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                """)) {
+            statement.setInt(1, groupId);
+            setNullableInt(statement, 2, memberId);
+            statement.setInt(3, contributionId);
+            statement.setInt(4, accountId);
+            statement.setInt(5, linkedTransactionId);
+            statement.setString(6, date.toString());
+            statement.setDouble(7, amount);
+            statement.setString(8, cleanNullable(paymentMethod));
+            statement.setString(9, cleanNullable(referenceNumber));
+            statement.setString(10, safeText(notes, ""));
+            setNullableInt(statement, 11, userId);
+            setNullableInt(statement, 12, userId);
+            statement.setInt(13, backdated ? 1 : 0);
+            statement.setString(14, backdated ? requireText(backdateReason, "Reason for backdating") : cleanNullable(backdateReason));
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertCommunityPenalty(Connection connection, int groupId, Integer memberId, int contributionId,
+                                        int accountId, int linkedTransactionId, LocalDate date, double amount,
+                                        String reason, String paymentMethod, String referenceNumber, String status,
+                                        String notes, boolean backdated, String backdateReason, Integer userId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_penalties (
+                    group_id, member_id, contribution_id, account_id, linked_transaction_id, transaction_date,
+                    penalty_amount, reason, payment_method, reference_number, status, notes,
+                    created_by, updated_by, updated_at, is_backdated, backdate_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                """)) {
+            statement.setInt(1, groupId);
+            setNullableInt(statement, 2, memberId);
+            statement.setInt(3, contributionId);
+            statement.setInt(4, accountId);
+            statement.setInt(5, linkedTransactionId);
+            statement.setString(6, date.toString());
+            statement.setDouble(7, amount);
+            statement.setString(8, safeText(reason, ""));
+            statement.setString(9, cleanNullable(paymentMethod));
+            statement.setString(10, cleanNullable(referenceNumber));
+            statement.setString(11, safeText(status, "OUTSTANDING"));
+            statement.setString(12, safeText(notes, ""));
+            setNullableInt(statement, 13, userId);
+            setNullableInt(statement, 14, userId);
+            statement.setInt(15, backdated ? 1 : 0);
+            statement.setString(16, backdated ? requireText(backdateReason, "Reason for backdating") : cleanNullable(backdateReason));
+            statement.executeUpdate();
+        }
+    }
+
+    private int upsertPayoutOrder(Connection connection, int groupId, Integer memberId, int position, String expectedPeriod,
+                                  LocalDate expectedDate, double expectedAmount, String status, String notes) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_payout_orders (
+                    group_id, member_id, position_number, expected_period, expected_date, expected_amount,
+                    status, notes, created_by, updated_by, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(group_id, position_number) DO UPDATE SET
+                    member_id = excluded.member_id,
+                    expected_period = excluded.expected_period,
+                    expected_date = excluded.expected_date,
+                    expected_amount = excluded.expected_amount,
+                    status = excluded.status,
+                    notes = excluded.notes,
+                    updated_at = CURRENT_TIMESTAMP,
+                    updated_by = excluded.updated_by
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, groupId);
+            setNullableInt(statement, 2, memberId);
+            statement.setInt(3, position);
+            statement.setString(4, safeText(expectedPeriod, ""));
+            statement.setString(5, dateString(expectedDate));
+            statement.setDouble(6, Math.max(0, expectedAmount));
+            statement.setString(7, normalizedPayoutOrderStatus(status));
+            statement.setString(8, safeText(notes, ""));
+            setNullableInt(statement, 9, currentUserIdOrNull());
+            setNullableInt(statement, 10, currentUserIdOrNull());
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertCommunityHistoricalEntry(Connection connection, CommunitySavingsHistoricalRowCommand row,
+                                               CommunitySavingsHistoricalValidation validation) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_historical_entries (
+                    group_id, member_id, account_id, transaction_type, contribution_period, transaction_date,
+                    principal, interest, penalty, social_fund, payout, total_amount, payment_method,
+                    reference_number, notes, created_by, updated_by, updated_at, is_backdated,
+                    backdate_reason, validation_status, accounting_classification, duplicate_override_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, row.groupId());
+            setNullableInt(statement, 2, row.memberId());
+            setNullableInt(statement, 3, row.paymentAccountId());
+            statement.setString(4, normalizedHistoricalTransactionType(row.transactionType()));
+            statement.setString(5, yearMonthString(row.contributionPeriod()));
+            statement.setString(6, requireDate(row.transactionDate(), "Transaction date").toString());
+            statement.setDouble(7, Math.max(0, row.principal()));
+            statement.setDouble(8, Math.max(0, row.interest()));
+            statement.setDouble(9, Math.max(0, row.penalty()));
+            statement.setDouble(10, Math.max(0, row.socialFund()));
+            statement.setDouble(11, Math.max(0, row.payout()));
+            statement.setDouble(12, historicalTotal(row));
+            statement.setString(13, cleanNullable(row.paymentMethod()));
+            statement.setString(14, cleanNullable(row.referenceNumber()));
+            statement.setString(15, safeText(row.notes(), ""));
+            setNullableInt(statement, 16, currentUserIdOrNull());
+            setNullableInt(statement, 17, currentUserIdOrNull());
+            statement.setString(18, requireText(row.backdateReason(), "Reason for backdating"));
+            statement.setString(19, validation.status());
+            statement.setString(20, validation.accountingClassification());
+            statement.setString(21, validation.duplicate() ? safeText(row.backdateReason(), "") : null);
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int saveValidatedHistoricalRow(Connection connection, CommunitySavingsHistoricalRowCommand row) throws SQLException {
+        String type = normalizedHistoricalTransactionType(row.transactionType());
+        return switch (type) {
+            case "CONTRIBUTION", "SHARE_PURCHASE", "SOCIAL_FUND_PAYMENT", "PENALTY" -> insertHistoricalContribution(connection, row, type);
+            case "LOAN_RECEIVED" -> insertHistoricalLoan(connection, row, "USER_BORROWED");
+            case "LOAN_ISSUED" -> insertHistoricalLoan(connection, row, "GROUP_LENT");
+            case "LOAN_REPAYMENT" -> insertHistoricalLoanRepayment(connection, row);
+            case "ZIPELEGANYU_PAYOUT" -> insertHistoricalPayout(connection, row);
+            case "BANK_NKHONDE_SHARE_OUT" -> insertHistoricalShareOut(connection, row);
+            case "GROUP_EXPENSE" -> insertHistoricalLedgerAdjustment(connection, row, "EXPENSE", "NORMAL");
+            case "BALANCE_ADJUSTMENT" -> insertHistoricalLedgerAdjustment(connection, row, "ADJUSTMENT", row.totalAmount() >= 0 ? "BALANCE_INCREASE" : "BALANCE_DECREASE");
+            case "OPENING_BALANCE" -> insertHistoricalLedgerAdjustment(connection, row, "ADJUSTMENT", "BALANCE_INCREASE");
+            default -> throw new IllegalArgumentException("Unsupported historical transaction type.");
+        };
+    }
+
+    private int insertHistoricalContribution(Connection connection, CommunitySavingsHistoricalRowCommand row, String type) throws SQLException {
+        CommunitySavingsGroupSummary group = requireCommunityGroup(row.groupId());
+        int paymentAccount = row.paymentAccountId() == null ? 0 : row.paymentAccountId();
+        if (paymentAccount <= 0) {
+            throw new IllegalArgumentException("Historical contribution rows require a payment account.");
+        }
+        double share = Set.of("CONTRIBUTION", "SHARE_PURCHASE").contains(type) ? Math.max(0, row.principal()) : 0;
+        double social = "SOCIAL_FUND_PAYMENT".equals(type) ? historicalTotal(row) : Math.max(0, row.socialFund());
+        double penalty = "PENALTY".equals(type) ? historicalTotal(row) : Math.max(0, row.penalty());
+        int incomingId = insertCommunityTransferPair(connection, paymentAccount, group.linkedAccountId(), share + social + penalty,
+                row.transactionDate(), "Historical " + type.replace('_', ' ').toLowerCase(Locale.ENGLISH), row.paymentMethod(), row.referenceNumber());
+        int userId = currentUserIdOrNull();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_contributions (
+                    group_id, member_id, account_id, linked_transaction_id, contribution_period, due_date,
+                    transaction_date, number_of_shares, share_value, expected_amount, amount_paid,
+                    social_fund_amount, penalty_amount, payment_method, reference_number, status, notes,
+                    created_by, updated_by, updated_at, is_backdated, backdate_reason, historical_confirmation
+                ) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?, 'PAID', ?, ?, ?, CURRENT_TIMESTAMP, 1, ?, 1)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, row.groupId());
+            setNullableInt(statement, 2, row.memberId());
+            statement.setInt(3, paymentAccount);
+            statement.setInt(4, incomingId);
+            statement.setString(5, yearMonthString(row.contributionPeriod()));
+            statement.setString(6, row.transactionDate().toString());
+            statement.setDouble(7, share + social + penalty);
+            statement.setDouble(8, share);
+            statement.setDouble(9, social);
+            statement.setDouble(10, penalty);
+            statement.setString(11, cleanNullable(row.paymentMethod()));
+            statement.setString(12, cleanNullable(row.referenceNumber()));
+            statement.setString(13, safeText(row.notes(), ""));
+            setNullableInt(statement, 14, userId);
+            setNullableInt(statement, 15, userId);
+            statement.setString(16, requireText(row.backdateReason(), "Reason for backdating"));
+            statement.executeUpdate();
+            int contributionId = generatedId(connection, statement);
+            if (social > 0) {
+                insertCommunitySocialFund(connection, row.groupId(), row.memberId(), contributionId, paymentAccount, incomingId,
+                        row.transactionDate(), social, row.paymentMethod(), row.referenceNumber(), row.notes(), true, row.backdateReason(), userId);
+            }
+            if (penalty > 0) {
+                insertCommunityPenalty(connection, row.groupId(), row.memberId(), contributionId, paymentAccount, incomingId,
+                        row.transactionDate(), penalty, "Historical penalty", row.paymentMethod(), row.referenceNumber(), "PAID",
+                        row.notes(), true, row.backdateReason(), userId);
+            }
+            return contributionId;
+        }
+    }
+
+    private int insertHistoricalLoan(Connection connection, CommunitySavingsHistoricalRowCommand row, String direction) throws SQLException {
+        return recordCommunityLoan(new CommunitySavingsLoanCommand(
+                row.groupId(),
+                row.memberId(),
+                row.paymentAccountId(),
+                direction,
+                historicalTotal(row),
+                "Flat",
+                row.interest(),
+                row.transactionDate(),
+                null,
+                null,
+                row.notes(),
+                "ACTIVE",
+                row.notes(),
+                row.backdateReason(),
+                true
+        ));
+    }
+
+    private int insertHistoricalLoanRepayment(Connection connection, CommunitySavingsHistoricalRowCommand row) throws SQLException {
+        int loanId = findOpenCommunityLoanForMember(connection, row.groupId(), row.memberId());
+        return recordCommunityLoanRepayment(new CommunitySavingsRepaymentCommand(
+                loanId,
+                row.paymentAccountId() == null ? 0 : row.paymentAccountId(),
+                row.transactionDate(),
+                Math.max(0, row.principal()),
+                Math.max(0, row.interest()),
+                Math.max(0, row.penalty()),
+                row.paymentMethod(),
+                row.referenceNumber(),
+                row.notes(),
+                row.backdateReason(),
+                true
+        ));
+    }
+
+    private int insertHistoricalPayout(Connection connection, CommunitySavingsHistoricalRowCommand row) throws SQLException {
+        return recordCommunityPayout(new CommunitySavingsPayoutCommand(
+                row.groupId(),
+                row.memberId(),
+                null,
+                row.paymentAccountId() == null ? 0 : row.paymentAccountId(),
+                row.transactionDate(),
+                historicalTotal(row),
+                historicalTotal(row),
+                Math.max(0, row.principal()),
+                Math.max(0, row.interest()),
+                0,
+                Math.max(0, row.penalty()),
+                "PAID",
+                row.referenceNumber(),
+                row.notes(),
+                row.backdateReason(),
+                true
+        ));
+    }
+
+    private int insertHistoricalShareOut(Connection connection, CommunitySavingsHistoricalRowCommand row) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO community_share_outs (
+                    group_id, cycle_label, share_out_date, total_contributions, profit_distributed,
+                    interest_earned, penalties_included, loan_deductions, social_fund_treatment, notes,
+                    created_by, updated_by, updated_at, is_backdated, backdate_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, row.groupId());
+            statement.setString(2, yearMonthString(row.contributionPeriod()));
+            statement.setString(3, row.transactionDate().toString());
+            statement.setDouble(4, Math.max(0, row.principal()));
+            statement.setDouble(5, Math.max(0, row.interest()));
+            statement.setDouble(6, Math.max(0, row.interest()));
+            statement.setDouble(7, Math.max(0, row.penalty()));
+            statement.setDouble(8, 0);
+            statement.setString(9, "Captured from historical records");
+            statement.setString(10, safeText(row.notes(), ""));
+            setNullableInt(statement, 11, currentUserIdOrNull());
+            setNullableInt(statement, 12, currentUserIdOrNull());
+            statement.setString(13, requireText(row.backdateReason(), "Reason for backdating"));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertHistoricalLedgerAdjustment(Connection connection, CommunitySavingsHistoricalRowCommand row,
+                                                 String transactionType, String purpose) throws SQLException {
+        CommunitySavingsGroupSummary group = requireCommunityGroup(row.groupId());
+        int accountId = row.paymentAccountId() == null || row.paymentAccountId() <= 0 ? group.linkedAccountId() : row.paymentAccountId();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, transaction_type, transaction_purpose, transaction_status, amount,
+                    transaction_date, description, source, payment_method, reference_number
+                ) VALUES (?, ?, ?, 'COMPLETED', ?, ?, ?, 'COMMUNITY_SAVINGS', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            statement.setString(2, transactionType);
+            statement.setString(3, purpose);
+            statement.setDouble(4, Math.abs(historicalTotal(row)));
+            statement.setString(5, row.transactionDate().toString());
+            statement.setString(6, safeText(row.notes(), "Historical Community Savings " + purpose));
+            statement.setString(7, cleanNullable(row.paymentMethod()));
+            statement.setString(8, communityReference("CS-HIST", row.referenceNumber()));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int findOpenCommunityLoanForMember(Connection connection, int groupId, Integer memberId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT id
+                FROM community_group_loans
+                WHERE group_id = ?
+                  AND (? IS NULL OR member_id = ?)
+                  AND upper(status) NOT IN ('PAID', 'CANCELLED', 'WRITTEN_OFF')
+                ORDER BY date(loan_date), id
+                LIMIT 1
+                """)) {
+            statement.setInt(1, groupId);
+            setNullableInt(statement, 2, memberId);
+            setNullableInt(statement, 3, memberId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return resultSet.getInt("id");
+                }
+            }
+        }
+        throw new IllegalArgumentException("No open loan was found for this historical repayment row.");
+    }
+
+    private boolean hasContributionDuplicate(int groupId, Integer memberId, YearMonth period, LocalDate transactionDate,
+                                             double amount, String referenceNumber) {
+        String sql = """
+                SELECT COUNT(*)
+                FROM community_contributions
+                WHERE group_id = ?
+                  AND (? IS NULL OR member_id = ?)
+                  AND COALESCE(contribution_period, '') = COALESCE(?, '')
+                  AND transaction_date = ?
+                  AND ABS(amount_paid - ?) < 0.005
+                  AND COALESCE(reference_number, '') = COALESCE(?, '')
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, groupId);
+            setNullableInt(statement, 2, memberId);
+            setNullableInt(statement, 3, memberId);
+            statement.setString(4, yearMonthString(period));
+            statement.setString(5, transactionDate.toString());
+            statement.setDouble(6, amount);
+            statement.setString(7, cleanNullable(referenceNumber));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check community savings duplicate", exception);
+        }
+    }
+
+    private boolean hasHistoricalDuplicate(CommunitySavingsHistoricalRowCommand row, LocalDate date, String type) {
+        if (Set.of("CONTRIBUTION", "SHARE_PURCHASE", "SOCIAL_FUND_PAYMENT", "PENALTY").contains(type)) {
+            return hasContributionDuplicate(row.groupId(), row.memberId(), row.contributionPeriod(), date, Math.max(0, row.principal()), row.referenceNumber());
+        }
+        String sql = """
+                SELECT COUNT(*)
+                FROM community_historical_entries
+                WHERE group_id = ?
+                  AND (? IS NULL OR member_id = ?)
+                  AND transaction_type = ?
+                  AND transaction_date = ?
+                  AND ABS(total_amount - ?) < 0.005
+                  AND COALESCE(reference_number, '') = COALESCE(?, '')
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, row.groupId());
+            setNullableInt(statement, 2, row.memberId());
+            setNullableInt(statement, 3, row.memberId());
+            statement.setString(4, type);
+            statement.setString(5, date.toString());
+            statement.setDouble(6, historicalTotal(row));
+            statement.setString(7, cleanNullable(row.referenceNumber()));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check historical duplicate", exception);
+        }
+    }
+
+    private String normalizedCommunityGroupType(String value) {
+        String clean = safeText(value, "Bank Nkhonde").trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return switch (clean) {
+            case "CHIPELEGANYU", "ZIPELEGANYU" -> "Chipeleganyu";
+            case "OTHER COMMUNITY SAVINGS", "OTHER" -> "Other Community Savings";
+            default -> "Bank Nkhonde";
+        };
+    }
+
+    private String communitySavingsSubtype(String groupType) {
+        return isChipeleganyuGroupType(groupType) ? "CHIPELEGANYU"
+                : "Other Community Savings".equalsIgnoreCase(groupType) ? "OTHER_COMMUNITY_SAVINGS"
+                : "BANK_NKHONDE";
+    }
+
+    private String normalizedCommunityLoanDirection(String value) {
+        String clean = safeText(value, "USER_BORROWED").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if (Set.of("USER_BORROWED", "BORROWED_FROM_GROUP", "LOAN_RECEIVED").contains(clean)) {
+            return "USER_BORROWED";
+        }
+        return "GROUP_LENT";
+    }
+
+    private String normalizedCommunityLoanStatus(String value) {
+        String clean = safeText(value, "ACTIVE").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return Set.of("PENDING", "APPROVED", "ACTIVE", "PARTIALLY_PAID", "PAID", "OVERDUE", "WRITTEN_OFF", "CANCELLED").contains(clean)
+                ? clean
+                : "ACTIVE";
+    }
+
+    private String normalizedContributionStatus(String value) {
+        String clean = safeText(value, "PAID").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return Set.of("UPCOMING", "DUE", "PAID", "PARTIALLY_PAID", "LATE", "MISSED", "WAIVED").contains(clean) ? clean : "PAID";
+    }
+
+    private String normalizedPayoutStatus(String value) {
+        String clean = safeText(value, "PAID").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return Set.of("WAITING", "DUE", "PARTIALLY_FUNDED", "PAID", "DELAYED", "SKIPPED", "CANCELLED").contains(clean) ? clean : "PAID";
+    }
+
+    private String normalizedPayoutOrderStatus(String value) {
+        return normalizedPayoutStatus(value);
+    }
+
+    private String normalizedHistoricalTransactionType(String value) {
+        String clean = safeText(value, "").trim().toUpperCase(Locale.ENGLISH).replace('-', '_').replace(' ', '_');
+        return switch (clean) {
+            case "CONTRIBUTION" -> "CONTRIBUTION";
+            case "SHARE_PURCHASE", "PURCHASE_SHARES" -> "SHARE_PURCHASE";
+            case "SOCIAL_FUND", "SOCIAL_FUND_PAYMENT" -> "SOCIAL_FUND_PAYMENT";
+            case "PENALTY" -> "PENALTY";
+            case "LOAN_RECEIVED", "BANK_NKHONDE_LOAN_RECEIVED" -> "LOAN_RECEIVED";
+            case "LOAN_ISSUED", "GROUP_LOAN" -> "LOAN_ISSUED";
+            case "LOAN_REPAYMENT", "REPAYMENT" -> "LOAN_REPAYMENT";
+            case "ZIPELEGANYU_PAYOUT", "PAYOUT" -> "ZIPELEGANYU_PAYOUT";
+            case "BANK_NKHONDE_SHARE_OUT", "SHARE_OUT" -> "BANK_NKHONDE_SHARE_OUT";
+            case "GROUP_EXPENSE" -> "GROUP_EXPENSE";
+            case "BALANCE_ADJUSTMENT", "ADJUSTMENT" -> "BALANCE_ADJUSTMENT";
+            case "OPENING_BALANCE" -> "OPENING_BALANCE";
+            default -> throw new IllegalArgumentException("Unsupported historical transaction type.");
+        };
+    }
+
+    private String accountingClassification(String type) {
+        return switch (type) {
+            case "CONTRIBUTION", "SHARE_PURCHASE", "SOCIAL_FUND_PAYMENT" ->
+                    "Transfer from Cash/Bank/Mobile Money to Asset Account -> Community Savings.";
+            case "PENALTY" -> "Penalty component tracked separately; payment moves into Community Savings.";
+            case "LOAN_RECEIVED" -> "Cash increases and Liability Account -> Community Savings Loan increases; not income.";
+            case "LOAN_ISSUED" -> "Community Savings decreases and Asset Account -> Loan Receivable increases; not available cash.";
+            case "LOAN_REPAYMENT" -> "Principal reduces liability/receivable; interest and penalty remain separate.";
+            case "ZIPELEGANYU_PAYOUT", "BANK_NKHONDE_SHARE_OUT" ->
+                    "Original savings returned as transfer; only profit or bonus component is income.";
+            case "GROUP_EXPENSE" -> "Community Savings expense against the linked group account.";
+            case "BALANCE_ADJUSTMENT", "OPENING_BALANCE" -> "Audited migration adjustment, not ordinary income.";
+            default -> "Not checked";
+        };
+    }
+
+    private double historicalTotal(CommunitySavingsHistoricalRowCommand row) {
+        if (row.totalAmount() > 0) {
+            return row.totalAmount();
+        }
+        return Math.max(0, row.principal())
+                + Math.max(0, row.interest())
+                + Math.max(0, row.penalty())
+                + Math.max(0, row.socialFund())
+                + Math.max(0, row.payout());
+    }
+
+    private int communityCount(String sql) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate community savings count", exception);
+        }
+    }
+
+    private int currentUserIdOrNull() {
+        return UserSession.isAuthenticated() ? UserSession.getAuthenticatedUser().getId() : 0;
+    }
+
+    private int currentWorkspaceIdOrNull() {
+        return UserSession.isAuthenticated() ? UserSession.getWorkspaceUserId() : 0;
+    }
+
+    private LocalDate requireDate(LocalDate date, String label) {
+        if (date == null) {
+            throw new IllegalArgumentException(label + " is required.");
+        }
+        return date;
+    }
+
+    private LocalDate parseDateOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException exception) {
+            return null;
+        }
+    }
+
+    private String dateString(LocalDate date) {
+        return date == null ? null : date.toString();
+    }
+
+    private String yearMonthString(YearMonth yearMonth) {
+        return yearMonth == null ? "" : yearMonth.toString();
+    }
+
+    private String communityReference(String prefix, String referenceNumber) {
+        String clean = cleanNullable(referenceNumber);
+        return clean == null ? prefix + "-" + LocalDateTime.now(ZoneId.systemDefault()).format(FILE_TIMESTAMP_FORMAT) : clean;
     }
 
     public List<Category> listCategories() {
         List<Category> categories = new ArrayList<>();
-        String sql = "SELECT id, category_name, category_type FROM categories ORDER BY category_name";
+        String sql = "SELECT id, category_name, category_type FROM categories WHERE COALESCE(is_deleted, 0) = 0 ORDER BY category_name";
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -1612,11 +9258,14 @@ public class DatabaseHandler {
         List<Budget> budgets = new ArrayList<>();
         String sql = """
                 SELECT b.id, b.budget_name, b.category_id, c.category_name, b.budget_month,
-                       b.amount_limit, b.rollover, b.status, b.notes
-                FROM budgets b
-                LEFT JOIN categories c ON c.id = b.category_id
-                ORDER BY b.budget_month DESC, b.budget_name
-                """;
+                       b.amount_limit, b.rollover, b.status, b.notes,
+                       b.budget_type, b.start_date, b.end_date, b.currency,
+                       b.expected_income, b.planned_savings, b.overall_spending_limit
+                  FROM budgets b
+                  LEFT JOIN categories c ON c.id = b.category_id
+                  WHERE COALESCE(b.is_deleted, 0) = 0
+                  ORDER BY b.budget_month DESC, b.budget_name
+                  """;
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -1634,13 +9283,17 @@ public class DatabaseHandler {
         String sql = """
                 SELECT b.id, b.budget_name, b.category_id, c.category_name, b.budget_month,
                        b.amount_limit, b.rollover, b.status, b.notes,
+                       b.budget_type, b.start_date, b.end_date, b.currency,
+                       b.expected_income, b.planned_savings, b.overall_spending_limit,
                        COALESCE(SUM(t.amount), 0) AS spent
                 FROM budgets b
                 LEFT JOIN categories c ON c.id = b.category_id
                 LEFT JOIN valid_transactions t ON t.transaction_type = 'EXPENSE'
                     AND substr(t.transaction_date, 1, 7) = b.budget_month
-                    AND (b.category_id IS NULL OR t.category_id = b.category_id)
+                    AND b.category_id IS NOT NULL
+                    AND t.category_id = b.category_id
                 WHERE (? IS NULL OR b.budget_month = ?)
+                  AND COALESCE(b.is_deleted, 0) = 0
                 GROUP BY b.id
                 ORDER BY b.budget_month DESC, b.budget_name
                 """;
@@ -1673,10 +9326,86 @@ public class DatabaseHandler {
             String status,
             String notes
     ) {
+        addBudget(
+                budgetName,
+                categoryId,
+                budgetMonth,
+                amountLimit,
+                rollover,
+                status,
+                notes,
+                "Monthly",
+                null,
+                null,
+                "MWK",
+                0,
+                0,
+                0
+        );
+    }
+
+    public void addBudgetPlanDraft(
+            String budgetName,
+            String budgetMonth,
+            String budgetType,
+            String startDate,
+            String endDate,
+            String currency,
+            double expectedIncome,
+            double plannedSavings,
+            double overallSpendingLimit,
+            String notes
+    ) {
+        validateBudgetPlanHeader(budgetName, budgetMonth, startDate, endDate);
+        String sql = """
+                INSERT INTO budgets (
+                    budget_name, category_id, budget_month, amount_limit, rollover, status, notes,
+                    budget_type, start_date, end_date, currency, expected_income, planned_savings, overall_spending_limit
+                )
+                VALUES (?, NULL, ?, 0, 0, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            String month = normalizeBudgetMonth(budgetMonth);
+            statement.setString(1, budgetName.trim());
+            statement.setString(2, month);
+            statement.setString(3, notes == null ? "" : notes.trim());
+            statement.setString(4, normalizedBudgetType(budgetType));
+            statement.setString(5, blankToNull(startDate));
+            statement.setString(6, blankToNull(endDate));
+            statement.setString(7, normalizedCurrency(currency));
+            statement.setDouble(8, Math.max(0, expectedIncome));
+            statement.setDouble(9, Math.max(0, plannedSavings));
+            statement.setDouble(10, Math.max(0, overallSpendingLimit));
+            statement.executeUpdate();
+            ensureBudgetOwnerForMonth(connection, month);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to add budget plan draft", exception);
+        }
+    }
+
+    public void addBudget(
+            String budgetName,
+            Integer categoryId,
+            String budgetMonth,
+            double amountLimit,
+            boolean rollover,
+            String status,
+            String notes,
+            String budgetType,
+            String startDate,
+            String endDate,
+            String currency,
+            double expectedIncome,
+            double plannedSavings,
+            double overallSpendingLimit
+    ) {
         validateBudget(budgetName, budgetMonth, amountLimit);
         String sql = """
-                INSERT INTO budgets (budget_name, category_id, budget_month, amount_limit, rollover, status, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO budgets (
+                    budget_name, category_id, budget_month, amount_limit, rollover, status, notes,
+                    budget_type, start_date, end_date, currency, expected_income, planned_savings, overall_spending_limit
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, budgetName.trim());
@@ -1686,6 +9415,13 @@ public class DatabaseHandler {
             statement.setInt(5, rollover ? 1 : 0);
             statement.setString(6, normalizedBudgetStatus(status));
             statement.setString(7, notes);
+            statement.setString(8, normalizedBudgetType(budgetType));
+            statement.setString(9, blankToNull(startDate));
+            statement.setString(10, blankToNull(endDate));
+            statement.setString(11, normalizedCurrency(currency));
+            statement.setDouble(12, Math.max(0, expectedIncome));
+            statement.setDouble(13, Math.max(0, plannedSavings));
+            statement.setDouble(14, Math.max(0, overallSpendingLimit));
             statement.executeUpdate();
             ensureBudgetOwnerForMonth(connection, budgetMonth);
         } catch (SQLException exception) {
@@ -1703,6 +9439,44 @@ public class DatabaseHandler {
             String status,
             String notes
     ) {
+        updateBudget(
+                budgetId,
+                budgetName,
+                categoryId,
+                budgetMonth,
+                amountLimit,
+                rollover,
+                status,
+                notes,
+                "Monthly",
+                null,
+                null,
+                "MWK",
+                0,
+                0,
+                0,
+                ""
+        );
+    }
+
+    public void updateBudget(
+            int budgetId,
+            String budgetName,
+            Integer categoryId,
+            String budgetMonth,
+            double amountLimit,
+            boolean rollover,
+            String status,
+            String notes,
+            String budgetType,
+            String startDate,
+            String endDate,
+            String currency,
+            double expectedIncome,
+            double plannedSavings,
+            double overallSpendingLimit,
+            String revisionReason
+    ) {
         validateBudget(budgetName, budgetMonth, amountLimit);
         String sql = """
                 UPDATE budgets
@@ -1713,10 +9487,18 @@ public class DatabaseHandler {
                     rollover = ?,
                     status = ?,
                     notes = ?,
+                    budget_type = ?,
+                    start_date = ?,
+                    end_date = ?,
+                    currency = ?,
+                    expected_income = ?,
+                    planned_savings = ?,
+                    overall_spending_limit = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            Budget existing = findBudgetById(connection, budgetId);
             statement.setString(1, budgetName.trim());
             setNullableInt(statement, 2, categoryId);
             statement.setString(3, budgetMonth.trim());
@@ -1724,8 +9506,16 @@ public class DatabaseHandler {
             statement.setInt(5, rollover ? 1 : 0);
             statement.setString(6, normalizedBudgetStatus(status));
             statement.setString(7, notes);
-            statement.setInt(8, budgetId);
+            statement.setString(8, normalizedBudgetType(budgetType));
+            statement.setString(9, blankToNull(startDate));
+            statement.setString(10, blankToNull(endDate));
+            statement.setString(11, normalizedCurrency(currency));
+            statement.setDouble(12, Math.max(0, expectedIncome));
+            statement.setDouble(13, Math.max(0, plannedSavings));
+            statement.setDouble(14, Math.max(0, overallSpendingLimit));
+            statement.setInt(15, budgetId);
             statement.executeUpdate();
+            recordBudgetRevisionIfChanged(connection, existing, budgetId, budgetName, budgetMonth, amountLimit, revisionReason);
             ensureBudgetOwnerForMonth(connection, budgetMonth);
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to update budget", exception);
@@ -1733,14 +9523,140 @@ public class DatabaseHandler {
     }
 
     public void deleteBudget(int budgetId) {
-        requireSuperAdminForPhysicalDeletion("delete budget " + budgetId);
-        String sql = "DELETE FROM budgets WHERE id = ?";
+        softDeleteRecord("Budget", budgetId, "Super Administrator budget deletion.");
+    }
+
+    public void updateBudgetGroupStatus(String budgetName, String budgetMonth, String status) {
+        if (budgetName == null || budgetName.isBlank()) {
+            throw new IllegalArgumentException("Budget name is required");
+        }
+        String month = normalizeBudgetMonth(budgetMonth);
+        String sql = """
+                UPDATE budgets
+                SET status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE budget_name = ?
+                  AND budget_month = ?
+                """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setInt(1, budgetId);
+            statement.setString(1, normalizedBudgetStatus(status));
+            statement.setString(2, budgetName.trim());
+            statement.setString(3, month);
             statement.executeUpdate();
         } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to delete budget", exception);
+            throw new IllegalStateException("Failed to update budget status", exception);
         }
+    }
+
+    public void copyBudgetToNewPeriod(String budgetName, String fromBudgetMonth, String toBudgetMonth, String startDate, String endDate) {
+        if (budgetName == null || budgetName.isBlank()) {
+            throw new IllegalArgumentException("Budget name is required");
+        }
+        String fromMonth = normalizeBudgetMonth(fromBudgetMonth);
+        String toMonth = normalizeBudgetMonth(toBudgetMonth);
+        String sql = """
+                INSERT INTO budgets (
+                    budget_name, category_id, budget_month, amount_limit, rollover, status, notes,
+                    budget_type, start_date, end_date, currency, expected_income, planned_savings, overall_spending_limit
+                )
+                SELECT budget_name, category_id, ?, amount_limit, rollover, 'DRAFT', notes,
+                       budget_type, ?, ?, currency, expected_income, planned_savings, overall_spending_limit
+                FROM budgets
+                WHERE budget_name = ?
+                  AND budget_month = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonth);
+            statement.setString(2, blankToNull(startDate));
+            statement.setString(3, blankToNull(endDate));
+            statement.setString(4, budgetName.trim());
+            statement.setString(5, fromMonth);
+            statement.executeUpdate();
+            ensureBudgetOwnerForMonth(connection, toMonth);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to copy budget", exception);
+        }
+    }
+
+    public List<String> listBudgetRevisionHistory(String budgetName, String budgetMonth) {
+        List<String> history = new ArrayList<>();
+        if (budgetName == null || budgetName.isBlank()) {
+            return history;
+        }
+        String sql = """
+                SELECT category_name, previous_amount, new_amount, reason, changed_by, changed_at
+                FROM budget_revisions
+                WHERE budget_name = ?
+                  AND budget_month = ?
+                ORDER BY changed_at DESC, id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, budgetName.trim());
+            statement.setString(2, normalizeBudgetMonth(budgetMonth));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    history.add("%s | %s | %.2f -> %.2f | %s | %s".formatted(
+                            resultSet.getString("changed_at"),
+                            valueOrFallback(resultSet.getString("category_name"), "All expense categories"),
+                            resultSet.getDouble("previous_amount"),
+                            resultSet.getDouble("new_amount"),
+                            valueOrFallback(resultSet.getString("reason"), "No reason recorded"),
+                            valueOrFallback(resultSet.getString("changed_by"), "Unknown user")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list budget revision history", exception);
+        }
+        return history;
+    }
+
+    public List<FinanceTransaction> listExpenseTransactionsForBudgetCategory(String budgetMonth, Integer categoryId) {
+        List<FinanceTransaction> transactions = new ArrayList<>();
+        String sql = """
+                SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
+                       c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
+                       t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.transaction_type = 'EXPENSE'
+                  AND substr(t.transaction_date, 1, 7) = ?
+                  AND (? IS NULL OR t.category_id = ?)
+                ORDER BY t.transaction_date DESC, t.id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, normalizeBudgetMonth(budgetMonth));
+            setNullableInt(statement, 2, categoryId);
+            setNullableInt(statement, 3, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    transactions.add(new FinanceTransaction(
+                            resultSet.getInt("id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("transaction_type"),
+                            resultSet.getString("transaction_purpose"),
+                            resultSet.getString("transaction_status"),
+                            resultSet.getString("category_name"),
+                            resultSet.getString("project_name"),
+                            resultSet.getString("full_name"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("description"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            nullableInt(resultSet, "project_activity_id"),
+                            resultSet.getString("activity_name")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list budget category expenses", exception);
+        }
+        return transactions;
     }
 
     public List<HouseholdMonthMember> listHouseholdMonthMembers(String budgetMonth) {
@@ -2094,8 +10010,68 @@ public class DatabaseHandler {
                 resultSet.getDouble("amount_limit"),
                 resultSet.getInt("rollover") == 1,
                 resultSet.getString("status"),
-                resultSet.getString("notes")
+                resultSet.getString("notes"),
+                resultSet.getString("budget_type"),
+                resultSet.getString("start_date"),
+                resultSet.getString("end_date"),
+                resultSet.getString("currency"),
+                resultSet.getDouble("expected_income"),
+                resultSet.getDouble("planned_savings"),
+                resultSet.getDouble("overall_spending_limit")
         );
+    }
+
+    private Budget findBudgetById(Connection connection, int budgetId) throws SQLException {
+        String sql = """
+                SELECT b.id, b.budget_name, b.category_id, c.category_name, b.budget_month,
+                       b.amount_limit, b.rollover, b.status, b.notes,
+                       b.budget_type, b.start_date, b.end_date, b.currency,
+                       b.expected_income, b.planned_savings, b.overall_spending_limit
+                FROM budgets b
+                LEFT JOIN categories c ON c.id = b.category_id
+                WHERE b.id = ?
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, budgetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? budgetFromResult(resultSet) : null;
+            }
+        }
+    }
+
+    private void recordBudgetRevisionIfChanged(
+            Connection connection,
+            Budget existing,
+            int budgetId,
+            String budgetName,
+            String budgetMonth,
+            double newAmount,
+            String revisionReason
+    ) throws SQLException {
+        if (existing == null || Math.abs(existing.getAmountLimit() - newAmount) < 0.005) {
+            return;
+        }
+        String reason = revisionReason == null ? "" : revisionReason.trim();
+        if (reason.isBlank()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO budget_revisions (
+                    budget_id, budget_name, budget_month, category_name,
+                    previous_amount, new_amount, reason, changed_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            statement.setInt(1, budgetId);
+            statement.setString(2, budgetName.trim());
+            statement.setString(3, normalizeBudgetMonth(budgetMonth));
+            statement.setString(4, existing.getCategoryName());
+            statement.setDouble(5, existing.getAmountLimit());
+            statement.setDouble(6, newAmount);
+            statement.setString(7, reason);
+            statement.setString(8, currentUserDisplayName());
+            statement.executeUpdate();
+        }
     }
 
     private void validateBudget(String budgetName, String budgetMonth, double amountLimit) {
@@ -2110,27 +10086,106 @@ public class DatabaseHandler {
         }
     }
 
+    private void validateBudgetPlanHeader(String budgetName, String budgetMonth, String startDate, String endDate) {
+        if (budgetName == null || budgetName.isBlank()) {
+            throw new IllegalArgumentException("Budget name is required");
+        }
+        String month = normalizeBudgetMonth(budgetMonth);
+        if (!month.matches("\\d{4}-\\d{2}")) {
+            throw new IllegalArgumentException("Budget month must use YYYY-MM format");
+        }
+        LocalDate start = parseNullableIsoDate(startDate, "Start date");
+        LocalDate end = parseNullableIsoDate(endDate, "End date");
+        if (start != null && end != null && end.isBefore(start)) {
+            throw new IllegalArgumentException("End date cannot be before start date");
+        }
+    }
+
+    private LocalDate parseNullableIsoDate(String value, String label) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException(label + " must use YYYY-MM-DD format");
+        }
+    }
+
     private String normalizedBudgetStatus(String status) {
         if (status == null || status.isBlank()) {
-            return "PLANNED";
+            return "DRAFT";
         }
         String normalized = status.trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
-        if ("ACTIVE".equals(normalized)) {
-            return "ON_BUDGET";
+        if ("PLANNED".equals(normalized)) {
+            return "DRAFT";
         }
-        if (List.of("PLANNED", "ON_BUDGET", "FULFILLED", "NOT_MET", "PAUSED", "CLOSED").contains(normalized)) {
+        if ("ON_BUDGET".equals(normalized)) {
+            return "ACTIVE";
+        }
+        if ("FULFILLED".equals(normalized)) {
+            return "CLOSED";
+        }
+        if ("NOT_MET".equals(normalized)) {
+            return "EXCEEDED";
+        }
+        if (List.of("DRAFT", "ACTIVE", "AT_RISK", "EXCEEDED", "PAUSED", "CLOSED", "ARCHIVED").contains(normalized)) {
             return normalized;
         }
-        return "PLANNED";
+        return "DRAFT";
+    }
+
+    private String normalizedBudgetType(String budgetType) {
+        if (budgetType == null || budgetType.isBlank()) {
+            return "Monthly";
+        }
+        String normalized = budgetType.trim();
+        String upper = normalized.toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return switch (upper) {
+            case "WEEKLY" -> "Weekly";
+            case "QUARTERLY" -> "Quarterly";
+            case "ANNUAL", "YEARLY" -> "Annual";
+            case "CUSTOM", "CUSTOM PERIOD" -> "Custom period";
+            case "PROJECT", "PROJECT BUDGET" -> "Project budget";
+            case "GOAL", "GOAL RELATED", "GOAL-RELATED", "GOAL-RELATED BUDGET" -> "Goal-related budget";
+            default -> "Monthly";
+        };
+    }
+
+    private String normalizedCurrency(String currency) {
+        String normalized = normalizedCurrencyCodeOrDefault(currency);
+        return normalized.isBlank() ? DEFAULT_CURRENCY_CODE : normalized;
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String valueOrFallback(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String currentUserDisplayName() {
+        if (!UserSession.isAuthenticated()) {
+            return "System";
+        }
+        SystemUser user = UserSession.getWorkspaceUser();
+        return user == null ? "System" : user.getDisplayName();
     }
 
     public List<Project> listProjects() {
         List<Project> projects = new ArrayList<>();
         String sql = """
                 SELECT p.id, p.project_name, p.description, p.planned_budget, p.start_date, p.end_date, p.status,
+                       p.project_type, p.project_owner, p.priority, p.currency, p.funding_source,
+                       p.funding_account_id, a.account_name AS funding_account_name,
+                       p.linked_goal_id, g.goal_name AS linked_goal_name, p.notes,
                        COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' THEN t.amount ELSE 0 END), 0) AS amount_spent
                 FROM projects p
+                LEFT JOIN accounts a ON a.id = p.funding_account_id
+                LEFT JOIN goals g ON g.id = p.linked_goal_id
                 LEFT JOIN valid_transactions t ON t.project_id = p.id
+                WHERE COALESCE(p.is_deleted, 0) = 0
                 GROUP BY p.id
                 ORDER BY p.project_name
                 """;
@@ -2138,16 +10193,7 @@ public class DatabaseHandler {
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
-                projects.add(new Project(
-                        resultSet.getInt("id"),
-                        resultSet.getString("project_name"),
-                        resultSet.getString("description"),
-                        resultSet.getDouble("planned_budget"),
-                        resultSet.getDouble("amount_spent"),
-                        resultSet.getString("start_date"),
-                        resultSet.getString("end_date"),
-                        resultSet.getString("status")
-                ));
+                projects.add(projectFromResult(resultSet));
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to list projects", exception);
@@ -2160,17 +10206,130 @@ public class DatabaseHandler {
     }
 
     public void addProject(String name, String description, double plannedBudget, String startDate, String endDate, String status) {
-        String sql = "INSERT INTO projects (project_name, description, planned_budget, start_date, end_date, status) VALUES (?, ?, ?, ?, ?, ?)";
-        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        addProject(
+                name,
+                "Other",
+                description,
+                startDate,
+                endDate,
+                "",
+                "Medium",
+                "MWK",
+                plannedBudget,
+                "",
+                null,
+                null,
+                status,
+                ""
+        );
+    }
+
+    public void addProject(
+            String name,
+            String projectType,
+            String description,
+            String startDate,
+            String endDate,
+            String projectOwner,
+            String priority,
+            String currency,
+            double plannedBudget,
+            String fundingSource,
+            Integer fundingAccountId,
+            Integer linkedGoalId,
+            String status,
+            String notes
+    ) {
+        validateProject(name, plannedBudget, startDate, endDate);
+        String sql = """
+                INSERT INTO projects (
+                    project_name, project_type, description, start_date, end_date, project_owner, priority,
+                    currency, planned_budget, funding_source, funding_account_id, linked_goal_id, status, notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setString(1, name);
-            statement.setString(2, description);
-            statement.setDouble(3, plannedBudget);
-            statement.setString(4, startDate);
-            statement.setString(5, endDate);
-            statement.setString(6, status == null || status.isBlank() ? "ACTIVE" : status);
+            statement.setString(2, normalizedProjectType(projectType));
+            statement.setString(3, description);
+            statement.setString(4, blankToNull(startDate));
+            statement.setString(5, blankToNull(endDate));
+            statement.setString(6, blankToNull(projectOwner));
+            statement.setString(7, normalizedPriority(priority));
+            statement.setString(8, normalizedCurrency(currency));
+            statement.setDouble(9, Math.max(0, plannedBudget));
+            statement.setString(10, blankToNull(fundingSource));
+            setNullableInt(statement, 11, fundingAccountId);
+            setNullableInt(statement, 12, linkedGoalId);
+            statement.setString(13, normalizedProjectStatus(status));
+            statement.setString(14, notes);
             statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                if (keys.next()) {
+                    recordProjectHistory(connection, keys.getInt(1), "Created", "Project created as " + normalizedProjectStatus(status) + ".");
+                }
+            }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to add project", exception);
+        }
+    }
+
+    public void updateProject(
+            int projectId,
+            String name,
+            String projectType,
+            String description,
+            String startDate,
+            String endDate,
+            String projectOwner,
+            String priority,
+            String currency,
+            double plannedBudget,
+            String fundingSource,
+            Integer fundingAccountId,
+            Integer linkedGoalId,
+            String status,
+            String notes
+    ) {
+        validateProject(name, plannedBudget, startDate, endDate);
+        String sql = """
+                UPDATE projects
+                SET project_name = ?,
+                    project_type = ?,
+                    description = ?,
+                    start_date = ?,
+                    end_date = ?,
+                    project_owner = ?,
+                    priority = ?,
+                    currency = ?,
+                    planned_budget = ?,
+                    funding_source = ?,
+                    funding_account_id = ?,
+                    linked_goal_id = ?,
+                    status = ?,
+                    notes = ?
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, name.trim());
+            statement.setString(2, normalizedProjectType(projectType));
+            statement.setString(3, description);
+            statement.setString(4, blankToNull(startDate));
+            statement.setString(5, blankToNull(endDate));
+            statement.setString(6, blankToNull(projectOwner));
+            statement.setString(7, normalizedPriority(priority));
+            statement.setString(8, normalizedCurrency(currency));
+            statement.setDouble(9, Math.max(0, plannedBudget));
+            statement.setString(10, blankToNull(fundingSource));
+            setNullableInt(statement, 11, fundingAccountId);
+            setNullableInt(statement, 12, linkedGoalId);
+            statement.setString(13, normalizedProjectStatus(status));
+            statement.setString(14, notes);
+            statement.setInt(15, projectId);
+            statement.executeUpdate();
+            recordProjectHistory(connection, projectId, "Updated", "Project details updated.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update project", exception);
         }
     }
 
@@ -2187,13 +10346,44 @@ public class DatabaseHandler {
     }
 
     public void updateProjectStatus(int projectId, String status) {
+        String cleanStatus = normalizedProjectStatus(status);
         String sql = "UPDATE projects SET status = ? WHERE id = ?";
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, status == null || status.isBlank() ? "ACTIVE" : status);
+            statement.setString(1, cleanStatus);
             statement.setInt(2, projectId);
             statement.executeUpdate();
+            recordProjectHistory(connection, projectId, cleanStatus, "Project status changed to " + cleanStatus + ".");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to update project status", exception);
+        }
+    }
+
+    public int copyProject(int projectId, String projectName) {
+        String name = projectName == null || projectName.isBlank() ? "Project Copy" : projectName.trim();
+        String sql = """
+                INSERT INTO projects (
+                    project_name, project_type, description, planned_budget, start_date, end_date, status,
+                    project_owner, priority, currency, funding_source, funding_account_id, linked_goal_id, notes
+                )
+                SELECT ?, project_type, description, planned_budget, start_date, end_date, 'DRAFT',
+                       project_owner, priority, currency, funding_source, funding_account_id, linked_goal_id, notes
+                FROM projects
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, name);
+            statement.setInt(2, projectId);
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                if (keys.next()) {
+                    int newProjectId = keys.getInt(1);
+                    recordProjectHistory(connection, newProjectId, "Copied", "Project copied from project #" + projectId + " as draft.");
+                    return newProjectId;
+                }
+            }
+            return -1;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to copy project", exception);
         }
     }
 
@@ -2205,24 +10395,136 @@ public class DatabaseHandler {
             String reason,
             String status
     ) {
+        addProjectActivity(
+                projectId,
+                activityName,
+                "Other",
+                description,
+                activityDate,
+                null,
+                null,
+                null,
+                0,
+                "",
+                "Medium",
+                0,
+                status,
+                reason,
+                ""
+        );
+    }
+
+    public void addProjectActivity(
+            int projectId,
+            String activityName,
+            String activityType,
+            String description,
+            LocalDate activityDate,
+            LocalDate plannedStartDate,
+            LocalDate plannedCompletionDate,
+            LocalDate actualCompletionDate,
+            double plannedCost,
+            String responsiblePerson,
+            String priority,
+            double progress,
+            String status,
+            String notes,
+            String evidenceReference
+    ) {
         if (activityName == null || activityName.isBlank()) {
             throw new IllegalArgumentException("Activity name is required");
         }
         String sql = """
                 INSERT INTO project_activities (
-                    project_id, activity_name, activity_date, description, reason, status
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    project_id, activity_name, activity_type, activity_date, description,
+                    start_date, end_date, actual_completion_date, planned_cost,
+                    responsible_person, priority, progress, status, reason, evidence_reference
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setInt(1, projectId);
             statement.setString(2, activityName.trim());
-            statement.setString(3, (activityDate == null ? LocalDate.now() : activityDate).toString());
-            statement.setString(4, description);
-            statement.setString(5, reason);
-            statement.setString(6, status == null || status.isBlank() ? "Pending" : status);
+            statement.setString(3, normalizedActivityType(activityType));
+            statement.setString(4, (activityDate == null ? LocalDate.now() : activityDate).toString());
+            statement.setString(5, description);
+            statement.setString(6, plannedStartDate == null ? null : plannedStartDate.toString());
+            statement.setString(7, plannedCompletionDate == null ? null : plannedCompletionDate.toString());
+            statement.setString(8, actualCompletionDate == null ? null : actualCompletionDate.toString());
+            statement.setDouble(9, Math.max(0, plannedCost));
+            statement.setString(10, blankToNull(responsiblePerson));
+            statement.setString(11, normalizedPriority(priority));
+            statement.setDouble(12, boundedPercent(progress));
+            statement.setString(13, normalizedActivityStatus(status));
+            statement.setString(14, notes);
+            statement.setString(15, blankToNull(evidenceReference));
             statement.executeUpdate();
+            recordProjectHistory(connection, projectId, "Activity", "Activity added: " + activityName.trim() + ".");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to add project activity", exception);
+        }
+    }
+
+    public void updateProjectActivity(
+            int activityId,
+            int projectId,
+            String activityName,
+            String activityType,
+            String description,
+            LocalDate activityDate,
+            LocalDate plannedStartDate,
+            LocalDate plannedCompletionDate,
+            LocalDate actualCompletionDate,
+            double plannedCost,
+            String responsiblePerson,
+            String priority,
+            double progress,
+            String status,
+            String notes,
+            String evidenceReference
+    ) {
+        if (activityName == null || activityName.isBlank()) {
+            throw new IllegalArgumentException("Activity name is required");
+        }
+        String sql = """
+                UPDATE project_activities
+                SET project_id = ?,
+                    activity_name = ?,
+                    activity_type = ?,
+                    activity_date = ?,
+                    description = ?,
+                    start_date = ?,
+                    end_date = ?,
+                    actual_completion_date = ?,
+                    planned_cost = ?,
+                    responsible_person = ?,
+                    priority = ?,
+                    progress = ?,
+                    status = ?,
+                    reason = ?,
+                    evidence_reference = ?
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            statement.setString(2, activityName.trim());
+            statement.setString(3, normalizedActivityType(activityType));
+            statement.setString(4, (activityDate == null ? LocalDate.now() : activityDate).toString());
+            statement.setString(5, description);
+            statement.setString(6, plannedStartDate == null ? null : plannedStartDate.toString());
+            statement.setString(7, plannedCompletionDate == null ? null : plannedCompletionDate.toString());
+            statement.setString(8, actualCompletionDate == null ? null : actualCompletionDate.toString());
+            statement.setDouble(9, Math.max(0, plannedCost));
+            statement.setString(10, blankToNull(responsiblePerson));
+            statement.setString(11, normalizedPriority(priority));
+            statement.setDouble(12, boundedPercent(progress));
+            statement.setString(13, normalizedActivityStatus(status));
+            statement.setString(14, notes);
+            statement.setString(15, blankToNull(evidenceReference));
+            statement.setInt(16, activityId);
+            statement.executeUpdate();
+            recordProjectHistory(connection, projectId, "Activity", "Activity updated: " + activityName.trim() + ".");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update project activity", exception);
         }
     }
 
@@ -2230,13 +10532,16 @@ public class DatabaseHandler {
         List<ProjectActivity> activities = new ArrayList<>();
         String sql = """
                 SELECT pa.id, pa.project_id, p.project_name, pa.activity_name, pa.activity_date, pa.description,
+                       COALESCE(pa.activity_type, 'Other') AS activity_type,
+                       COALESCE(pa.planned_cost, 0) AS planned_cost,
                        CASE
                            WHEN COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' THEN t.amount ELSE 0 END), 0) > 0
                                THEN COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' THEN t.amount ELSE 0 END), 0)
                            ELSE COALESCE(pa.amount_used, 0)
                        END AS amount_used,
                        c.category_name, a.account_name, pa.payment_method, pa.reason,
-                       pa.start_date, pa.end_date, pa.status
+                       pa.start_date, pa.end_date, pa.actual_completion_date, pa.responsible_person,
+                       pa.priority, COALESCE(pa.progress, 0) AS progress, pa.evidence_reference, pa.status
                 FROM project_activities pa
                 JOIN projects p ON p.id = pa.project_id
                 LEFT JOIN categories c ON c.id = pa.category_id
@@ -2254,8 +10559,10 @@ public class DatabaseHandler {
                         resultSet.getInt("project_id"),
                         resultSet.getString("project_name"),
                         resultSet.getString("activity_name"),
+                        resultSet.getString("activity_type"),
                         resultSet.getString("activity_date"),
                         resultSet.getString("description"),
+                        resultSet.getDouble("planned_cost"),
                         resultSet.getDouble("amount_used"),
                         resultSet.getString("category_name"),
                         resultSet.getString("account_name"),
@@ -2263,6 +10570,11 @@ public class DatabaseHandler {
                         resultSet.getString("reason"),
                         resultSet.getString("start_date"),
                         resultSet.getString("end_date"),
+                        resultSet.getString("actual_completion_date"),
+                        resultSet.getString("responsible_person"),
+                        resultSet.getString("priority"),
+                        resultSet.getDouble("progress"),
+                        resultSet.getString("evidence_reference"),
                         resultSet.getString("status")
                 ));
             }
@@ -2270,6 +10582,307 @@ public class DatabaseHandler {
             throw new IllegalStateException("Failed to list project activities", exception);
         }
         return activities;
+    }
+
+    public List<FinanceTransaction> listProjectTransactions(int projectId) {
+        List<FinanceTransaction> transactions = new ArrayList<>();
+        String sql = """
+                SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
+                       c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
+                       t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.project_id = ?
+                ORDER BY t.transaction_date DESC, t.id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    transactions.add(new FinanceTransaction(
+                            resultSet.getInt("id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("transaction_type"),
+                            resultSet.getString("transaction_purpose"),
+                            resultSet.getString("transaction_status"),
+                            resultSet.getString("category_name"),
+                            resultSet.getString("project_name"),
+                            resultSet.getString("full_name"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("description"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            nullableInt(resultSet, "project_activity_id"),
+                            resultSet.getString("activity_name")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list project transactions", exception);
+        }
+        return transactions;
+    }
+
+    public List<ProjectMilestone> listProjectMilestones(int projectId) {
+        List<ProjectMilestone> milestones = new ArrayList<>();
+        String sql = """
+                SELECT pm.id, pm.project_id, p.project_name, pm.milestone_name,
+                       pm.target_date, pm.completion_date, pm.status, pm.notes
+                FROM project_milestones pm
+                JOIN projects p ON p.id = pm.project_id
+                WHERE pm.project_id = ?
+                ORDER BY COALESCE(pm.target_date, ''), pm.milestone_name
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    milestones.add(new ProjectMilestone(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("project_id"),
+                            resultSet.getString("project_name"),
+                            resultSet.getString("milestone_name"),
+                            resultSet.getString("target_date"),
+                            resultSet.getString("completion_date"),
+                            resultSet.getString("status"),
+                            resultSet.getString("notes")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list project milestones", exception);
+        }
+        return milestones;
+    }
+
+    public void saveProjectMilestone(
+            Integer milestoneId,
+            int projectId,
+            String milestoneName,
+            String targetDate,
+            String completionDate,
+            String status,
+            String notes
+    ) {
+        if (milestoneName == null || milestoneName.isBlank()) {
+            throw new IllegalArgumentException("Milestone name is required");
+        }
+        String cleanStatus = normalizedMilestoneStatus(status);
+        String sql = milestoneId == null ? """
+                INSERT INTO project_milestones (project_id, milestone_name, target_date, completion_date, status, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """ : """
+                UPDATE project_milestones
+                SET project_id = ?,
+                    milestone_name = ?,
+                    target_date = ?,
+                    completion_date = ?,
+                    status = ?,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            statement.setString(2, milestoneName.trim());
+            statement.setString(3, blankToNull(targetDate));
+            statement.setString(4, blankToNull(completionDate));
+            statement.setString(5, cleanStatus);
+            statement.setString(6, notes);
+            if (milestoneId != null) {
+                statement.setInt(7, milestoneId);
+            }
+            statement.executeUpdate();
+            recordProjectHistory(connection, projectId, "Milestone", "Milestone " + (milestoneId == null ? "added: " : "updated: ") + milestoneName.trim() + ".");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save project milestone", exception);
+        }
+    }
+
+    public List<String> listProjectHistory(int projectId) {
+        List<String> history = new ArrayList<>();
+        String sql = """
+                SELECT event_type, description, created_by, created_at
+                FROM project_history
+                WHERE project_id = ?
+                ORDER BY created_at DESC, id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    history.add("%s | %s | %s | %s".formatted(
+                            resultSet.getString("created_at"),
+                            resultSet.getString("event_type"),
+                            resultSet.getString("description"),
+                            valueOrFallback(resultSet.getString("created_by"), "System")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list project history", exception);
+        }
+        return history;
+    }
+
+    private Project projectFromResult(ResultSet resultSet) throws SQLException {
+        return new Project(
+                resultSet.getInt("id"),
+                resultSet.getString("project_name"),
+                resultSet.getString("description"),
+                resultSet.getDouble("planned_budget"),
+                resultSet.getDouble("amount_spent"),
+                resultSet.getString("start_date"),
+                resultSet.getString("end_date"),
+                resultSet.getString("status"),
+                resultSet.getString("project_type"),
+                resultSet.getString("project_owner"),
+                resultSet.getString("priority"),
+                resultSet.getString("currency"),
+                resultSet.getString("funding_source"),
+                nullableInt(resultSet, "funding_account_id"),
+                resultSet.getString("funding_account_name"),
+                nullableInt(resultSet, "linked_goal_id"),
+                resultSet.getString("linked_goal_name"),
+                resultSet.getString("notes")
+        );
+    }
+
+    private void validateProject(String name, double plannedBudget, String startDate, String endDate) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Project name is required");
+        }
+        if (plannedBudget < 0) {
+            throw new IllegalArgumentException("Planned budget cannot be negative");
+        }
+        if (startDate != null && !startDate.isBlank() && endDate != null && !endDate.isBlank()) {
+            try {
+                if (LocalDate.parse(endDate).isBefore(LocalDate.parse(startDate))) {
+                    throw new IllegalArgumentException("Expected completion date cannot be before the start date");
+                }
+            } catch (DateTimeParseException exception) {
+                throw new IllegalArgumentException("Project dates must use YYYY-MM-DD format");
+            }
+        }
+    }
+
+    private String normalizedProjectStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "DRAFT";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return switch (normalized) {
+            case "DRAFT" -> "Draft";
+            case "PLANNED" -> "Planned";
+            case "ACTIVE", "ON BUDGET" -> "Active";
+            case "AT RISK" -> "At Risk";
+            case "DELAYED" -> "Delayed";
+            case "PAUSED", "ON HOLD" -> "Paused";
+            case "COMPLETED", "CLOSED" -> "Completed";
+            case "CANCELLED", "CANCELED" -> "Cancelled";
+            case "ARCHIVED" -> "Archived";
+            default -> "Draft";
+        };
+    }
+
+    private String normalizedProjectType(String projectType) {
+        if (projectType == null || projectType.isBlank()) {
+            return "Other";
+        }
+        String normalized = projectType.trim().toUpperCase(Locale.ENGLISH);
+        return switch (normalized) {
+            case "BUSINESS" -> "Business";
+            case "CONSTRUCTION" -> "Construction";
+            case "AGRICULTURE" -> "Agriculture";
+            case "EDUCATION" -> "Education";
+            case "HOUSEHOLD" -> "Household";
+            case "TECHNOLOGY" -> "Technology";
+            case "COMMUNITY" -> "Community";
+            case "PERSONAL" -> "Personal";
+            default -> "Other";
+        };
+    }
+
+    private String normalizedPriority(String priority) {
+        if (priority == null || priority.isBlank()) {
+            return "Medium";
+        }
+        String normalized = priority.trim().toUpperCase(Locale.ENGLISH);
+        return switch (normalized) {
+            case "CRITICAL" -> "Critical";
+            case "HIGH" -> "High";
+            case "OPTIONAL" -> "Optional";
+            default -> "Medium";
+        };
+    }
+
+    private String normalizedActivityType(String activityType) {
+        if (activityType == null || activityType.isBlank()) {
+            return "Other";
+        }
+        String normalized = activityType.trim().toUpperCase(Locale.ENGLISH);
+        return switch (normalized) {
+            case "PLANNING" -> "Planning";
+            case "PROCUREMENT" -> "Procurement";
+            case "IMPLEMENTATION" -> "Implementation";
+            case "TRAINING" -> "Training";
+            case "MONITORING" -> "Monitoring";
+            case "CONSTRUCTION" -> "Construction";
+            case "PURCHASE" -> "Purchase";
+            case "ADMINISTRATIVE" -> "Administrative";
+            default -> "Other";
+        };
+    }
+
+    private String normalizedActivityStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "Not Started";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return switch (normalized) {
+            case "IN PROGRESS", "ACTIVE" -> "In Progress";
+            case "COMPLETED", "DONE", "FINISHED" -> "Completed";
+            case "DELAYED", "OVERDUE" -> "Delayed";
+            case "PAUSED", "ON HOLD" -> "Paused";
+            case "CANCELLED", "CANCELED" -> "Cancelled";
+            default -> "Not Started";
+        };
+    }
+
+    private String normalizedMilestoneStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "Not Started";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ENGLISH).replace('_', ' ');
+        return switch (normalized) {
+            case "IN PROGRESS", "ACTIVE" -> "In Progress";
+            case "COMPLETED", "DONE", "FINISHED" -> "Completed";
+            case "DELAYED", "OVERDUE" -> "Delayed";
+            case "SKIPPED" -> "Skipped";
+            default -> "Not Started";
+        };
+    }
+
+    private double boundedPercent(double value) {
+        return Math.max(0, Math.min(100, value));
+    }
+
+    private void recordProjectHistory(Connection connection, int projectId, String eventType, String description) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO project_history (project_id, event_type, description, created_by)
+                VALUES (?, ?, ?, ?)
+                """)) {
+            statement.setInt(1, projectId);
+            statement.setString(2, eventType);
+            statement.setString(3, description);
+            statement.setString(4, currentUserDisplayName());
+            statement.executeUpdate();
+        }
     }
 
     public List<Person> listPeople() {
@@ -2308,7 +10921,34 @@ public class DatabaseHandler {
 
     public List<Goal> listGoals() {
         List<Goal> goals = new ArrayList<>();
-        String sql = "SELECT id, goal_name, target_amount, current_amount, monthly_contribution, target_date, status FROM goals ORDER BY goal_name";
+        String sql = """
+                SELECT g.id, g.goal_name, g.target_amount,
+                       CASE
+                           WHEN EXISTS (
+                               SELECT 1 FROM goal_contributions gc
+                               WHERE gc.goal_id = g.id
+                                 AND COALESCE(gc.status, 'ACTIVE') <> 'CANCELLED'
+                           )
+                           THEN COALESCE((
+                               SELECT SUM(CASE
+                                   WHEN upper(COALESCE(gc2.contribution_type, '')) IN ('WITHDRAWAL', 'REALLOCATION_OUT') THEN -gc2.amount
+                                   ELSE gc2.amount
+                               END)
+                               FROM goal_contributions gc2
+                               WHERE gc2.goal_id = g.id
+                                 AND COALESCE(gc2.status, 'ACTIVE') <> 'CANCELLED'
+                           ), 0)
+                           ELSE g.current_amount
+                       END AS allocated_amount,
+                       g.monthly_contribution, g.target_date, g.status,
+                       g.goal_type, g.currency, g.start_date, g.priority,
+                       g.funding_account_id, a.account_name AS funding_account_name,
+                       g.contribution_frequency, g.description
+                FROM goals g
+                LEFT JOIN accounts a ON a.id = g.funding_account_id
+                WHERE COALESCE(g.is_deleted, 0) = 0
+                ORDER BY g.goal_name
+                """;
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -2317,10 +10957,18 @@ public class DatabaseHandler {
                         resultSet.getInt("id"),
                         resultSet.getString("goal_name"),
                         resultSet.getDouble("target_amount"),
-                        resultSet.getDouble("current_amount"),
+                        resultSet.getDouble("allocated_amount"),
                         resultSet.getDouble("monthly_contribution"),
                         resultSet.getString("target_date"),
-                        resultSet.getString("status")
+                        resultSet.getString("status"),
+                        resultSet.getString("goal_type"),
+                        resultSet.getString("currency"),
+                        resultSet.getString("start_date"),
+                        resultSet.getString("priority"),
+                        nullableInt(resultSet, "funding_account_id"),
+                        resultSet.getString("funding_account_name"),
+                        resultSet.getString("contribution_frequency"),
+                        resultSet.getString("description")
                 ));
             }
         } catch (SQLException exception) {
@@ -2334,14 +10982,45 @@ public class DatabaseHandler {
     }
 
     public int addGoal(String name, double targetAmount, double currentAmount, double monthlyContribution, String targetDate, String status) {
-        String sql = "INSERT INTO goals (goal_name, target_amount, current_amount, monthly_contribution, target_date, status) VALUES (?, ?, ?, ?, ?, ?)";
+        return addGoal(name, "Savings", targetAmount, "MWK", currentAmount, null, targetDate, "Medium", null, "Monthly", monthlyContribution, "", status);
+    }
+
+    public int addGoal(
+            String name,
+            String goalType,
+            double targetAmount,
+            String currency,
+            double currentAmount,
+            String startDate,
+            String targetDate,
+            String priority,
+            Integer fundingAccountId,
+            String contributionFrequency,
+            double monthlyContribution,
+            String description,
+            String status
+    ) {
+        String sql = """
+                INSERT INTO goals (
+                    goal_name, goal_type, target_amount, currency, current_amount,
+                    start_date, target_date, priority, funding_account_id,
+                    contribution_frequency, monthly_contribution, description, status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setString(1, name);
-            statement.setDouble(2, targetAmount);
-            statement.setDouble(3, currentAmount);
-            statement.setDouble(4, monthlyContribution);
-            statement.setString(5, targetDate);
-            statement.setString(6, status == null || status.isBlank() ? "ACTIVE" : status);
+            statement.setString(2, safeText(goalType, "Savings"));
+            statement.setDouble(3, targetAmount);
+            statement.setString(4, safeText(currency, "MWK"));
+            statement.setDouble(5, currentAmount);
+            statement.setString(6, cleanNullable(startDate));
+            statement.setString(7, cleanNullable(targetDate));
+            statement.setString(8, safeText(priority, "Medium"));
+            setNullableInt(statement, 9, fundingAccountId);
+            statement.setString(10, safeText(contributionFrequency, "Monthly"));
+            statement.setDouble(11, monthlyContribution);
+            statement.setString(12, safeText(description, ""));
+            statement.setString(13, normalizeGoalStatus(status));
             statement.executeUpdate();
             return generatedId(connection, statement);
         } catch (SQLException exception) {
@@ -2456,24 +11135,58 @@ public class DatabaseHandler {
             String targetDate,
             String status
     ) {
+        updateGoal(goalId, name, "Savings", targetAmount, "MWK", currentAmount, null, targetDate, "Medium", null, "Monthly", monthlyContribution, "", status);
+    }
+
+    public void updateGoal(
+            int goalId,
+            String name,
+            String goalType,
+            double targetAmount,
+            String currency,
+            double currentAmount,
+            String startDate,
+            String targetDate,
+            String priority,
+            Integer fundingAccountId,
+            String contributionFrequency,
+            double monthlyContribution,
+            String description,
+            String status
+    ) {
         String sql = """
                 UPDATE goals
                 SET goal_name = ?,
+                    goal_type = ?,
                     target_amount = ?,
+                    currency = ?,
                     current_amount = ?,
+                    start_date = ?,
                     monthly_contribution = ?,
                     target_date = ?,
-                    status = ?
+                    priority = ?,
+                    funding_account_id = ?,
+                    contribution_frequency = ?,
+                    description = ?,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, name);
-            statement.setDouble(2, targetAmount);
-            statement.setDouble(3, currentAmount);
-            statement.setDouble(4, monthlyContribution);
-            statement.setString(5, targetDate);
-            statement.setString(6, status == null || status.isBlank() ? "ACTIVE" : status);
-            statement.setInt(7, goalId);
+            statement.setString(2, safeText(goalType, "Savings"));
+            statement.setDouble(3, targetAmount);
+            statement.setString(4, safeText(currency, "MWK"));
+            statement.setDouble(5, currentAmount);
+            statement.setString(6, cleanNullable(startDate));
+            statement.setDouble(7, monthlyContribution);
+            statement.setString(8, cleanNullable(targetDate));
+            statement.setString(9, safeText(priority, "Medium"));
+            setNullableInt(statement, 10, fundingAccountId);
+            statement.setString(11, safeText(contributionFrequency, "Monthly"));
+            statement.setString(12, safeText(description, ""));
+            statement.setString(13, normalizeGoalStatus(status));
+            statement.setInt(14, goalId);
             if (statement.executeUpdate() == 0) {
                 throw new IllegalArgumentException("Select a valid goal to edit.");
             }
@@ -2482,17 +11195,264 @@ public class DatabaseHandler {
         }
     }
 
-    public void deleteGoal(int goalId) {
-        requireSuperAdminForPhysicalDeletion("delete goal " + goalId);
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement("DELETE FROM goals WHERE id = ?")) {
-            statement.setInt(1, goalId);
+    public void updateGoalStatus(int goalId, String status, String note) {
+        String sql = """
+                UPDATE goals
+                SET status = ?,
+                    description = trim(COALESCE(description, '') || ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, normalizeGoalStatus(status));
+            statement.setString(2, System.lineSeparator() + LocalDate.now() + ": " + safeText(note, "Status updated."));
+            statement.setInt(3, goalId);
             if (statement.executeUpdate() == 0) {
-                throw new IllegalArgumentException("Select a valid goal to delete.");
+                throw new IllegalArgumentException("Select a valid goal.");
             }
         } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to delete goal", exception);
+            throw new IllegalStateException("Failed to update goal status", exception);
         }
+    }
+
+    public boolean goalExistsByName(String goalName, Integer excludedGoalId) {
+        String sql = """
+                SELECT 1
+                FROM goals
+                WHERE lower(trim(goal_name)) = lower(trim(?))
+                  AND (? IS NULL OR id <> ?)
+                LIMIT 1
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, safeText(goalName, ""));
+            setNullableInt(statement, 2, excludedGoalId);
+            setNullableInt(statement, 3, excludedGoalId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check goal name", exception);
+        }
+    }
+
+    public List<GoalContribution> listGoalContributions(Integer goalId) {
+        List<GoalContribution> contributions = new ArrayList<>();
+        String sql = """
+                SELECT gc.id, gc.goal_id, g.goal_name, gc.contribution_date, gc.amount, gc.currency,
+                       gc.contribution_type, source.account_name AS source_account_name,
+                       destination.account_name AS destination_account_name,
+                       gc.transaction_id, gc.allocation_reference, gc.status, gc.notes
+                FROM goal_contributions gc
+                JOIN goals g ON g.id = gc.goal_id
+                LEFT JOIN accounts source ON source.id = gc.source_account_id
+                LEFT JOIN accounts destination ON destination.id = gc.destination_account_id
+                WHERE (? IS NULL OR gc.goal_id = ?)
+                ORDER BY gc.contribution_date DESC, gc.id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, goalId);
+            setNullableInt(statement, 2, goalId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    contributions.add(new GoalContribution(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("goal_id"),
+                            resultSet.getString("goal_name"),
+                            resultSet.getString("contribution_date"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("currency"),
+                            resultSet.getString("contribution_type"),
+                            resultSet.getString("source_account_name"),
+                            resultSet.getString("destination_account_name"),
+                            nullableInt(resultSet, "transaction_id"),
+                            resultSet.getString("allocation_reference"),
+                            resultSet.getString("status"),
+                            resultSet.getString("notes")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list goal contributions", exception);
+        }
+        return contributions;
+    }
+
+    public int recordGoalContribution(
+            int goalId,
+            LocalDate contributionDate,
+            double amount,
+            String currency,
+            String contributionType,
+            Integer sourceAccountId,
+            Integer destinationAccountId,
+            Integer transactionId,
+            String allocationReference,
+            String status,
+            String notes
+    ) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Contribution amount must be greater than zero.");
+        }
+        if (contributionDate == null) {
+            throw new IllegalArgumentException("Contribution date is required.");
+        }
+        String sql = """
+                INSERT INTO goal_contributions (
+                    goal_id, contribution_date, amount, currency, contribution_type,
+                    source_account_id, destination_account_id, transaction_id,
+                    allocation_reference, status, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                if (!"OPENING_ALLOCATION".equalsIgnoreCase(safeText(contributionType, ""))) {
+                    ensureOpeningGoalContribution(connection, goalId);
+                }
+                int contributionId;
+                try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setInt(1, goalId);
+                    statement.setString(2, contributionDate.toString());
+                    statement.setDouble(3, amount);
+                    statement.setString(4, safeText(currency, "MWK"));
+                    statement.setString(5, safeText(contributionType, "Allocation"));
+                    setNullableInt(statement, 6, sourceAccountId);
+                    setNullableInt(statement, 7, destinationAccountId);
+                    setNullableInt(statement, 8, transactionId);
+                    statement.setString(9, cleanNullable(allocationReference));
+                    statement.setString(10, safeText(status, "ACTIVE").toUpperCase(Locale.ENGLISH));
+                    statement.setString(11, safeText(notes, ""));
+                    statement.executeUpdate();
+                    contributionId = generatedId(connection, statement);
+                }
+                syncGoalCurrentAmount(connection, goalId);
+                connection.commit();
+                return contributionId;
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record goal contribution", exception);
+        }
+    }
+
+    public double activeGoalAllocationForAccount(int accountId, Integer excludedGoalId) {
+        String sql = """
+                SELECT COALESCE(SUM(gc.amount), 0)
+                FROM goal_contributions gc
+                JOIN goals g ON g.id = gc.goal_id
+                WHERE gc.source_account_id = ?
+                  AND upper(COALESCE(gc.contribution_type, '')) IN ('ALLOCATION', 'OPENING_ALLOCATION')
+                  AND COALESCE(gc.status, 'ACTIVE') = 'ACTIVE'
+                  AND COALESCE(g.status, 'ACTIVE') NOT IN ('CANCELLED', 'ARCHIVED', 'ACHIEVED')
+                  AND (? IS NULL OR gc.goal_id <> ?)
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            setNullableInt(statement, 2, excludedGoalId);
+            setNullableInt(statement, 3, excludedGoalId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getDouble(1) : 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate allocated savings", exception);
+        }
+    }
+
+    private void ensureOpeningGoalContribution(Connection connection, int goalId) throws SQLException {
+        try (PreparedStatement countStatement = connection.prepareStatement(
+                "SELECT COUNT(gc.id), COALESCE(MAX(g.current_amount), 0), COALESCE(MAX(g.currency), 'MWK'), MAX(g.funding_account_id) FROM goals g LEFT JOIN goal_contributions gc ON gc.goal_id = g.id WHERE g.id = ?")) {
+            countStatement.setInt(1, goalId);
+            try (ResultSet resultSet = countStatement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid goal.");
+                }
+                int contributionCount = resultSet.getInt(1);
+                double currentAmount = resultSet.getDouble(2);
+                if (contributionCount > 0 || currentAmount <= 0.005) {
+                    return;
+                }
+                String currency = resultSet.getString(3);
+                Integer fundingAccountId = nullableInt(resultSet, 4);
+                try (PreparedStatement insert = connection.prepareStatement("""
+                        INSERT INTO goal_contributions (
+                            goal_id, contribution_date, amount, currency, contribution_type,
+                            source_account_id, allocation_reference, status, notes
+                        ) VALUES (?, ?, ?, ?, 'OPENING_ALLOCATION', ?, 'OPENING', 'ACTIVE', 'Opening allocation from existing goal balance.')
+                        """)) {
+                    insert.setInt(1, goalId);
+                    insert.setString(2, LocalDate.now().toString());
+                    insert.setDouble(3, currentAmount);
+                    insert.setString(4, safeText(currency, "MWK"));
+                    setNullableInt(insert, 5, fundingAccountId);
+                    insert.executeUpdate();
+                }
+            }
+        }
+    }
+
+    private void syncGoalCurrentAmount(Connection connection, int goalId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE goals
+                SET current_amount = (
+                    SELECT COALESCE(SUM(CASE
+                        WHEN upper(COALESCE(contribution_type, '')) IN ('WITHDRAWAL', 'REALLOCATION_OUT') THEN -amount
+                        ELSE amount
+                    END), 0)
+                    FROM goal_contributions
+                    WHERE goal_id = ?
+                      AND COALESCE(status, 'ACTIVE') <> 'CANCELLED'
+                ),
+                status = CASE
+                    WHEN status IN ('ACTIVE', 'AT_RISK', 'OVERDUE')
+                     AND target_amount > 0
+                     AND (
+                         SELECT COALESCE(SUM(CASE
+                             WHEN upper(COALESCE(contribution_type, '')) IN ('WITHDRAWAL', 'REALLOCATION_OUT') THEN -amount
+                             ELSE amount
+                         END), 0)
+                         FROM goal_contributions
+                         WHERE goal_id = ?
+                           AND COALESCE(status, 'ACTIVE') <> 'CANCELLED'
+                     ) >= target_amount
+                    THEN 'ACHIEVED'
+                    ELSE status
+                END,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, goalId);
+            statement.setInt(2, goalId);
+            statement.setInt(3, goalId);
+            statement.executeUpdate();
+        }
+    }
+
+    private Integer nullableInt(ResultSet resultSet, int columnIndex) throws SQLException {
+        int value = resultSet.getInt(columnIndex);
+        return resultSet.wasNull() ? null : value;
+    }
+
+    private String normalizeGoalStatus(String status) {
+        String value = safeText(status, "ACTIVE").toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return switch (value) {
+            case "DRAFT" -> "DRAFT";
+            case "PAUSED" -> "PAUSED";
+            case "AT_RISK" -> "AT_RISK";
+            case "OVERDUE" -> "OVERDUE";
+            case "ACHIEVED", "COMPLETED" -> "ACHIEVED";
+            case "CONVERTED_TO_PROJECT", "CONVERTED" -> "CONVERTED_TO_PROJECT";
+            case "CANCELLED", "CANCELED" -> "CANCELLED";
+            case "ARCHIVED" -> "ARCHIVED";
+            default -> "ACTIVE";
+        };
+    }
+
+    public void deleteGoal(int goalId) {
+        softDeleteRecord("Goal", goalId, "Super Administrator goal deletion.");
     }
 
     public AiSettings getAiSettings() {
@@ -2614,6 +11574,10 @@ public class DatabaseHandler {
         return fallback;
     }
 
+    public String getAppSetting(String key, String fallback) {
+        return getSetting(requireText(key, "Setting key"), fallback);
+    }
+
     private String getSetting(Connection connection, String key, String fallback) throws SQLException {
         String sql = "SELECT setting_value FROM app_settings WHERE setting_key = ?";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -2626,6 +11590,14 @@ public class DatabaseHandler {
             }
         }
         return fallback;
+    }
+
+    public void saveAppSetting(String key, String value) {
+        try (Connection connection = connect()) {
+            saveSetting(connection, requireText(key, "Setting key"), value == null ? "" : value);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save application setting", exception);
+        }
     }
 
     private void clearPlainTextAiKey(Connection connection) throws SQLException {
@@ -2705,19 +11677,30 @@ public class DatabaseHandler {
             String severity,
             String details
     ) {
+        try (Connection connection = connect()) {
+            recordSystemLog(connection, moduleName, actionName, severity, details);
+        } catch (SQLException exception) {
+            System.err.println("Failed to record system event: " + exception.getMessage());
+        }
+    }
+
+    private void recordSystemLog(
+            Connection connection,
+            String moduleName,
+            String actionName,
+            String severity,
+            String details
+    ) throws SQLException {
         String sql = """
                 INSERT INTO system_event_log (module_name, action_name, severity, details)
                 VALUES (?, ?, ?, ?)
                 """;
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, safeText(moduleName, "System"));
             statement.setString(2, safeText(actionName, "Event"));
             statement.setString(3, safeText(severity, "INFO").toUpperCase(Locale.ENGLISH));
             statement.setString(4, safeText(details, ""));
             statement.executeUpdate();
-        } catch (SQLException exception) {
-            System.err.println("Failed to record system event: " + exception.getMessage());
         }
     }
 
@@ -2748,6 +11731,1919 @@ public class DatabaseHandler {
             throw new IllegalStateException("Failed to list system event history", exception);
         }
         return history;
+    }
+
+    public void saveDataManualInput(
+            String inputType,
+            String reportingPeriod,
+            String description,
+            String inputValue,
+            String source,
+            String notes
+    ) {
+        String cleanType = requireText(inputType, "Input type");
+        String cleanPeriod = requireText(reportingPeriod, "Reporting period");
+        String cleanDescription = requireText(description, "Description");
+        String cleanValue = requireText(inputValue, "Value");
+        String cleanSource = requireText(source, "Source");
+        rejectCalculatedManualInput(cleanType);
+        rejectCalculatedManualInput(cleanDescription);
+        String sql = """
+                INSERT INTO data_manual_inputs (
+                    input_type, reporting_period, description, input_value, source, notes, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, cleanType);
+            statement.setString(2, cleanPeriod);
+            statement.setString(3, cleanDescription);
+            statement.setString(4, cleanValue);
+            statement.setString(5, cleanSource);
+            statement.setString(6, safeText(notes, ""));
+            statement.setString(7, activeUserText());
+            statement.executeUpdate();
+            recordSystemLog("Data Intake", "Save Manual Input", "INFO", cleanType + " for " + cleanPeriod + " saved.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save manual input", exception);
+        }
+    }
+
+    public List<DataManualInputRecord> listDataManualInputs(int limit) {
+        List<DataManualInputRecord> inputs = new ArrayList<>();
+        String sql = """
+                SELECT id, input_type, reporting_period, description, input_value, source, notes, created_by, created_at
+                FROM data_manual_inputs
+                ORDER BY id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    inputs.add(new DataManualInputRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getString("input_type"),
+                            resultSet.getString("reporting_period"),
+                            resultSet.getString("description"),
+                            resultSet.getString("input_value"),
+                            resultSet.getString("source"),
+                            resultSet.getString("notes"),
+                            resultSet.getString("created_by"),
+                            resultSet.getString("created_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list manual inputs", exception);
+        }
+        return inputs;
+    }
+
+    public int createDataImportBatch(
+            String batchKey,
+            String dataType,
+            String originalFilename,
+            String fileChecksum,
+            int totalRows,
+            int validRows,
+            int duplicateRows,
+            int rejectedRows,
+            int importedRows,
+            double importedTotal,
+            String status
+    ) {
+        String cleanBatchKey = requireText(batchKey, "Import batch");
+        String cleanDataType = requireText(dataType, "Data type");
+        String cleanFilename = requireText(originalFilename, "Original filename");
+        String cleanStatus = requireText(status, "Status");
+        String sql = """
+                INSERT INTO data_import_batches (
+                    batch_key, data_type, original_filename, file_checksum, workspace_name, imported_by,
+                    total_rows, valid_rows, duplicate_rows, rejected_rows, imported_rows, imported_total,
+                    status, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, cleanBatchKey);
+            statement.setString(2, cleanDataType);
+            statement.setString(3, cleanFilename);
+            statement.setString(4, safeText(fileChecksum, ""));
+            statement.setString(5, activeWorkspaceText());
+            statement.setString(6, activeUserText());
+            statement.setInt(7, Math.max(0, totalRows));
+            statement.setInt(8, Math.max(0, validRows));
+            statement.setInt(9, Math.max(0, duplicateRows));
+            statement.setInt(10, Math.max(0, rejectedRows));
+            statement.setInt(11, Math.max(0, importedRows));
+            statement.setDouble(12, Math.max(0, importedTotal));
+            statement.setString(13, cleanStatus);
+            statement.executeUpdate();
+            int id = generatedId(connection, statement);
+            recordSystemLog(
+                    "Data Intake",
+                    "Import Batch Completed",
+                    "INFO",
+                    cleanBatchKey + " completed. Imported: " + Math.max(0, importedRows)
+                            + "; Rejected: " + Math.max(0, rejectedRows) + "."
+            );
+            return id;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to create import batch", exception);
+        }
+    }
+
+    public void recordRejectedImportRow(
+            int batchId,
+            int rowNumber,
+            String recordText,
+            String problem,
+            String originalValue,
+            String status,
+            String correctedDate,
+            String correctedDescription,
+            Double correctedAmount,
+            String correctedAccount,
+            String correctedCategory,
+            String correctedPaymentMethod,
+            String correctedReference,
+            String correctedType
+    ) {
+        String sql = """
+                INSERT INTO data_import_rejected_records (
+                    batch_id, row_number, record_text, problem, original_value, status,
+                    corrected_date, corrected_description, corrected_amount, corrected_account, corrected_category,
+                    corrected_payment_method, corrected_reference, corrected_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, batchId);
+            statement.setInt(2, Math.max(1, rowNumber));
+            statement.setString(3, safeText(recordText, ""));
+            statement.setString(4, requireText(problem, "Problem"));
+            statement.setString(5, safeText(originalValue, ""));
+            statement.setString(6, safeText(status, "Needs correction"));
+            statement.setString(7, safeText(correctedDate, ""));
+            statement.setString(8, safeText(correctedDescription, ""));
+            if (correctedAmount == null) {
+                statement.setNull(9, java.sql.Types.REAL);
+            } else {
+                statement.setDouble(9, correctedAmount);
+            }
+            statement.setString(10, safeText(correctedAccount, ""));
+            statement.setString(11, safeText(correctedCategory, ""));
+            statement.setString(12, safeText(correctedPaymentMethod, ""));
+            statement.setString(13, safeText(correctedReference, ""));
+            statement.setString(14, safeText(correctedType, ""));
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save rejected import row", exception);
+        }
+    }
+
+    public List<DataImportBatchRecord> listDataImportBatches(int limit) {
+        List<DataImportBatchRecord> batches = new ArrayList<>();
+        String sql = """
+                SELECT id, batch_key, data_type, original_filename, file_checksum, workspace_name, imported_by,
+                       total_rows, valid_rows, duplicate_rows, rejected_rows, imported_rows, imported_total,
+                       status, created_at, completed_at
+                FROM data_import_batches
+                ORDER BY id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    batches.add(dataImportBatchRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list import batches", exception);
+        }
+        return batches;
+    }
+
+    public List<RejectedImportRecord> listRejectedImportRecords(int limit) {
+        List<RejectedImportRecord> records = new ArrayList<>();
+        String sql = """
+                SELECT r.id, r.batch_id, b.batch_key, r.row_number, r.record_text, r.problem, r.original_value,
+                       r.status, r.corrected_date, r.corrected_description, r.corrected_amount, r.corrected_account,
+                       r.corrected_category, r.corrected_payment_method, r.corrected_reference, r.corrected_type,
+                       r.created_at, r.updated_at
+                FROM data_import_rejected_records r
+                JOIN data_import_batches b ON b.id = r.batch_id
+                ORDER BY r.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    Double amount = resultSet.getObject("corrected_amount") == null
+                            ? null
+                            : resultSet.getDouble("corrected_amount");
+                    records.add(new RejectedImportRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("batch_id"),
+                            resultSet.getString("batch_key"),
+                            resultSet.getInt("row_number"),
+                            resultSet.getString("record_text"),
+                            resultSet.getString("problem"),
+                            resultSet.getString("original_value"),
+                            resultSet.getString("status"),
+                            resultSet.getString("corrected_date"),
+                            resultSet.getString("corrected_description"),
+                            amount,
+                            resultSet.getString("corrected_account"),
+                            resultSet.getString("corrected_category"),
+                            resultSet.getString("corrected_payment_method"),
+                            resultSet.getString("corrected_reference"),
+                            resultSet.getString("corrected_type"),
+                            resultSet.getString("created_at"),
+                            resultSet.getString("updated_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list rejected import rows", exception);
+        }
+        return records;
+    }
+
+    public void updateRejectedImportCorrection(
+            int rejectedRecordId,
+            String correctedDate,
+            String correctedDescription,
+            Double correctedAmount,
+            String correctedAccount,
+            String correctedCategory,
+            String correctedPaymentMethod,
+            String correctedReference,
+            String correctedType
+    ) {
+        String sql = """
+                UPDATE data_import_rejected_records
+                SET corrected_date = ?,
+                    corrected_description = ?,
+                    corrected_amount = ?,
+                    corrected_account = ?,
+                    corrected_category = ?,
+                    corrected_payment_method = ?,
+                    corrected_reference = ?,
+                    corrected_type = ?,
+                    status = 'Ready for retry',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, safeText(correctedDate, ""));
+            statement.setString(2, safeText(correctedDescription, ""));
+            if (correctedAmount == null) {
+                statement.setNull(3, java.sql.Types.REAL);
+            } else {
+                statement.setDouble(3, correctedAmount);
+            }
+            statement.setString(4, safeText(correctedAccount, ""));
+            statement.setString(5, safeText(correctedCategory, ""));
+            statement.setString(6, safeText(correctedPaymentMethod, ""));
+            statement.setString(7, safeText(correctedReference, ""));
+            statement.setString(8, safeText(correctedType, ""));
+            statement.setInt(9, rejectedRecordId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a rejected row to correct.");
+            }
+            recordSystemLog("Data Intake", "Rejected Row Corrected", "INFO", "Rejected row " + rejectedRecordId + " corrected.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update rejected import row", exception);
+        }
+    }
+
+    public void markRejectedImportRecordImported(int rejectedRecordId) {
+        String sql = """
+                UPDATE data_import_rejected_records
+                SET status = 'Imported',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, rejectedRecordId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a rejected row to retry.");
+            }
+            recordSystemLog("Data Intake", "Rejected Row Imported", "INFO", "Rejected row " + rejectedRecordId + " imported after correction.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark rejected import row imported", exception);
+        }
+    }
+
+    private DataImportBatchRecord dataImportBatchRecord(ResultSet resultSet) throws SQLException {
+        return new DataImportBatchRecord(
+                resultSet.getInt("id"),
+                resultSet.getString("batch_key"),
+                resultSet.getString("data_type"),
+                resultSet.getString("original_filename"),
+                resultSet.getString("file_checksum"),
+                resultSet.getString("workspace_name"),
+                resultSet.getString("imported_by"),
+                resultSet.getInt("total_rows"),
+                resultSet.getInt("valid_rows"),
+                resultSet.getInt("duplicate_rows"),
+                resultSet.getInt("rejected_rows"),
+                resultSet.getInt("imported_rows"),
+                resultSet.getDouble("imported_total"),
+                resultSet.getString("status"),
+                resultSet.getString("created_at"),
+                resultSet.getString("completed_at")
+        );
+    }
+
+    private int boundedLimit(int limit) {
+        return Math.max(1, Math.min(limit, 500));
+    }
+
+    private void rejectCalculatedManualInput(String value) {
+        String lower = value == null ? "" : value.toLowerCase(Locale.ENGLISH);
+        if (lower.contains("total income")
+                || lower.contains("total expense")
+                || lower.contains("account balance")
+                || lower.contains("outstanding loan")
+                || lower.contains("budget spending")) {
+            throw new IllegalArgumentException("Manual inputs cannot overwrite calculated financial totals.");
+        }
+    }
+
+    private String activeWorkspaceText() {
+        try {
+            SystemUser user = UserSession.getWorkspaceUser();
+            return user.getDisplayName() + " (" + user.getUsername() + ")";
+        } catch (RuntimeException exception) {
+            return "Workspace";
+        }
+    }
+
+    private String activeUserText() {
+        try {
+            SystemUser user = UserSession.getAuthenticatedUser();
+            return user.getDisplayName() + " (" + user.getUsername() + ")";
+        } catch (RuntimeException exception) {
+            return "System";
+        }
+    }
+
+    public Integer findOrCreatePerson(String fullName) {
+        String cleanName = fullName == null ? "" : fullName.trim();
+        if (cleanName.isEmpty()) {
+            return null;
+        }
+        try (Connection connection = connect()) {
+            try (PreparedStatement lookup = connection.prepareStatement("""
+                    SELECT id
+                    FROM people
+                    WHERE lower(trim(full_name)) = lower(trim(?))
+                    LIMIT 1
+                    """)) {
+                lookup.setString(1, cleanName);
+                try (ResultSet resultSet = lookup.executeQuery()) {
+                    if (resultSet.next()) {
+                        return resultSet.getInt("id");
+                    }
+                }
+            }
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO people (full_name, phone_number, relationship, notes)
+                    VALUES (?, '', 'Income contact', 'Created from Income entry')
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                insert.setString(1, cleanName);
+                insert.executeUpdate();
+                int personId = generatedId(connection, insert);
+                recordSystemLog("Income", "Create Income Contact", "INFO", cleanName + " added from an income record.");
+                return personId;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save income contact", exception);
+        }
+    }
+
+    public int saveIncomeDraft(
+            Integer draftId,
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer personId,
+            Integer expectedIncomeId,
+            double amount,
+            String currency,
+            LocalDate incomeDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description,
+            String attachmentPath
+    ) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero.");
+        }
+        LocalDate cleanDate = incomeDate == null ? LocalDate.now() : incomeDate;
+        String cleanCurrency = safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+        try (Connection connection = connect()) {
+            requireActiveAccountForIncome(connection, accountId, cleanCurrency);
+            if (draftId == null) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO income_drafts (
+                            account_id, category_id, project_id, person_id, expected_income_id,
+                            amount, currency, income_date, payment_method, reference_number,
+                            description, attachment_path, status, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', CURRENT_TIMESTAMP)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    bindIncomeDraft(statement, accountId, categoryId, projectId, personId, expectedIncomeId,
+                            amount, cleanCurrency, cleanDate, paymentMethod, referenceNumber, description, attachmentPath);
+                    statement.executeUpdate();
+                    int id = generatedId(connection, statement);
+                    recordSystemLog("Income", "Save Draft", "INFO", "Income draft " + id + " saved.");
+                    return id;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE income_drafts
+                    SET account_id = ?,
+                        category_id = ?,
+                        project_id = ?,
+                        person_id = ?,
+                        expected_income_id = ?,
+                        amount = ?,
+                        currency = ?,
+                        income_date = ?,
+                        payment_method = ?,
+                        reference_number = ?,
+                        description = ?,
+                        attachment_path = ?,
+                        status = 'Draft',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND COALESCE(status, 'Draft') = 'Draft'
+                    """)) {
+                bindIncomeDraft(statement, accountId, categoryId, projectId, personId, expectedIncomeId,
+                        amount, cleanCurrency, cleanDate, paymentMethod, referenceNumber, description, attachmentPath);
+                statement.setInt(13, draftId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a draft income record that can still be edited.");
+                }
+                recordSystemLog("Income", "Update Draft", "INFO", "Income draft " + draftId + " updated.");
+                return draftId;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save income draft", exception);
+        }
+    }
+
+    private void bindIncomeDraft(
+            PreparedStatement statement,
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer personId,
+            Integer expectedIncomeId,
+            double amount,
+            String currency,
+            LocalDate incomeDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description,
+            String attachmentPath
+    ) throws SQLException {
+        statement.setInt(1, accountId);
+        setNullableInt(statement, 2, categoryId);
+        setNullableInt(statement, 3, projectId);
+        setNullableInt(statement, 4, personId);
+        setNullableInt(statement, 5, expectedIncomeId);
+        statement.setDouble(6, amount);
+        statement.setString(7, currency);
+        statement.setString(8, incomeDate.toString());
+        statement.setString(9, cleanNullable(paymentMethod));
+        statement.setString(10, cleanNullable(referenceNumber));
+        statement.setString(11, safeText(description, ""));
+        statement.setString(12, cleanNullable(attachmentPath));
+    }
+
+    public List<IncomeDraftRecord> listIncomeDrafts(int limit) {
+        List<IncomeDraftRecord> drafts = new ArrayList<>();
+        String sql = incomeDraftSelectSql("""
+                WHERE COALESCE(d.status, 'Draft') <> 'Posted'
+                ORDER BY d.income_date DESC, d.id DESC
+                LIMIT ?
+                """);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    drafts.add(incomeDraftRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list income drafts", exception);
+        }
+        return drafts;
+    }
+
+    public IncomeDraftRecord findIncomeDraft(int draftId) {
+        String sql = incomeDraftSelectSql("WHERE d.id = ?");
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, draftId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return incomeDraftRecord(resultSet);
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load income draft", exception);
+        }
+        throw new IllegalArgumentException("Select a valid income draft.");
+    }
+
+    public void markIncomeDraftPosted(int draftId, int transactionId) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE income_drafts
+                     SET status = 'Posted',
+                         posted_transaction_id = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setInt(1, transactionId);
+            statement.setInt(2, draftId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid income draft.");
+            }
+            recordSystemLog("Income", "Post Draft", "INFO", "Income draft " + draftId + " posted as transaction " + transactionId + ".");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark income draft posted", exception);
+        }
+    }
+
+    private String incomeDraftSelectSql(String suffix) {
+        return """
+                SELECT d.id, d.account_id, a.account_name, a.currency AS account_currency,
+                       d.category_id, c.category_name, d.project_id, p.project_name,
+                       d.person_id, pe.full_name, d.expected_income_id, ei.reference_number AS expected_reference,
+                       d.amount, d.currency, d.income_date, d.payment_method, d.reference_number,
+                       d.description, d.attachment_path, d.status, d.posted_transaction_id,
+                       d.created_at, d.updated_at
+                FROM income_drafts d
+                JOIN accounts a ON a.id = d.account_id
+                LEFT JOIN categories c ON c.id = d.category_id
+                LEFT JOIN projects p ON p.id = d.project_id
+                LEFT JOIN people pe ON pe.id = d.person_id
+                LEFT JOIN expected_income ei ON ei.id = d.expected_income_id
+                """ + suffix;
+    }
+
+    private IncomeDraftRecord incomeDraftRecord(ResultSet resultSet) throws SQLException {
+        return new IncomeDraftRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                resultSet.getString("account_currency"),
+                nullableInt(resultSet, "category_id"),
+                resultSet.getString("category_name"),
+                nullableInt(resultSet, "project_id"),
+                resultSet.getString("project_name"),
+                nullableInt(resultSet, "person_id"),
+                resultSet.getString("full_name"),
+                nullableInt(resultSet, "expected_income_id"),
+                resultSet.getString("expected_reference"),
+                resultSet.getDouble("amount"),
+                resultSet.getString("currency"),
+                resultSet.getString("income_date"),
+                resultSet.getString("payment_method"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("description"),
+                resultSet.getString("attachment_path"),
+                resultSet.getString("status"),
+                nullableInt(resultSet, "posted_transaction_id"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    public int recordIncomeTransaction(
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer personId,
+            Integer expectedIncomeId,
+            double amount,
+            String currency,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero.");
+        }
+        if (date == null) {
+            throw new IllegalArgumentException("Income date is required.");
+        }
+        String cleanCurrency = safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+        int transactionId;
+        try (Connection connection = connect()) {
+            requireActiveAccountForIncome(connection, accountId, cleanCurrency);
+            connection.setAutoCommit(false);
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO transactions (
+                        account_id, category_id, project_id, person_id, transaction_type,
+                        transaction_purpose, transaction_status, amount, transaction_date,
+                        description, source, payment_method, reference_number
+                    ) VALUES (?, ?, ?, ?, 'INCOME', 'NORMAL', 'COMPLETED', ?, ?, ?, 'MANUAL', ?, ?)
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                insert.setInt(1, accountId);
+                setNullableInt(insert, 2, categoryId);
+                setNullableInt(insert, 3, projectId);
+                setNullableInt(insert, 4, personId);
+                insert.setDouble(5, amount);
+                insert.setString(6, date.toString());
+                insert.setString(7, safeText(description, ""));
+                insert.setString(8, cleanNullable(paymentMethod));
+                insert.setString(9, cleanNullable(referenceNumber));
+                insert.executeUpdate();
+                transactionId = generatedId(connection, insert);
+                if (expectedIncomeId != null) {
+                    markExpectedIncomeReceived(connection, expectedIncomeId, transactionId, amount, date);
+                }
+                refreshRelatedLoanStatuses(connection, personId, "NORMAL");
+                recordSystemLog(connection, "Income", "Post Income", "INFO", "Income transaction " + transactionId + " posted.");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to post income", exception);
+        }
+        return transactionId;
+    }
+
+    public boolean hasSimilarIncomeTransaction(
+            int accountId,
+            double amount,
+            LocalDate date,
+            String description,
+            String referenceNumber
+    ) {
+        String cleanDescription = safeText(description, "");
+        String cleanReference = safeText(referenceNumber, "");
+        String sql = """
+                SELECT COUNT(*)
+                FROM transactions
+                WHERE account_id = ?
+                  AND transaction_type = 'INCOME'
+                  AND amount = ?
+                  AND transaction_date = ?
+                  AND COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                  AND (
+                        (? <> '' AND lower(trim(COALESCE(reference_number, ''))) = lower(?))
+                     OR (? <> '' AND lower(trim(COALESCE(description, ''))) = lower(?))
+                     OR (? = '' AND ? = '')
+                  )
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            statement.setDouble(2, amount);
+            statement.setString(3, date.toString());
+            statement.setString(4, cleanReference);
+            statement.setString(5, cleanReference);
+            statement.setString(6, cleanDescription);
+            statement.setString(7, cleanDescription);
+            statement.setString(8, cleanReference);
+            statement.setString(9, cleanDescription);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check duplicate income", exception);
+        }
+    }
+
+    public int saveExpectedIncome(
+            Integer expectedIncomeId,
+            LocalDate expectedDate,
+            double expectedAmount,
+            String currency,
+            int accountId,
+            Integer categoryId,
+            Integer personId,
+            String referenceNumber,
+            String repeatFrequency,
+            LocalDate endDate,
+            String confidence,
+            String notes,
+            String status
+    ) {
+        if (expectedDate == null) {
+            throw new IllegalArgumentException("Expected date is required.");
+        }
+        if (expectedAmount <= 0) {
+            throw new IllegalArgumentException("Expected amount must be greater than zero.");
+        }
+        String cleanCurrency = safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+        String cleanFrequency = safeText(repeatFrequency, "One time");
+        String cleanConfidence = safeText(confidence, "Likely");
+        String cleanStatus = normalizedExpectedIncomeStatus(status);
+        try (Connection connection = connect()) {
+            requireActiveAccountForIncome(connection, accountId, cleanCurrency);
+            if (expectedIncomeId == null) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO expected_income (
+                            expected_date, expected_amount, currency, account_id, category_id, person_id,
+                            reference_number, repeat_frequency, end_date, confidence, notes, status, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    bindExpectedIncome(statement, expectedDate, expectedAmount, cleanCurrency, accountId, categoryId,
+                            personId, referenceNumber, cleanFrequency, endDate, cleanConfidence, notes, cleanStatus);
+                    statement.executeUpdate();
+                    int id = generatedId(connection, statement);
+                    recordSystemLog("Income", "Save Expected Income", "INFO", "Expected income " + id + " saved.");
+                    return id;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE expected_income
+                    SET expected_date = ?,
+                        expected_amount = ?,
+                        currency = ?,
+                        account_id = ?,
+                        category_id = ?,
+                        person_id = ?,
+                        reference_number = ?,
+                        repeat_frequency = ?,
+                        end_date = ?,
+                        confidence = ?,
+                        notes = ?,
+                        status = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """)) {
+                bindExpectedIncome(statement, expectedDate, expectedAmount, cleanCurrency, accountId, categoryId,
+                        personId, referenceNumber, cleanFrequency, endDate, cleanConfidence, notes, cleanStatus);
+                statement.setInt(13, expectedIncomeId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a valid expected income record.");
+                }
+                recordSystemLog("Income", "Update Expected Income", "INFO", "Expected income " + expectedIncomeId + " updated.");
+                return expectedIncomeId;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save expected income", exception);
+        }
+    }
+
+    private void bindExpectedIncome(
+            PreparedStatement statement,
+            LocalDate expectedDate,
+            double expectedAmount,
+            String currency,
+            int accountId,
+            Integer categoryId,
+            Integer personId,
+            String referenceNumber,
+            String repeatFrequency,
+            LocalDate endDate,
+            String confidence,
+            String notes,
+            String status
+    ) throws SQLException {
+        statement.setString(1, expectedDate.toString());
+        statement.setDouble(2, expectedAmount);
+        statement.setString(3, currency);
+        statement.setInt(4, accountId);
+        setNullableInt(statement, 5, categoryId);
+        setNullableInt(statement, 6, personId);
+        statement.setString(7, cleanNullable(referenceNumber));
+        statement.setString(8, repeatFrequency);
+        statement.setString(9, endDate == null ? null : endDate.toString());
+        statement.setString(10, confidence);
+        statement.setString(11, safeText(notes, ""));
+        statement.setString(12, status);
+    }
+
+    public List<ExpectedIncomeRecord> listExpectedIncomeRecords(int limit) {
+        List<ExpectedIncomeRecord> records = new ArrayList<>();
+        String sql = expectedIncomeSelectSql("""
+                ORDER BY date(e.expected_date) ASC, e.id DESC
+                LIMIT ?
+                """);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    records.add(expectedIncomeRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list expected income", exception);
+        }
+        return records;
+    }
+
+    public void markExpectedIncomeReceived(
+            int expectedIncomeId,
+            int transactionId,
+            double actualAmount,
+            LocalDate receivedDate
+    ) {
+        try (Connection connection = connect()) {
+            markExpectedIncomeReceived(connection, expectedIncomeId, transactionId, actualAmount, receivedDate);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark expected income received", exception);
+        }
+        recordSystemLog(
+                "Income",
+                "Mark Expected Income Received",
+                "INFO",
+                "Expected income " + expectedIncomeId + " linked to transaction " + transactionId
+                        + " for " + DEFAULT_CURRENCY_CODE + " " + String.format(Locale.ENGLISH, "%.2f", actualAmount)
+                        + " on " + receivedDate + "."
+        );
+    }
+
+    private void markExpectedIncomeReceived(
+            Connection connection,
+            int expectedIncomeId,
+            int transactionId,
+            double actualAmount,
+            LocalDate receivedDate
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE expected_income
+                SET status = 'Received',
+                    linked_transaction_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, transactionId);
+            statement.setInt(2, expectedIncomeId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid expected income record.");
+            }
+        }
+    }
+
+    private String expectedIncomeSelectSql(String suffix) {
+        return """
+                SELECT e.id, e.expected_date, e.expected_amount, e.currency,
+                       e.account_id, a.account_name, e.category_id, c.category_name,
+                       e.person_id, pe.full_name, e.reference_number, e.repeat_frequency,
+                       e.end_date, e.confidence, e.notes, e.status, e.linked_transaction_id,
+                       e.created_at, e.updated_at
+                FROM expected_income e
+                JOIN accounts a ON a.id = e.account_id
+                LEFT JOIN categories c ON c.id = e.category_id
+                LEFT JOIN people pe ON pe.id = e.person_id
+                """ + suffix;
+    }
+
+    private ExpectedIncomeRecord expectedIncomeRecord(ResultSet resultSet) throws SQLException {
+        return new ExpectedIncomeRecord(
+                resultSet.getInt("id"),
+                resultSet.getString("expected_date"),
+                resultSet.getDouble("expected_amount"),
+                resultSet.getString("currency"),
+                resultSet.getInt("account_id"),
+                resultSet.getString("account_name"),
+                nullableInt(resultSet, "category_id"),
+                resultSet.getString("category_name"),
+                nullableInt(resultSet, "person_id"),
+                resultSet.getString("full_name"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("repeat_frequency"),
+                resultSet.getString("end_date"),
+                resultSet.getString("confidence"),
+                resultSet.getString("notes"),
+                resultSet.getString("status"),
+                nullableInt(resultSet, "linked_transaction_id"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    public int createIncomeReversal(int transactionId, String reason) {
+        requireLifecycleAdministrator("reverse income transaction " + transactionId);
+        String cleanReason = requireText(reason, "Reason");
+        int reversalId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement insert = connection.prepareStatement("""
+                        INSERT INTO transactions (
+                            account_id, category_id, project_id, project_activity_id, person_id, related_transaction_id,
+                            transaction_type, transaction_purpose, transaction_status, amount, transaction_date,
+                            description, source, payment_method, reference_number
+                        )
+                        SELECT account_id, category_id, project_id, project_activity_id, person_id, id,
+                               'EXPENSE', 'INCOME_REVERSAL', 'COMPLETED', amount, ?,
+                               trim('Reversal of income #' || id || '. Reason: ' || ?),
+                               'REVERSAL', payment_method, reference_number
+                        FROM transactions
+                        WHERE id = ?
+                          AND transaction_type = 'INCOME'
+                          AND COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    insert.setString(1, LocalDate.now().toString());
+                    insert.setString(2, cleanReason);
+                    insert.setInt(3, transactionId);
+                    if (insert.executeUpdate() == 0) {
+                        throw new IllegalArgumentException("Select a posted income transaction that can be reversed.");
+                    }
+                    reversalId = generatedId(connection, insert);
+                }
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE transactions
+                        SET transaction_status = 'REVERSED'
+                        WHERE id = ?
+                        """)) {
+                    update.setInt(1, transactionId);
+                    update.executeUpdate();
+                }
+                recordSystemLog(
+                        connection,
+                        "Income",
+                        "Create Income Reversal",
+                        "WARNING",
+                        "Income transaction " + transactionId + " reversed by transaction " + reversalId + ". Reason: " + cleanReason
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to reverse income", exception);
+        }
+        return reversalId;
+    }
+
+    public int createIncomeDraftFromTransaction(int transactionId, String reason) {
+        String cleanReason = safeText(reason, "Copied as new income");
+        int draftId;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO income_drafts (
+                         account_id, category_id, project_id, person_id, expected_income_id,
+                         amount, currency, income_date, payment_method, reference_number,
+                         description, attachment_path, status, updated_at
+                     )
+                     SELECT t.account_id, t.category_id, t.project_id, t.person_id, NULL,
+                            t.amount, a.currency, t.transaction_date, t.payment_method, t.reference_number,
+                            trim(COALESCE(t.description, '') || ' (new draft from income #' || t.id || ')'),
+                            NULL, 'Draft', CURRENT_TIMESTAMP
+                     FROM transactions t
+                     JOIN accounts a ON a.id = t.account_id
+                     WHERE t.id = ?
+                       AND t.transaction_type = 'INCOME'
+                     """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, transactionId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select an income transaction to copy.");
+            }
+            draftId = generatedId(connection, statement);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to create income draft", exception);
+        }
+        recordSystemLog(
+                "Income",
+                "Create Corrected Income Draft",
+                "INFO",
+                "Income draft " + draftId + " created from transaction " + transactionId + ". Reason: " + cleanReason
+        );
+        return draftId;
+    }
+
+    private String normalizedExpectedIncomeStatus(String status) {
+        String cleanStatus = safeText(status, "Upcoming");
+        if (Set.of("Upcoming", "Due Today", "Overdue", "Partially Received", "Received", "Cancelled").contains(cleanStatus)) {
+            return cleanStatus;
+        }
+        return "Upcoming";
+    }
+
+    private void requireActiveAccountForIncome(Connection connection, int accountId, String currency) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT account_name, currency, status
+                FROM accounts
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid receiving account.");
+                }
+                String status = safeText(resultSet.getString("status"), "ACTIVE").toUpperCase(Locale.ENGLISH);
+                if (!"ACTIVE".equals(status)) {
+                    throw new IllegalArgumentException("The receiving account must be active.");
+                }
+                String accountCurrency = safeText(resultSet.getString("currency"), DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+                String requestedCurrency = safeText(currency, accountCurrency).toUpperCase(Locale.ENGLISH);
+                if (!accountCurrency.equals(requestedCurrency)) {
+                    throw new IllegalArgumentException("Income currency must match the receiving account currency.");
+                }
+            }
+        }
+    }
+
+    public int saveTransferDraft(
+            Integer draftId,
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            String currency,
+            Double exchangeRate,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate transferDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description
+    ) {
+        validateTransferDraft(fromAccountId, toAccountId, amountSent, amountReceived, transferFee, transferDate);
+        String cleanCurrency = safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+        try (Connection connection = connect()) {
+            requireActiveTransferAccount(connection, fromAccountId, "source");
+            requireActiveTransferAccount(connection, toAccountId, "destination");
+            if (draftId == null) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO transfer_drafts (
+                            from_account_id, to_account_id, amount_sent, amount_received, currency,
+                            exchange_rate, transfer_fee, fee_category_id, transfer_date, payment_method,
+                            reference_number, description, status, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', CURRENT_TIMESTAMP)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    bindTransferDraft(statement, fromAccountId, toAccountId, amountSent, amountReceived, cleanCurrency,
+                            exchangeRate, transferFee, feeCategoryId, transferDate, paymentMethod, referenceNumber, description);
+                    statement.executeUpdate();
+                    int id = generatedId(connection, statement);
+                    recordSystemLog("Transaction Ledger", "Save Transfer Draft", "INFO", "Transfer draft " + id + " saved.");
+                    return id;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE transfer_drafts
+                    SET from_account_id = ?,
+                        to_account_id = ?,
+                        amount_sent = ?,
+                        amount_received = ?,
+                        currency = ?,
+                        exchange_rate = ?,
+                        transfer_fee = ?,
+                        fee_category_id = ?,
+                        transfer_date = ?,
+                        payment_method = ?,
+                        reference_number = ?,
+                        description = ?,
+                        status = 'Draft',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND COALESCE(status, 'Draft') = 'Draft'
+                    """)) {
+                bindTransferDraft(statement, fromAccountId, toAccountId, amountSent, amountReceived, cleanCurrency,
+                        exchangeRate, transferFee, feeCategoryId, transferDate, paymentMethod, referenceNumber, description);
+                statement.setInt(13, draftId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a transfer draft that can still be edited.");
+                }
+                recordSystemLog("Transaction Ledger", "Update Transfer Draft", "INFO", "Transfer draft " + draftId + " updated.");
+                return draftId;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save transfer draft", exception);
+        }
+    }
+
+    private void bindTransferDraft(
+            PreparedStatement statement,
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            String currency,
+            Double exchangeRate,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate transferDate,
+            String paymentMethod,
+            String referenceNumber,
+            String description
+    ) throws SQLException {
+        statement.setInt(1, fromAccountId);
+        statement.setInt(2, toAccountId);
+        statement.setDouble(3, amountSent);
+        statement.setDouble(4, amountReceived);
+        statement.setString(5, currency);
+        if (exchangeRate == null) {
+            statement.setNull(6, java.sql.Types.REAL);
+        } else {
+            statement.setDouble(6, exchangeRate);
+        }
+        statement.setDouble(7, Math.max(0, transferFee));
+        setNullableInt(statement, 8, feeCategoryId);
+        statement.setString(9, transferDate.toString());
+        statement.setString(10, cleanNullable(paymentMethod));
+        statement.setString(11, cleanNullable(referenceNumber));
+        statement.setString(12, safeText(description, ""));
+    }
+
+    public List<TransferDraftRecord> listTransferDrafts(int limit) {
+        List<TransferDraftRecord> drafts = new ArrayList<>();
+        String sql = transferDraftSelectSql("""
+                WHERE COALESCE(d.status, 'Draft') <> 'Posted'
+                ORDER BY d.transfer_date DESC, d.id DESC
+                LIMIT ?
+                """);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    drafts.add(transferDraftRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list transfer drafts", exception);
+        }
+        return drafts;
+    }
+
+    public TransferDraftRecord findTransferDraft(int draftId) {
+        String sql = transferDraftSelectSql("WHERE d.id = ?");
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, draftId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return transferDraftRecord(resultSet);
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load transfer draft", exception);
+        }
+        throw new IllegalArgumentException("Select a valid transfer draft.");
+    }
+
+    public void markTransferDraftPosted(int draftId, int outgoingTransactionId) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE transfer_drafts
+                     SET status = 'Posted',
+                         posted_outgoing_transaction_id = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setInt(1, outgoingTransactionId);
+            statement.setInt(2, draftId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid transfer draft.");
+            }
+            recordSystemLog("Transaction Ledger", "Post Transfer Draft", "INFO", "Transfer draft " + draftId + " posted.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark transfer draft posted", exception);
+        }
+    }
+
+    public void updateTransferDraftStatus(int draftId, String status, String reason) {
+        String cleanStatus = safeText(status, "Draft");
+        if (!List.of("Draft", "Cancelled").contains(cleanStatus)) {
+            throw new IllegalArgumentException("Transfer draft status must be Draft or Cancelled.");
+        }
+        String cleanReason = safeText(reason, "No reason provided.");
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE transfer_drafts
+                     SET status = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                       AND COALESCE(status, 'Draft') <> 'Posted'
+                     """)) {
+            statement.setString(1, cleanStatus);
+            statement.setInt(2, draftId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a transfer draft that can still be updated.");
+            }
+            recordSystemLog(
+                    "Transaction Ledger",
+                    "Update Transfer Draft Status",
+                    "WARNING",
+                    "Transfer draft " + draftId + " set to " + cleanStatus + ". Reason: " + cleanReason
+            );
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update transfer draft status", exception);
+        }
+    }
+
+    private String transferDraftSelectSql(String suffix) {
+        return """
+                SELECT d.id, d.from_account_id, fa.account_name AS from_account_name, fa.currency AS from_currency,
+                       d.to_account_id, ta.account_name AS to_account_name, ta.currency AS to_currency,
+                       d.amount_sent, d.amount_received, d.currency, d.exchange_rate, d.transfer_fee,
+                       d.fee_category_id, fc.category_name AS fee_category_name, d.transfer_date,
+                       d.payment_method, d.reference_number, d.description, d.status,
+                       d.posted_outgoing_transaction_id, d.created_at, d.updated_at
+                FROM transfer_drafts d
+                JOIN accounts fa ON fa.id = d.from_account_id
+                JOIN accounts ta ON ta.id = d.to_account_id
+                LEFT JOIN categories fc ON fc.id = d.fee_category_id
+                """ + suffix;
+    }
+
+    private TransferDraftRecord transferDraftRecord(ResultSet resultSet) throws SQLException {
+        Double exchangeRate = resultSet.getObject("exchange_rate") == null ? null : resultSet.getDouble("exchange_rate");
+        return new TransferDraftRecord(
+                resultSet.getInt("id"),
+                resultSet.getInt("from_account_id"),
+                resultSet.getString("from_account_name"),
+                resultSet.getString("from_currency"),
+                resultSet.getInt("to_account_id"),
+                resultSet.getString("to_account_name"),
+                resultSet.getString("to_currency"),
+                resultSet.getDouble("amount_sent"),
+                resultSet.getDouble("amount_received"),
+                resultSet.getString("currency"),
+                exchangeRate,
+                resultSet.getDouble("transfer_fee"),
+                nullableInt(resultSet, "fee_category_id"),
+                resultSet.getString("fee_category_name"),
+                resultSet.getString("transfer_date"),
+                resultSet.getString("payment_method"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("description"),
+                resultSet.getString("status"),
+                nullableInt(resultSet, "posted_outgoing_transaction_id"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    public boolean hasSimilarTransfer(
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            LocalDate transferDate,
+            String referenceNumber
+    ) {
+        String cleanReference = safeText(referenceNumber, "");
+        String sql = """
+                SELECT COUNT(*)
+                FROM transactions outgoing
+                JOIN transactions incoming
+                  ON incoming.id = outgoing.related_transaction_id
+                  OR incoming.related_transaction_id = outgoing.id
+                WHERE outgoing.transaction_type = 'TRANSFER'
+                  AND outgoing.transaction_purpose = 'TRANSFER_OUT'
+                  AND incoming.transaction_type = 'TRANSFER'
+                  AND incoming.transaction_purpose = 'TRANSFER_IN'
+                  AND outgoing.account_id = ?
+                  AND incoming.account_id = ?
+                  AND outgoing.amount = ?
+                  AND outgoing.transaction_date = ?
+                  AND COALESCE(outgoing.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                  AND (? = '' OR lower(trim(COALESCE(outgoing.reference_number, ''))) = lower(?))
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, fromAccountId);
+            statement.setInt(2, toAccountId);
+            statement.setDouble(3, amountSent);
+            statement.setString(4, transferDate.toString());
+            statement.setString(5, cleanReference);
+            statement.setString(6, cleanReference);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to check duplicate transfer", exception);
+        }
+    }
+
+    public List<FinanceTransaction> listLinkedTransactions(int transactionId) {
+        List<FinanceTransaction> transactions = new ArrayList<>();
+        String sql = """
+                SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
+                       c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
+                       t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.id = ?
+                   OR t.related_transaction_id = ?
+                   OR t.id = (SELECT related_transaction_id FROM transactions WHERE id = ?)
+                   OR t.related_transaction_id = (SELECT related_transaction_id FROM transactions WHERE id = ?)
+                ORDER BY t.transaction_purpose DESC, t.id ASC
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, transactionId);
+            statement.setInt(2, transactionId);
+            statement.setInt(3, transactionId);
+            statement.setInt(4, transactionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    transactions.add(new FinanceTransaction(
+                            resultSet.getInt("id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("transaction_type"),
+                            resultSet.getString("transaction_purpose"),
+                            resultSet.getString("transaction_status"),
+                            resultSet.getString("category_name"),
+                            resultSet.getString("project_name"),
+                            resultSet.getString("full_name"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("description"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            nullableInt(resultSet, "project_activity_id"),
+                            resultSet.getString("activity_name")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list linked transactions", exception);
+        }
+        return transactions;
+    }
+
+    public void updateTransferGroupStatus(int transactionId, String status, String reason) {
+        requireLifecycleAdministrator("update transfer group " + transactionId + " to " + status);
+        String cleanStatus = lifecycleStatus(requireText(status, "Status").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_'));
+        String cleanReason = requireText(reason, "Reason");
+        try (Connection connection = connect()) {
+            updateTransferGroupStatus(connection, transactionId, cleanStatus);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update transfer status", exception);
+        }
+        recordSystemLog(
+                "Transaction Ledger",
+                "Transfer Lifecycle Updated",
+                "WARNING",
+                "Transfer group for transaction " + transactionId + " set to " + cleanStatus + ". Reason: " + cleanReason
+        );
+    }
+
+    private void updateTransferGroupStatus(Connection connection, int transactionId, String status) throws SQLException {
+        String sql = """
+                UPDATE transactions
+                SET transaction_status = ?
+                WHERE id = ?
+                   OR related_transaction_id = ?
+                   OR id = (SELECT related_transaction_id FROM transactions WHERE id = ?)
+                   OR related_transaction_id = (SELECT related_transaction_id FROM transactions WHERE id = ?)
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, status);
+            statement.setInt(2, transactionId);
+            statement.setInt(3, transactionId);
+            statement.setInt(4, transactionId);
+            statement.setInt(5, transactionId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid transfer.");
+            }
+        }
+    }
+
+    public int createTransactionReversal(int transactionId, String reason) {
+        requireLifecycleAdministrator("reverse transaction " + transactionId);
+        String cleanReason = requireText(reason, "Reason");
+        int reversalId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    INSERT INTO transactions (
+                        account_id, category_id, project_id, project_activity_id, person_id, related_transaction_id,
+                        transaction_type, transaction_purpose, transaction_status, amount, transaction_date,
+                        description, source, payment_method, reference_number
+                    )
+                    SELECT account_id, category_id, project_id, project_activity_id, person_id, id,
+                           CASE WHEN transaction_type = 'INCOME' THEN 'EXPENSE' ELSE 'INCOME' END,
+                           'REVERSAL', 'COMPLETED', amount, ?,
+                           trim('Reversal of transaction #' || id || '. Reason: ' || ?),
+                           'REVERSAL', payment_method, reference_number
+                    FROM transactions
+                    WHERE id = ?
+                      AND transaction_type IN ('INCOME', 'EXPENSE')
+                      AND COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                insert.setString(1, LocalDate.now().toString());
+                insert.setString(2, cleanReason);
+                insert.setInt(3, transactionId);
+                if (insert.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a posted income or expense transaction that can be reversed.");
+                }
+                reversalId = generatedId(connection, insert);
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE transactions
+                        SET transaction_status = 'REVERSED'
+                        WHERE id = ?
+                        """)) {
+                    update.setInt(1, transactionId);
+                    update.executeUpdate();
+                }
+                recordSystemLog(
+                        connection,
+                        "Transaction Ledger",
+                        "Transaction Reversed",
+                        "WARNING",
+                        "Transaction " + transactionId + " reversed by transaction " + reversalId + ". Reason: " + cleanReason
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to reverse transaction", exception);
+        }
+        return reversalId;
+    }
+
+    public int createTransferDraftFromTransaction(int transactionId, String reason) {
+        String cleanReason = safeText(reason, "Copied as new transfer");
+        int draftId;
+        String sql = """
+                INSERT INTO transfer_drafts (
+                    from_account_id, to_account_id, amount_sent, amount_received, currency,
+                    exchange_rate, transfer_fee, fee_category_id, transfer_date, payment_method,
+                    reference_number, description, status, updated_at
+                )
+                SELECT outgoing.account_id, incoming.account_id, outgoing.amount, incoming.amount,
+                       fa.currency, NULL, COALESCE(fee.amount, 0), fee.category_id,
+                       outgoing.transaction_date, outgoing.payment_method, outgoing.reference_number,
+                       trim(COALESCE(outgoing.description, '') || ' (new draft from transfer #' || outgoing.id || ')'),
+                       'Draft', CURRENT_TIMESTAMP
+                FROM transactions seed
+                JOIN transactions outgoing
+                  ON (outgoing.id = seed.id OR outgoing.id = seed.related_transaction_id
+                   OR outgoing.related_transaction_id = seed.id OR outgoing.related_transaction_id = seed.related_transaction_id)
+                 AND outgoing.transaction_type = 'TRANSFER'
+                 AND outgoing.transaction_purpose = 'TRANSFER_OUT'
+                JOIN transactions incoming
+                  ON (incoming.id = outgoing.related_transaction_id OR incoming.related_transaction_id = outgoing.id)
+                 AND incoming.transaction_type = 'TRANSFER'
+                 AND incoming.transaction_purpose = 'TRANSFER_IN'
+                JOIN accounts fa ON fa.id = outgoing.account_id
+                LEFT JOIN transactions fee
+                  ON fee.related_transaction_id = outgoing.id
+                 AND fee.transaction_type = 'EXPENSE'
+                 AND fee.transaction_purpose = 'TRANSFER_FEE'
+                WHERE seed.id = ?
+                LIMIT 1
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, transactionId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid transfer to copy.");
+            }
+            draftId = generatedId(connection, statement);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to create transfer draft", exception);
+        }
+        recordSystemLog(
+                "Transaction Ledger",
+                "Create Transfer Draft",
+                "INFO",
+                "Transfer draft " + draftId + " created from transaction " + transactionId + ". Reason: " + cleanReason
+        );
+        return draftId;
+    }
+
+    public TransferPostingResult createTransferReversal(int transactionId, String reason) {
+        requireLifecycleAdministrator("reverse transfer " + transactionId);
+        String cleanReason = requireText(reason, "Reason");
+        TransferGroupData group;
+        TransferPostingResult result;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                group = transferGroupData(connection, transactionId);
+                LocalDate reversalDate = LocalDate.now();
+                String reversalReference = safeText(group.referenceNumber(), "") + "-REV";
+                String reversalDescription = "Reversal of transfer #" + group.outgoingId() + ". Reason: " + cleanReason;
+                int reversalOutgoingId = insertTransferRow(
+                        connection,
+                        group.toAccountId(),
+                        null,
+                        "TRANSFER_OUT",
+                        group.amountReceived(),
+                        reversalDate,
+                        reversalDescription,
+                        group.paymentMethod(),
+                        reversalReference
+                );
+                int reversalIncomingId = insertTransferRow(
+                        connection,
+                        group.fromAccountId(),
+                        reversalOutgoingId,
+                        "TRANSFER_IN",
+                        group.amountSent(),
+                        reversalDate,
+                        reversalDescription,
+                        group.paymentMethod(),
+                        reversalReference
+                );
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
+                    update.setInt(1, reversalIncomingId);
+                    update.setInt(2, reversalOutgoingId);
+                    update.executeUpdate();
+                }
+                Integer feeReversalId = null;
+                if (group.transferFee() > 0) {
+                    feeReversalId = insertTransferFeeReversalRow(
+                            connection,
+                            group.fromAccountId(),
+                            group.feeCategoryId(),
+                            reversalOutgoingId,
+                            group.transferFee(),
+                            reversalDate,
+                            "Reversal of transfer fee for transfer #" + group.outgoingId() + ". Reason: " + cleanReason,
+                            group.paymentMethod(),
+                            reversalReference
+                    );
+                }
+                updateTransferGroupStatus(connection, transactionId, STATUS_REVERSED);
+                recordSystemLog(
+                        connection,
+                        "Transaction Ledger",
+                        "Transfer Reversed",
+                        "WARNING",
+                        "Transfer " + group.outgoingId() + " reversed by transfer " + reversalOutgoingId
+                                + ". Reason: " + cleanReason
+                );
+                connection.commit();
+                Account updatedSource = accountSnapshot(group.toAccountId());
+                Account updatedDestination = accountSnapshot(group.fromAccountId());
+                result = new TransferPostingResult(
+                        reversalOutgoingId,
+                        reversalIncomingId,
+                        feeReversalId,
+                        reversalReference,
+                        updatedSource.getCurrentBalance(),
+                        updatedDestination.getCurrentBalance()
+                );
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to reverse transfer", exception);
+        }
+        return result;
+    }
+
+    private TransferGroupData transferGroupData(int transactionId) {
+        try (Connection connection = connect()) {
+            return transferGroupData(connection, transactionId);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load transfer group", exception);
+        }
+    }
+
+    private TransferGroupData transferGroupData(Connection connection, int transactionId) throws SQLException {
+        String sql = """
+                SELECT outgoing.id AS outgoing_id, incoming.id AS incoming_id,
+                       outgoing.account_id AS from_account_id, incoming.account_id AS to_account_id,
+                       outgoing.amount AS amount_sent, incoming.amount AS amount_received,
+                       COALESCE(fee.amount, 0) AS transfer_fee, fee.category_id AS fee_category_id,
+                       outgoing.transaction_date, outgoing.payment_method, outgoing.reference_number,
+                       outgoing.description
+                FROM transactions seed
+                JOIN transactions outgoing
+                  ON (outgoing.id = seed.id OR outgoing.id = seed.related_transaction_id
+                   OR outgoing.related_transaction_id = seed.id OR outgoing.related_transaction_id = seed.related_transaction_id)
+                 AND outgoing.transaction_type = 'TRANSFER'
+                 AND outgoing.transaction_purpose = 'TRANSFER_OUT'
+                JOIN transactions incoming
+                  ON (incoming.id = outgoing.related_transaction_id OR incoming.related_transaction_id = outgoing.id)
+                 AND incoming.transaction_type = 'TRANSFER'
+                 AND incoming.transaction_purpose = 'TRANSFER_IN'
+                LEFT JOIN transactions fee
+                  ON fee.related_transaction_id = outgoing.id
+                 AND fee.transaction_type = 'EXPENSE'
+                 AND fee.transaction_purpose = 'TRANSFER_FEE'
+                WHERE seed.id = ?
+                  AND COALESCE(outgoing.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                  AND COALESCE(incoming.transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
+                LIMIT 1
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, transactionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return new TransferGroupData(
+                            resultSet.getInt("outgoing_id"),
+                            resultSet.getInt("incoming_id"),
+                            resultSet.getInt("from_account_id"),
+                            resultSet.getInt("to_account_id"),
+                            resultSet.getDouble("amount_sent"),
+                            resultSet.getDouble("amount_received"),
+                            resultSet.getDouble("transfer_fee"),
+                            nullableInt(resultSet, "fee_category_id"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            resultSet.getString("description")
+                    );
+                }
+            }
+        }
+        throw new IllegalArgumentException("Select a valid transfer.");
+    }
+
+    public int saveScheduledTransfer(
+            Integer scheduleId,
+            String transferName,
+            int fromAccountId,
+            int toAccountId,
+            double amount,
+            String currency,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate firstTransferDate,
+            LocalDate nextDueDate,
+            String frequency,
+            LocalDate endDate,
+            String reminderPeriod,
+            String transferMethod,
+            boolean confirmationRequired,
+            String notes,
+            String status,
+            Integer lastTransactionId
+    ) {
+        String cleanName = requireText(transferName, "Transfer name");
+        validateTransferDraft(fromAccountId, toAccountId, amount, amount, transferFee, firstTransferDate);
+        LocalDate cleanNextDueDate = nextDueDate == null ? firstTransferDate : nextDueDate;
+        String cleanCurrency = safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+        String cleanStatus = normalizedScheduledTransferStatus(status);
+        try (Connection connection = connect()) {
+            requireActiveTransferAccount(connection, fromAccountId, "source");
+            requireActiveTransferAccount(connection, toAccountId, "destination");
+            if (scheduleId == null) {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO scheduled_transfers (
+                            transfer_name, from_account_id, to_account_id, amount, currency, transfer_fee,
+                            fee_category_id, first_transfer_date, next_due_date, frequency, end_date,
+                            reminder_period, transfer_method, confirmation_required, notes, status,
+                            last_transaction_id, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    bindScheduledTransfer(statement, cleanName, fromAccountId, toAccountId, amount, cleanCurrency,
+                            transferFee, feeCategoryId, firstTransferDate, cleanNextDueDate, frequency, endDate,
+                            reminderPeriod, transferMethod, confirmationRequired, notes, cleanStatus, lastTransactionId);
+                    statement.executeUpdate();
+                    int id = generatedId(connection, statement);
+                    recordSystemLog("Transaction Ledger", "Save Scheduled Transfer", "INFO", "Scheduled transfer " + id + " saved.");
+                    return id;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE scheduled_transfers
+                    SET transfer_name = ?,
+                        from_account_id = ?,
+                        to_account_id = ?,
+                        amount = ?,
+                        currency = ?,
+                        transfer_fee = ?,
+                        fee_category_id = ?,
+                        first_transfer_date = ?,
+                        next_due_date = ?,
+                        frequency = ?,
+                        end_date = ?,
+                        reminder_period = ?,
+                        transfer_method = ?,
+                        confirmation_required = ?,
+                        notes = ?,
+                        status = ?,
+                        last_transaction_id = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """)) {
+                bindScheduledTransfer(statement, cleanName, fromAccountId, toAccountId, amount, cleanCurrency,
+                        transferFee, feeCategoryId, firstTransferDate, cleanNextDueDate, frequency, endDate,
+                        reminderPeriod, transferMethod, confirmationRequired, notes, cleanStatus, lastTransactionId);
+                statement.setInt(18, scheduleId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a valid scheduled transfer.");
+                }
+                recordSystemLog("Transaction Ledger", "Update Scheduled Transfer", "INFO", "Scheduled transfer " + scheduleId + " updated.");
+                return scheduleId;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to save scheduled transfer", exception);
+        }
+    }
+
+    private void bindScheduledTransfer(
+            PreparedStatement statement,
+            String transferName,
+            int fromAccountId,
+            int toAccountId,
+            double amount,
+            String currency,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate firstTransferDate,
+            LocalDate nextDueDate,
+            String frequency,
+            LocalDate endDate,
+            String reminderPeriod,
+            String transferMethod,
+            boolean confirmationRequired,
+            String notes,
+            String status,
+            Integer lastTransactionId
+    ) throws SQLException {
+        statement.setString(1, transferName);
+        statement.setInt(2, fromAccountId);
+        statement.setInt(3, toAccountId);
+        statement.setDouble(4, amount);
+        statement.setString(5, currency);
+        statement.setDouble(6, Math.max(0, transferFee));
+        setNullableInt(statement, 7, feeCategoryId);
+        statement.setString(8, firstTransferDate.toString());
+        statement.setString(9, nextDueDate.toString());
+        statement.setString(10, safeText(frequency, "One time"));
+        statement.setString(11, endDate == null ? null : endDate.toString());
+        statement.setString(12, safeText(reminderPeriod, "Same day"));
+        statement.setString(13, cleanNullable(transferMethod));
+        statement.setInt(14, confirmationRequired ? 1 : 0);
+        statement.setString(15, safeText(notes, ""));
+        statement.setString(16, status);
+        setNullableInt(statement, 17, lastTransactionId);
+    }
+
+    public List<ScheduledTransferRecord> listScheduledTransfers(int limit) {
+        List<ScheduledTransferRecord> records = new ArrayList<>();
+        String sql = scheduledTransferSelectSql("""
+                ORDER BY date(s.next_due_date) ASC, s.id DESC
+                LIMIT ?
+                """);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    records.add(scheduledTransferRecord(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list scheduled transfers", exception);
+        }
+        return records;
+    }
+
+    public void updateScheduledTransferAfterPost(
+            int scheduleId,
+            int outgoingTransactionId,
+            LocalDate nextDueDate,
+            String status
+    ) {
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE scheduled_transfers
+                     SET last_transaction_id = ?,
+                         next_due_date = ?,
+                         status = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                     """)) {
+            statement.setInt(1, outgoingTransactionId);
+            statement.setString(2, nextDueDate == null ? LocalDate.now().toString() : nextDueDate.toString());
+            statement.setString(3, normalizedScheduledTransferStatus(status));
+            statement.setInt(4, scheduleId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid scheduled transfer.");
+            }
+            recordSystemLog("Transaction Ledger", "Scheduled Transfer Posted", "INFO", "Scheduled transfer " + scheduleId + " posted.");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update scheduled transfer", exception);
+        }
+    }
+
+    private String scheduledTransferSelectSql(String suffix) {
+        return """
+                SELECT s.id, s.transfer_name, s.from_account_id, fa.account_name AS from_account_name,
+                       fa.currency AS from_currency, s.to_account_id, ta.account_name AS to_account_name,
+                       ta.currency AS to_currency, s.amount, s.currency, s.transfer_fee,
+                       s.fee_category_id, fc.category_name AS fee_category_name, s.first_transfer_date,
+                       s.next_due_date, s.frequency, s.end_date, s.reminder_period, s.transfer_method,
+                       s.confirmation_required, s.notes, s.status, s.last_transaction_id, s.created_at, s.updated_at
+                FROM scheduled_transfers s
+                JOIN accounts fa ON fa.id = s.from_account_id
+                JOIN accounts ta ON ta.id = s.to_account_id
+                LEFT JOIN categories fc ON fc.id = s.fee_category_id
+                """ + suffix;
+    }
+
+    private ScheduledTransferRecord scheduledTransferRecord(ResultSet resultSet) throws SQLException {
+        return new ScheduledTransferRecord(
+                resultSet.getInt("id"),
+                resultSet.getString("transfer_name"),
+                resultSet.getInt("from_account_id"),
+                resultSet.getString("from_account_name"),
+                resultSet.getString("from_currency"),
+                resultSet.getInt("to_account_id"),
+                resultSet.getString("to_account_name"),
+                resultSet.getString("to_currency"),
+                resultSet.getDouble("amount"),
+                resultSet.getString("currency"),
+                resultSet.getDouble("transfer_fee"),
+                nullableInt(resultSet, "fee_category_id"),
+                resultSet.getString("fee_category_name"),
+                resultSet.getString("first_transfer_date"),
+                resultSet.getString("next_due_date"),
+                resultSet.getString("frequency"),
+                resultSet.getString("end_date"),
+                resultSet.getString("reminder_period"),
+                resultSet.getString("transfer_method"),
+                resultSet.getInt("confirmation_required") == 1,
+                resultSet.getString("notes"),
+                resultSet.getString("status"),
+                nullableInt(resultSet, "last_transaction_id"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private void validateTransferDraft(
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            double transferFee,
+            LocalDate transferDate
+    ) {
+        if (fromAccountId == toAccountId) {
+            throw new IllegalArgumentException("Choose two different accounts.");
+        }
+        if (amountSent <= 0 || amountReceived <= 0) {
+            throw new IllegalArgumentException("Transfer amount must be greater than zero.");
+        }
+        if (transferFee < 0) {
+            throw new IllegalArgumentException("Transfer fee cannot be negative.");
+        }
+        if (transferDate == null) {
+            throw new IllegalArgumentException("Transfer date is required.");
+        }
+    }
+
+    private void requireActiveTransferAccount(Connection connection, int accountId, String role) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT status, COALESCE(is_system_account, 0) AS is_system_account
+                FROM accounts
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid " + role + " account.");
+                }
+                if (!"ACTIVE".equalsIgnoreCase(safeText(resultSet.getString("status"), ""))) {
+                    throw new IllegalArgumentException("The " + role + " account must be active.");
+                }
+                if (resultSet.getInt("is_system_account") == 1) {
+                    throw new IllegalArgumentException("The " + role + " account must be a real user account, not an internal Savings Group ledger.");
+                }
+            }
+        }
+    }
+
+    private String normalizedScheduledTransferStatus(String status) {
+        String cleanStatus = safeText(status, "Upcoming");
+        if (Set.of("Upcoming", "Due Today", "Overdue", "Completed", "Paused", "Cancelled").contains(cleanStatus)) {
+            return cleanStatus;
+        }
+        return "Upcoming";
     }
 
     public List<SetupPolicyRecord> listSetupPolicyRecords(String policyArea) {
@@ -2926,7 +13822,7 @@ public class DatabaseHandler {
                     FROM transactions
                     WHERE category_id IS NULL
                       AND transaction_type IN ('INCOME','EXPENSE')
-                      AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                      AND COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
                     """));
             appendDataQualityLine(summary, "Transactions linked to missing accounts", countQuery(connection, """
                     SELECT COUNT(*)
@@ -2939,7 +13835,7 @@ public class DatabaseHandler {
                     FROM (
                         SELECT account_id, transaction_date, transaction_type, amount, COALESCE(description, '') AS description
                         FROM transactions
-                        WHERE COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                        WHERE COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
                         GROUP BY account_id, transaction_date, transaction_type, amount, COALESCE(description, '')
                         HAVING COUNT(*) > 1
                     )
@@ -2947,7 +13843,7 @@ public class DatabaseHandler {
             appendDataQualityLine(summary, "Future-dated transactions", countQuery(connection, """
                     SELECT COUNT(*)
                     FROM transactions
-                    WHERE date(transaction_date) > date('now')
+                WHERE date(transaction_date) > date('now', 'localtime')
                     """));
             appendDataQualityLine(summary, "Zero-value transactions", countQuery(connection, """
                     SELECT COUNT(*)
@@ -3087,7 +13983,7 @@ public class DatabaseHandler {
                 FROM transactions
                 WHERE category_id IS NULL
                   AND transaction_type IN ('INCOME','EXPENSE')
-                  AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                  AND COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
                 """);
         count += countQuery(connection, """
                 SELECT COUNT(*)
@@ -3100,12 +13996,12 @@ public class DatabaseHandler {
                 FROM (
                     SELECT account_id, transaction_date, transaction_type, amount, COALESCE(description, '') AS description
                     FROM transactions
-                    WHERE COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                    WHERE COALESCE(transaction_status, 'COMPLETED') NOT IN ('CANCELLED', 'REVERSED')
                     GROUP BY account_id, transaction_date, transaction_type, amount, COALESCE(description, '')
                     HAVING COUNT(*) > 1
                 )
                 """);
-        count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE date(transaction_date) > date('now')");
+            count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE date(transaction_date) > date('now', 'localtime')");
         count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE amount = 0");
         count += countQuery(connection, "SELECT COUNT(*) FROM transactions WHERE payment_method IS NULL OR trim(payment_method) = ''");
         count += countQuery(connection, """
@@ -3151,6 +14047,1503 @@ public class DatabaseHandler {
 
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    public List<Asset> listAssets() {
+        List<Asset> assets = new ArrayList<>();
+        String sql = """
+                SELECT ast.id, ast.asset_name, ast.asset_category, ast.acquisition_method, ast.purchase_date,
+                       ast.purchase_cost, ast.capitalized_costs, ast.currency, ast.account_id,
+                       a.account_name, ast.budget_id, b.budget_name, ast.project_id, p.project_name,
+                       ast.project_activity_id, pa.activity_name AS project_activity_name,
+                       ast.purchase_transaction_id, ast.payment_treatment, ast.supplier, ast.payment_method,
+                       ast.reference_number, ast.serial_number, ast.location, ast.asset_condition,
+                       ast.quantity, ast.current_value, ast.status, ast.supporting_document, ast.notes,
+                       ast.created_at
+                FROM assets ast
+                LEFT JOIN accounts a ON a.id = ast.account_id
+                LEFT JOIN budgets b ON b.id = ast.budget_id
+                LEFT JOIN projects p ON p.id = ast.project_id
+                LEFT JOIN project_activities pa ON pa.id = ast.project_activity_id
+                WHERE COALESCE(ast.is_deleted, 0) = 0
+                ORDER BY ast.status, ast.asset_name
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                assets.add(assetFromResult(resultSet));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list assets", exception);
+        }
+        return assets;
+    }
+
+    public List<AssetEvent> listAssetEvents(int assetId) {
+        List<AssetEvent> events = new ArrayList<>();
+        String sql = """
+                SELECT id, asset_id, event_type, event_date, amount, currency, counterparty,
+                       transaction_id, payment_status, reason, reference_number, notes, created_at
+                FROM asset_events
+                WHERE asset_id = ?
+                ORDER BY event_date DESC, id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, assetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    events.add(assetEventFromResult(resultSet));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list asset history", exception);
+        }
+        return events;
+    }
+
+    public List<Integer> registerAssets(
+            String assetName,
+            String assetCategory,
+            String acquisitionMethod,
+            String purchaseDate,
+            double unitPurchaseCost,
+            double unitCapitalizedCosts,
+            String currency,
+            Integer accountId,
+            Integer budgetId,
+            Integer projectId,
+            Integer projectActivityId,
+            Integer purchaseTransactionId,
+            String paymentTreatment,
+            String supplier,
+            String paymentMethod,
+            String referenceNumber,
+            String serialNumber,
+            String location,
+            String condition,
+            int quantity,
+            String supportingDocument,
+            String notes
+    ) {
+        String cleanName = requireText(assetName, "Asset name");
+        String cleanCategory = safeText(assetCategory, "Other");
+        String cleanMethod = safeText(acquisitionMethod, "Purchased");
+        String cleanDate = safeText(purchaseDate, LocalDate.now().toString());
+        String cleanCurrency = normalizedCurrency(currency);
+        String cleanTreatment = normalizedAssetPaymentTreatment(paymentTreatment);
+        int cleanQuantity = Math.max(1, quantity);
+        if (unitPurchaseCost < 0 || unitCapitalizedCosts < 0) {
+            throw new IllegalArgumentException("Asset costs cannot be negative.");
+        }
+        if ("CREATE_PAYMENT_TRANSACTION".equals(cleanTreatment) && accountId == null) {
+            throw new IllegalArgumentException("Choose the paying account before creating a payment transaction.");
+        }
+        if ("LINK_EXISTING_TRANSACTION".equals(cleanTreatment) && purchaseTransactionId == null) {
+            throw new IllegalArgumentException("Enter the existing purchase transaction ID to link.");
+        }
+
+        List<Integer> assetIds = new ArrayList<>();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Integer linkedTransactionId = purchaseTransactionId;
+                double totalAllocatedValue = (unitPurchaseCost + unitCapitalizedCosts) * cleanQuantity;
+                Integer expenseCategoryId = budgetId == null ? null : budgetCategoryId(connection, budgetId);
+                if ("CREATE_PAYMENT_TRANSACTION".equals(cleanTreatment)) {
+                    requireActiveAssetAccount(connection, accountId, cleanCurrency, "paying");
+                    if (totalAllocatedValue <= 0) {
+                        throw new IllegalArgumentException("A new payment transaction requires a positive purchase value.");
+                    }
+                    linkedTransactionId = insertAssetPaymentTransaction(
+                            connection,
+                            accountId,
+                            expenseCategoryId,
+                            projectId,
+                            projectActivityId,
+                            totalAllocatedValue,
+                            cleanDate,
+                            cleanName,
+                            supplier,
+                            paymentMethod,
+                            referenceNumber
+                    );
+                } else if ("LINK_EXISTING_TRANSACTION".equals(cleanTreatment)) {
+                    double transactionAmount = validateExistingAssetPurchaseTransaction(connection, purchaseTransactionId, cleanCurrency);
+                    double allocatedBefore = amountAllocatedToAssets(connection, purchaseTransactionId, null);
+                    double unallocatedAfter = transactionAmount - allocatedBefore - totalAllocatedValue;
+                    if (Math.abs(unallocatedAfter) > 0.005 && safeText(notes, "").isBlank()) {
+                        throw new IllegalArgumentException("The linked transaction will have an unexplained asset allocation difference. Explain or approve the difference in notes.");
+                    }
+                }
+
+                for (int index = 1; index <= cleanQuantity; index++) {
+                    String splitName = cleanQuantity == 1 ? cleanName : cleanName + " " + index;
+                    int assetId = insertAsset(
+                            connection,
+                            splitName,
+                            cleanCategory,
+                            cleanMethod,
+                            cleanDate,
+                            unitPurchaseCost,
+                            unitCapitalizedCosts,
+                            cleanCurrency,
+                            accountId,
+                            budgetId,
+                            projectId,
+                            projectActivityId,
+                            linkedTransactionId,
+                            cleanTreatment,
+                            supplier,
+                            paymentMethod,
+                            referenceNumber,
+                            serialNumber,
+                            location,
+                            safeText(condition, "Good"),
+                            1,
+                            unitPurchaseCost + unitCapitalizedCosts,
+                            "ACTIVE",
+                            supportingDocument,
+                            notes
+                    );
+                    assetIds.add(assetId);
+                    insertAssetEvent(
+                            connection,
+                            assetId,
+                            "REGISTERED",
+                            cleanDate,
+                            unitPurchaseCost + unitCapitalizedCosts,
+                            cleanCurrency,
+                            supplier,
+                            linkedTransactionId,
+                            cleanTreatment,
+                            "Asset acquired by " + cleanMethod + ".",
+                            referenceNumber,
+                            notes
+                    );
+                }
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to register asset", exception);
+        }
+        recordSystemLog("Assets", "Register Asset", "INFO", assetIds.size() + " asset record(s) registered.");
+        return assetIds;
+    }
+
+    public int registerProjectAsAsset(int projectId) {
+        int assetId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Project project = projectByIdWithSpending(connection, projectId);
+                if ("Cancelled".equalsIgnoreCase(safeText(project.getStatus(), ""))) {
+                    throw new IllegalArgumentException("Cancelled projects cannot be registered as assets.");
+                }
+                Integer existingAssetId = existingAssetIdForProject(connection, projectId);
+                if (existingAssetId != null) {
+                    throw new IllegalArgumentException("This project is already registered as asset #" + existingAssetId + ".");
+                }
+                double assetValue = project.getAmountSpent() > 0 ? project.getAmountSpent() : project.getPlannedBudget();
+                if (assetValue <= 0) {
+                    throw new IllegalArgumentException("The selected project has no recorded or planned cost to convert into an asset.");
+                }
+                String currency = normalizedCurrency(project.getCurrency());
+                String assetDate = preferredAssetDate(project.getEndDate(), project.getStartDate());
+                String category = assetCategoryForProjectType(project.getProjectType());
+                String notes = "Automatically registered from project #" + project.getId()
+                        + ". Actual cost: " + project.getAmountSpent()
+                        + "; planned budget: " + project.getPlannedBudget()
+                        + ". No new payment transaction was created.";
+                assetId = insertAsset(
+                        connection,
+                        project.getProjectName(),
+                        category,
+                        "Converted from Project",
+                        assetDate,
+                        assetValue,
+                        0,
+                        currency,
+                        null,
+                        null,
+                        project.getId(),
+                        null,
+                        null,
+                        "CONVERTED_FROM_PROJECT",
+                        project.getFundingSource(),
+                        null,
+                        "PROJECT-" + project.getId(),
+                        null,
+                        null,
+                        "Good",
+                        1,
+                        assetValue,
+                        "ACTIVE",
+                        null,
+                        notes
+                );
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        "REGISTERED",
+                        assetDate,
+                        assetValue,
+                        currency,
+                        project.getFundingSource(),
+                        null,
+                        "CONVERTED_FROM_PROJECT",
+                        "Project converted to asset without posting a duplicate payment transaction.",
+                        "PROJECT-" + project.getId(),
+                        notes
+                );
+                recordProjectHistory(connection, project.getId(), "Asset Registered", "Project registered as asset #" + assetId + ".");
+                recordSystemLog(connection, "Assets", "Project Registered As Asset", "INFO",
+                        "Project " + project.getId() + " registered as asset " + assetId + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to register project as asset", exception);
+        }
+        return assetId;
+    }
+
+    public int registerBudgetPlanAsAsset(String budgetName, String budgetMonth) {
+        int assetId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                BudgetAssetSource source = budgetAssetSource(connection, budgetName, budgetMonth);
+                Integer existingAssetId = existingAssetIdForBudgetPlan(connection, source.budgetName(), source.budgetMonth());
+                if (existingAssetId != null) {
+                    throw new IllegalArgumentException("This budget plan is already registered as asset #" + existingAssetId + ".");
+                }
+                double assetValue = source.actualAmount() > 0 ? source.actualAmount() : source.plannedAmount();
+                if (assetValue <= 0) {
+                    throw new IllegalArgumentException("The selected budget has no recorded or planned amount to convert into an asset.");
+                }
+                String assetDate = budgetAssetDate(source);
+                String category = assetCategoryForBudget(source);
+                String notes = "Automatically registered from budget \"" + source.budgetName()
+                        + "\" for " + source.budgetMonth()
+                        + ". Actual spending: " + source.actualAmount()
+                        + "; planned amount: " + source.plannedAmount()
+                        + "; allocations: " + source.allocationCount()
+                        + ". No new payment transaction was created.";
+                assetId = insertAsset(
+                        connection,
+                        source.budgetName() + " (" + source.budgetMonth() + ")",
+                        category,
+                        "Converted from Budget",
+                        assetDate,
+                        assetValue,
+                        0,
+                        normalizedCurrency(source.currency()),
+                        null,
+                        source.budgetId(),
+                        null,
+                        null,
+                        null,
+                        "CONVERTED_FROM_BUDGET",
+                        source.categoryNames(),
+                        null,
+                        "BUDGET-" + source.budgetId(),
+                        null,
+                        null,
+                        "Good",
+                        1,
+                        assetValue,
+                        "ACTIVE",
+                        null,
+                        notes
+                );
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        "REGISTERED",
+                        assetDate,
+                        assetValue,
+                        normalizedCurrency(source.currency()),
+                        source.categoryNames(),
+                        null,
+                        "CONVERTED_FROM_BUDGET",
+                        "Budget plan converted to asset without posting a duplicate payment transaction.",
+                        "BUDGET-" + source.budgetId(),
+                        notes
+                );
+                recordSystemLog(connection, "Assets", "Budget Registered As Asset", "INFO",
+                        "Budget " + source.budgetName() + " " + source.budgetMonth()
+                                + " registered as asset " + assetId + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to register budget as asset", exception);
+        }
+        return assetId;
+    }
+
+    public double assetPurchaseUnallocatedAmount(int transactionId) {
+        try (Connection connection = connect()) {
+            double transactionAmount = validateExistingAssetPurchaseTransaction(connection, transactionId, null);
+            return transactionAmount - amountAllocatedToAssets(connection, transactionId, null);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate asset purchase allocation", exception);
+        }
+    }
+
+    public void updateAssetValue(int assetId, double currentValue, String eventDate, String reason, String notes) {
+        if (currentValue < 0) {
+            throw new IllegalArgumentException("Asset value cannot be negative.");
+        }
+        String cleanDate = safeText(eventDate, LocalDate.now().toString());
+        try (Connection connection = connect()) {
+            Asset asset = assetById(connection, assetId);
+            requireEditableAsset(asset);
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE assets
+                    SET current_value = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """)) {
+                statement.setDouble(1, currentValue);
+                statement.setInt(2, assetId);
+                statement.executeUpdate();
+            }
+            insertAssetEvent(
+                    connection,
+                    assetId,
+                    "VALUE_UPDATE",
+                    cleanDate,
+                    currentValue,
+                    safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE),
+                    null,
+                    null,
+                    "VALUATION",
+                    safeText(reason, "Asset value updated."),
+                    null,
+                    notes
+            );
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update asset value", exception);
+        }
+        recordSystemLog("Assets", "Update Value", "INFO", "Asset " + assetId + " value updated.");
+    }
+
+    public void updateAssetDetails(
+            int assetId,
+            String assetName,
+            String assetCategory,
+            String supplier,
+            String referenceNumber,
+            String serialNumber,
+            String location,
+            String condition,
+            String supportingDocument,
+            String notes
+    ) {
+        String cleanName = requireText(assetName, "Asset name");
+        String cleanCategory = safeText(assetCategory, "Other");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Asset asset = assetById(connection, assetId);
+                requireEditableAsset(asset);
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE assets
+                        SET asset_name = ?,
+                            asset_category = ?,
+                            supplier = ?,
+                            reference_number = ?,
+                            serial_number = ?,
+                            location = ?,
+                            asset_condition = ?,
+                            supporting_document = ?,
+                            notes = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, cleanName);
+                    statement.setString(2, cleanCategory);
+                    statement.setString(3, cleanNullable(supplier));
+                    statement.setString(4, cleanNullable(referenceNumber));
+                    statement.setString(5, cleanNullable(serialNumber));
+                    statement.setString(6, cleanNullable(location));
+                    statement.setString(7, safeText(condition, "Good"));
+                    statement.setString(8, cleanNullable(supportingDocument));
+                    statement.setString(9, safeText(notes, ""));
+                    statement.setInt(10, assetId);
+                    statement.executeUpdate();
+                }
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        "DETAILS_UPDATED",
+                        LocalDate.now().toString(),
+                        asset.getCurrentValue(),
+                        safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE),
+                        supplier,
+                        asset.getPurchaseTransactionId(),
+                        "DETAILS_ONLY",
+                        "Asset non-financial details updated.",
+                        referenceNumber,
+                        notes
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update asset details", exception);
+        }
+        recordSystemLog("Assets", "Edit Details", "INFO", "Asset " + assetId + " details updated.");
+    }
+
+    public void recordAssetMaintenance(
+            int assetId,
+            String eventDate,
+            double cost,
+            String provider,
+            String referenceNumber,
+            String notes,
+            boolean addToAssetValue
+    ) {
+        if (cost < 0) {
+            throw new IllegalArgumentException("Maintenance cost cannot be negative.");
+        }
+        String cleanDate = safeText(eventDate, LocalDate.now().toString());
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Asset asset = assetById(connection, assetId);
+                requireEditableAsset(asset);
+                if (addToAssetValue && cost > 0) {
+                    try (PreparedStatement statement = connection.prepareStatement("""
+                            UPDATE assets
+                            SET capitalized_costs = capitalized_costs + ?,
+                                current_value = current_value + ?,
+                                status = 'UNDER_MAINTENANCE',
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """)) {
+                        statement.setDouble(1, cost);
+                        statement.setDouble(2, cost);
+                        statement.setInt(3, assetId);
+                        statement.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement statement = connection.prepareStatement("""
+                            UPDATE assets
+                            SET status = 'UNDER_MAINTENANCE', updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """)) {
+                        statement.setInt(1, assetId);
+                        statement.executeUpdate();
+                    }
+                }
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        addToAssetValue ? "MAINTENANCE_CAPITALIZED" : "MAINTENANCE",
+                        cleanDate,
+                        cost,
+                        safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE),
+                        provider,
+                        null,
+                        addToAssetValue ? "ADDED_TO_ASSET_VALUE" : "EXPENSE_ONLY",
+                        addToAssetValue ? "Approved capital cost added to asset value." : "Routine maintenance recorded.",
+                        referenceNumber,
+                        notes
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record asset maintenance", exception);
+        }
+        recordSystemLog("Assets", "Record Maintenance", "INFO", "Maintenance recorded for asset " + assetId + ".");
+    }
+
+    public void linkAssetPurchaseTransaction(int assetId, int transactionId, String notes) {
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Asset asset = assetById(connection, assetId);
+                requireEditableAsset(asset);
+                double transactionAmount = validateExistingAssetPurchaseTransaction(connection, transactionId, asset.getCurrency());
+                double allocatedBefore = amountAllocatedToAssets(connection, transactionId, assetId);
+                double unallocatedAfter = transactionAmount - allocatedBefore - asset.getTotalCost();
+                if (Math.abs(unallocatedAfter) > 0.005 && safeText(notes, "").isBlank()) {
+                    throw new IllegalArgumentException("The linked transaction has an unexplained allocation difference. Explain or approve the difference in notes.");
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE assets
+                        SET purchase_transaction_id = ?,
+                            payment_treatment = 'LINK_EXISTING_TRANSACTION',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setInt(1, transactionId);
+                    statement.setInt(2, assetId);
+                    statement.executeUpdate();
+                }
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        "LINK_PURCHASE_TRANSACTION",
+                        LocalDate.now().toString(),
+                        asset.getTotalCost(),
+                        safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE),
+                        asset.getSupplier(),
+                        transactionId,
+                        "LINK_EXISTING_TRANSACTION",
+                        "Existing purchase transaction linked without creating another outflow.",
+                        asset.getReferenceNumber(),
+                        allocationNote(notes, unallocatedAfter)
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to link asset purchase transaction", exception);
+        }
+        recordSystemLog("Assets", "Link Purchase Transaction", "INFO", "Asset " + assetId + " linked to transaction " + transactionId + ".");
+    }
+
+    public void sellAsset(
+            int assetId,
+            String saleType,
+            String saleDate,
+            String buyer,
+            double salePrice,
+            String currency,
+            Integer receivingAccountId,
+            String paymentMethod,
+            String referenceNumber,
+            double sellingCosts,
+            String reason,
+            String supportingDocument,
+            String notes,
+            String paymentOption,
+            double amountReceived,
+            String dueDate,
+            double quantitySold,
+            double valueRemoved
+    ) {
+        if (salePrice < 0 || sellingCosts < 0 || amountReceived < 0) {
+            throw new IllegalArgumentException("Sale amounts cannot be negative.");
+        }
+        String cleanDate = safeText(saleDate, LocalDate.now().toString());
+        String cleanCurrency = normalizedCurrency(currency);
+        String cleanPaymentOption = safeText(paymentOption, "Full payment received");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Asset asset = assetById(connection, assetId);
+                requireSaleableAsset(asset);
+                if (!safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE).equalsIgnoreCase(cleanCurrency)) {
+                    throw new IllegalArgumentException("Sale currency must match the asset currency.");
+                }
+                if (receivingAccountId == null) {
+                    throw new IllegalArgumentException("Choose the receiving account for sale proceeds or receivables.");
+                }
+                requireActiveAssetAccount(connection, receivingAccountId, cleanCurrency, "receiving");
+
+                boolean partialSale = "PARTIAL_SALE".equalsIgnoreCase(safeText(saleType, "FULL_SALE"));
+                double removedQuantity = partialSale ? quantitySold : asset.getQuantity();
+                if (removedQuantity <= 0 || removedQuantity > asset.getQuantity()) {
+                    throw new IllegalArgumentException("Quantity or portion sold must be greater than zero and not exceed the remaining asset quantity.");
+                }
+                double removedBookValue = valueRemoved > 0 ? valueRemoved : proratedBookValue(asset, removedQuantity);
+                if (removedBookValue < 0 || removedBookValue > asset.getCurrentValue() + 0.005) {
+                    throw new IllegalArgumentException("Value removed cannot exceed the current asset value.");
+                }
+
+                double cashReceived = amountReceived;
+                if ("Full payment received".equalsIgnoreCase(cleanPaymentOption) && cashReceived <= 0) {
+                    cashReceived = salePrice;
+                }
+                if (cashReceived > salePrice + 0.005) {
+                    throw new IllegalArgumentException("Amount received cannot exceed the sale price.");
+                }
+
+                Integer receiptTransactionId = null;
+                if (cashReceived > 0) {
+                    receiptTransactionId = insertAssetSaleReceiptTransaction(
+                            connection,
+                            receivingAccountId,
+                            cashReceived,
+                            cleanDate,
+                            asset.getAssetName(),
+                            buyer,
+                            paymentMethod,
+                            referenceNumber
+                    );
+                }
+                Integer sellingCostTransactionId = null;
+                if (sellingCosts > 0) {
+                    sellingCostTransactionId = insertAssetSellingCostTransaction(
+                            connection,
+                            receivingAccountId,
+                            sellingCosts,
+                            cleanDate,
+                            asset.getAssetName(),
+                            paymentMethod,
+                            referenceNumber
+                    );
+                }
+
+                double remainingQuantity = Math.max(0, asset.getQuantity() - removedQuantity);
+                double remainingValue = Math.max(0, asset.getCurrentValue() - removedBookValue);
+                String newStatus = partialSale && remainingQuantity > 0 && remainingValue > 0 ? "ACTIVE" : "SOLD";
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE assets
+                        SET quantity = ?,
+                            current_value = ?,
+                            status = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setDouble(1, remainingQuantity);
+                    statement.setDouble(2, remainingValue);
+                    statement.setString(3, newStatus);
+                    statement.setInt(4, assetId);
+                    statement.executeUpdate();
+                }
+
+                double netProceeds = salePrice - sellingCosts;
+                double gainOrLoss = netProceeds - removedBookValue;
+                double outstanding = Math.max(0, salePrice - cashReceived);
+                String eventNotes = saleFinancialNote(
+                        notes,
+                        supportingDocument,
+                        cleanPaymentOption,
+                        cashReceived,
+                        outstanding,
+                        dueDate,
+                        sellingCosts,
+                        netProceeds,
+                        removedBookValue,
+                        gainOrLoss,
+                        remainingQuantity,
+                        remainingValue,
+                        sellingCostTransactionId
+                );
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        partialSale ? "PARTIAL_SALE" : "SALE",
+                        cleanDate,
+                        salePrice,
+                        cleanCurrency,
+                        buyer,
+                        receiptTransactionId,
+                        cleanPaymentOption,
+                        safeText(reason, "Asset sold."),
+                        referenceNumber,
+                        eventNotes
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to sell asset", exception);
+        }
+        recordSystemLog("Assets", "Sell Asset", "INFO", "Asset " + assetId + " sale recorded.");
+    }
+
+    public void updateAssetStatusWithEvent(
+            int assetId,
+            String status,
+            String eventType,
+            String eventDate,
+            String counterparty,
+            String reason,
+            String referenceNumber,
+            String notes
+    ) {
+        String cleanStatus = normalizedAssetStatus(status);
+        String cleanDate = safeText(eventDate, LocalDate.now().toString());
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                Asset asset = assetById(connection, assetId);
+                if ("ARCHIVED".equals(cleanStatus)) {
+                    if ("ARCHIVED".equalsIgnoreCase(safeText(asset.getStatus(), ""))) {
+                        throw new IllegalArgumentException("This asset is already archived.");
+                    }
+                } else {
+                    requireEditableAsset(asset);
+                }
+                double newQuantity = closesAssetValue(cleanStatus) ? 0 : asset.getQuantity();
+                double newValue = closesAssetValue(cleanStatus) ? 0 : asset.getCurrentValue();
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE assets
+                        SET status = ?, quantity = ?, current_value = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, cleanStatus);
+                    statement.setDouble(2, newQuantity);
+                    statement.setDouble(3, newValue);
+                    statement.setInt(4, assetId);
+                    statement.executeUpdate();
+                }
+                insertAssetEvent(
+                        connection,
+                        assetId,
+                        safeText(eventType, cleanStatus),
+                        cleanDate,
+                        asset.getCurrentValue(),
+                        safeText(asset.getCurrency(), DEFAULT_CURRENCY_CODE),
+                        counterparty,
+                        null,
+                        cleanStatus,
+                        safeText(reason, cleanStatus.replace('_', ' ')),
+                        referenceNumber,
+                        notes
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update asset status", exception);
+        }
+        recordSystemLog("Assets", "Update Asset Status", "INFO", "Asset " + assetId + " status set to " + cleanStatus + ".");
+    }
+
+    private record BudgetAssetSource(
+            int budgetId,
+            String budgetName,
+            String budgetMonth,
+            String budgetType,
+            String currency,
+            String startDate,
+            String endDate,
+            double plannedAmount,
+            double actualAmount,
+            String categoryNames,
+            int allocationCount,
+            String notes
+    ) {
+    }
+
+    private Project projectByIdWithSpending(Connection connection, int projectId) throws SQLException {
+        String sql = """
+                SELECT p.id, p.project_name, p.description, p.planned_budget, p.start_date, p.end_date, p.status,
+                       p.project_type, p.project_owner, p.priority, p.currency, p.funding_source,
+                       p.funding_account_id, a.account_name AS funding_account_name,
+                       p.linked_goal_id, g.goal_name AS linked_goal_name, p.notes,
+                       COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' THEN t.amount ELSE 0 END), 0) AS amount_spent
+                FROM projects p
+                LEFT JOIN accounts a ON a.id = p.funding_account_id
+                LEFT JOIN goals g ON g.id = p.linked_goal_id
+                LEFT JOIN valid_transactions t ON t.project_id = p.id
+                WHERE p.id = ?
+                  AND COALESCE(p.is_deleted, 0) = 0
+                GROUP BY p.id
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, projectId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return projectFromResult(resultSet);
+                }
+            }
+        }
+        throw new IllegalArgumentException("Select a valid project.");
+    }
+
+    private BudgetAssetSource budgetAssetSource(Connection connection, String budgetName, String budgetMonth) throws SQLException {
+        String sql = """
+                SELECT MIN(b.id) AS budget_id,
+                       b.budget_name,
+                       b.budget_month,
+                       COALESCE(MAX(b.budget_type), 'Monthly') AS budget_type,
+                       COALESCE(MAX(b.currency), ?) AS currency,
+                       MIN(b.start_date) AS start_date,
+                       MAX(b.end_date) AS end_date,
+                       COALESCE(SUM(b.amount_limit), 0) AS planned_amount,
+                       COALESCE(SUM((
+                           SELECT COALESCE(SUM(t.amount), 0)
+                           FROM valid_transactions t
+                           WHERE t.transaction_type = 'EXPENSE'
+                             AND substr(t.transaction_date, 1, 7) = b.budget_month
+                             AND (b.category_id IS NULL OR t.category_id = b.category_id)
+                       )), 0) AS actual_amount,
+                       GROUP_CONCAT(COALESCE(c.category_name, 'Uncategorized'), ', ') AS category_names,
+                       COUNT(*) AS allocation_count,
+                       GROUP_CONCAT(COALESCE(b.notes, ''), char(10)) AS notes
+                FROM budgets b
+                LEFT JOIN categories c ON c.id = b.category_id
+                WHERE lower(b.budget_name) = lower(?)
+                  AND b.budget_month = ?
+                  AND COALESCE(b.is_deleted, 0) = 0
+                GROUP BY b.budget_name, b.budget_month
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DEFAULT_CURRENCY_CODE);
+            statement.setString(2, requireText(budgetName, "Budget name"));
+            statement.setString(3, normalizeBudgetMonth(budgetMonth));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return new BudgetAssetSource(
+                            resultSet.getInt("budget_id"),
+                            resultSet.getString("budget_name"),
+                            resultSet.getString("budget_month"),
+                            resultSet.getString("budget_type"),
+                            resultSet.getString("currency"),
+                            resultSet.getString("start_date"),
+                            resultSet.getString("end_date"),
+                            resultSet.getDouble("planned_amount"),
+                            resultSet.getDouble("actual_amount"),
+                            resultSet.getString("category_names"),
+                            resultSet.getInt("allocation_count"),
+                            resultSet.getString("notes")
+                    );
+                }
+            }
+        }
+        throw new IllegalArgumentException("Select a valid budget plan.");
+    }
+
+    private Integer existingAssetIdForProject(Connection connection, int projectId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT id
+                FROM assets
+                WHERE project_id = ?
+                  AND project_activity_id IS NULL
+                  AND COALESCE(is_deleted, 0) = 0
+                ORDER BY id
+                LIMIT 1
+                """)) {
+            statement.setInt(1, projectId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("id") : null;
+            }
+        }
+    }
+
+    private Integer existingAssetIdForBudgetPlan(Connection connection, String budgetName, String budgetMonth) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT ast.id
+                FROM assets ast
+                JOIN budgets b ON b.id = ast.budget_id
+                WHERE lower(b.budget_name) = lower(?)
+                  AND b.budget_month = ?
+                  AND COALESCE(ast.is_deleted, 0) = 0
+                ORDER BY ast.id
+                LIMIT 1
+                """)) {
+            statement.setString(1, budgetName);
+            statement.setString(2, budgetMonth);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("id") : null;
+            }
+        }
+    }
+
+    private String preferredAssetDate(String preferred, String fallback) {
+        if (isIsoDate(preferred)) {
+            return preferred.trim();
+        }
+        if (isIsoDate(fallback)) {
+            return fallback.trim();
+        }
+        return LocalDate.now().toString();
+    }
+
+    private String budgetAssetDate(BudgetAssetSource source) {
+        if (isIsoDate(source.endDate())) {
+            return source.endDate().trim();
+        }
+        try {
+            return YearMonth.parse(source.budgetMonth()).atEndOfMonth().toString();
+        } catch (DateTimeParseException exception) {
+            return preferredAssetDate(source.startDate(), null);
+        }
+    }
+
+    private boolean isIsoDate(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            LocalDate.parse(value.trim());
+            return true;
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private String assetCategoryForProjectType(String projectType) {
+        String type = safeText(projectType, "").toLowerCase(Locale.ENGLISH);
+        if (type.contains("construction")) {
+            return "Property";
+        }
+        if (type.contains("technology")) {
+            return "Electronics";
+        }
+        if (type.contains("agriculture")) {
+            return "Livestock";
+        }
+        if (type.contains("business")) {
+            return "Business";
+        }
+        if (type.contains("household") || type.contains("personal")) {
+            return "Household";
+        }
+        if (type.contains("education")) {
+            return "Equipment";
+        }
+        return "Other";
+    }
+
+    private String assetCategoryForBudget(BudgetAssetSource source) {
+        return assetCategoryFromText(source.budgetName() + " " + source.budgetType() + " " + source.categoryNames());
+    }
+
+    private String assetCategoryFromText(String value) {
+        String text = safeText(value, "").toLowerCase(Locale.ENGLISH);
+        if (text.contains("vehicle") || text.contains("car") || text.contains("motorcycle")) {
+            return "Vehicle";
+        }
+        if (text.contains("land") || text.contains("house") || text.contains("building") || text.contains("construction")) {
+            return "Property";
+        }
+        if (text.contains("laptop") || text.contains("computer") || text.contains("phone") || text.contains("electronic")) {
+            return "Electronics";
+        }
+        if (text.contains("furniture") || text.contains("chair") || text.contains("table")) {
+            return "Furniture";
+        }
+        if (text.contains("tool")) {
+            return "Tools";
+        }
+        if (text.contains("equipment") || text.contains("machine")) {
+            return "Equipment";
+        }
+        if (text.contains("livestock") || text.contains("animal")) {
+            return "Livestock";
+        }
+        if (text.contains("business")) {
+            return "Business";
+        }
+        return "Other";
+    }
+
+    private Asset assetFromResult(ResultSet resultSet) throws SQLException {
+        return new Asset(
+                resultSet.getInt("id"),
+                resultSet.getString("asset_name"),
+                resultSet.getString("asset_category"),
+                resultSet.getString("acquisition_method"),
+                resultSet.getString("purchase_date"),
+                resultSet.getDouble("purchase_cost"),
+                resultSet.getDouble("capitalized_costs"),
+                resultSet.getString("currency"),
+                nullableInt(resultSet, "account_id"),
+                resultSet.getString("account_name"),
+                nullableInt(resultSet, "budget_id"),
+                resultSet.getString("budget_name"),
+                nullableInt(resultSet, "project_id"),
+                resultSet.getString("project_name"),
+                nullableInt(resultSet, "project_activity_id"),
+                resultSet.getString("project_activity_name"),
+                nullableInt(resultSet, "purchase_transaction_id"),
+                resultSet.getString("payment_treatment"),
+                resultSet.getString("supplier"),
+                resultSet.getString("payment_method"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("serial_number"),
+                resultSet.getString("location"),
+                resultSet.getString("asset_condition"),
+                resultSet.getDouble("quantity"),
+                resultSet.getDouble("current_value"),
+                resultSet.getString("status"),
+                resultSet.getString("supporting_document"),
+                resultSet.getString("notes"),
+                resultSet.getString("created_at")
+        );
+    }
+
+    private AssetEvent assetEventFromResult(ResultSet resultSet) throws SQLException {
+        return new AssetEvent(
+                resultSet.getInt("id"),
+                resultSet.getInt("asset_id"),
+                resultSet.getString("event_type"),
+                resultSet.getString("event_date"),
+                resultSet.getDouble("amount"),
+                resultSet.getString("currency"),
+                resultSet.getString("counterparty"),
+                nullableInt(resultSet, "transaction_id"),
+                resultSet.getString("payment_status"),
+                resultSet.getString("reason"),
+                resultSet.getString("reference_number"),
+                resultSet.getString("notes"),
+                resultSet.getString("created_at")
+        );
+    }
+
+    private Asset assetById(Connection connection, int assetId) throws SQLException {
+        String sql = """
+                SELECT ast.id, ast.asset_name, ast.asset_category, ast.acquisition_method, ast.purchase_date,
+                       ast.purchase_cost, ast.capitalized_costs, ast.currency, ast.account_id,
+                       a.account_name, ast.budget_id, b.budget_name, ast.project_id, p.project_name,
+                       ast.project_activity_id, pa.activity_name AS project_activity_name,
+                       ast.purchase_transaction_id, ast.payment_treatment, ast.supplier, ast.payment_method,
+                       ast.reference_number, ast.serial_number, ast.location, ast.asset_condition,
+                       ast.quantity, ast.current_value, ast.status, ast.supporting_document, ast.notes,
+                       ast.created_at
+                FROM assets ast
+                LEFT JOIN accounts a ON a.id = ast.account_id
+                LEFT JOIN budgets b ON b.id = ast.budget_id
+                LEFT JOIN projects p ON p.id = ast.project_id
+                LEFT JOIN project_activities pa ON pa.id = ast.project_activity_id
+                WHERE ast.id = ?
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, assetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return assetFromResult(resultSet);
+                }
+            }
+        }
+        throw new IllegalArgumentException("Select a valid asset.");
+    }
+
+    private int insertAsset(
+            Connection connection,
+            String assetName,
+            String assetCategory,
+            String acquisitionMethod,
+            String purchaseDate,
+            double purchaseCost,
+            double capitalizedCosts,
+            String currency,
+            Integer accountId,
+            Integer budgetId,
+            Integer projectId,
+            Integer projectActivityId,
+            Integer purchaseTransactionId,
+            String paymentTreatment,
+            String supplier,
+            String paymentMethod,
+            String referenceNumber,
+            String serialNumber,
+            String location,
+            String condition,
+            double quantity,
+            double currentValue,
+            String status,
+            String supportingDocument,
+            String notes
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO assets (
+                    asset_name, asset_category, acquisition_method, purchase_date, purchase_cost,
+                    capitalized_costs, currency, account_id, budget_id, project_id, project_activity_id,
+                    purchase_transaction_id, payment_treatment, supplier, payment_method, reference_number,
+                    serial_number, location, asset_condition, quantity, current_value, status,
+                    supporting_document, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, assetName);
+            statement.setString(2, assetCategory);
+            statement.setString(3, acquisitionMethod);
+            statement.setString(4, purchaseDate);
+            statement.setDouble(5, purchaseCost);
+            statement.setDouble(6, capitalizedCosts);
+            statement.setString(7, currency);
+            setNullableInt(statement, 8, accountId);
+            setNullableInt(statement, 9, budgetId);
+            setNullableInt(statement, 10, projectId);
+            setNullableInt(statement, 11, projectActivityId);
+            setNullableInt(statement, 12, purchaseTransactionId);
+            statement.setString(13, paymentTreatment);
+            statement.setString(14, cleanNullable(supplier));
+            statement.setString(15, cleanNullable(paymentMethod));
+            statement.setString(16, cleanNullable(referenceNumber));
+            statement.setString(17, cleanNullable(serialNumber));
+            statement.setString(18, cleanNullable(location));
+            statement.setString(19, condition);
+            statement.setDouble(20, Math.max(0, quantity));
+            statement.setDouble(21, Math.max(0, currentValue));
+            statement.setString(22, normalizedAssetStatus(status));
+            statement.setString(23, cleanNullable(supportingDocument));
+            statement.setString(24, safeText(notes, ""));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertAssetPaymentTransaction(
+            Connection connection,
+            int accountId,
+            Integer categoryId,
+            Integer projectId,
+            Integer projectActivityId,
+            double amount,
+            String date,
+            String assetName,
+            String supplier,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, category_id, project_id, project_activity_id, person_id, transaction_type,
+                    transaction_purpose, transaction_status, amount, transaction_date, description,
+                    source, payment_method, reference_number
+                ) VALUES (?, ?, ?, ?, NULL, 'EXPENSE', 'ASSET_PURCHASE', 'COMPLETED', ?, ?, ?, 'ASSET', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            setNullableInt(statement, 2, categoryId);
+            setNullableInt(statement, 3, projectId);
+            setNullableInt(statement, 4, projectActivityId);
+            statement.setDouble(5, amount);
+            statement.setString(6, date);
+            statement.setString(7, "Asset purchase: " + assetName + optionalSuffix(" from ", supplier));
+            statement.setString(8, cleanNullable(paymentMethod));
+            statement.setString(9, cleanNullable(referenceNumber));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertAssetSaleReceiptTransaction(
+            Connection connection,
+            int accountId,
+            double amount,
+            String date,
+            String assetName,
+            String buyer,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, category_id, project_id, project_activity_id, person_id, transaction_type,
+                    transaction_purpose, transaction_status, amount, transaction_date, description,
+                    source, payment_method, reference_number
+                ) VALUES (?, NULL, NULL, NULL, NULL, 'ASSET_SALE', 'ASSET_SALE_PROCEEDS', 'COMPLETED', ?, ?, ?, 'ASSET', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            statement.setDouble(2, amount);
+            statement.setString(3, date);
+            statement.setString(4, "Asset sale proceeds: " + assetName + optionalSuffix(" to ", buyer));
+            statement.setString(5, cleanNullable(paymentMethod));
+            statement.setString(6, cleanNullable(referenceNumber));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int insertAssetSellingCostTransaction(
+            Connection connection,
+            int accountId,
+            double amount,
+            String date,
+            String assetName,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, category_id, project_id, project_activity_id, person_id, transaction_type,
+                    transaction_purpose, transaction_status, amount, transaction_date, description,
+                    source, payment_method, reference_number
+                ) VALUES (?, NULL, NULL, NULL, NULL, 'EXPENSE', 'ASSET_SELLING_COST', 'COMPLETED', ?, ?, ?, 'ASSET', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            statement.setDouble(2, amount);
+            statement.setString(3, date);
+            statement.setString(4, "Asset selling cost: " + assetName);
+            statement.setString(5, cleanNullable(paymentMethod));
+            statement.setString(6, cleanNullable(referenceNumber));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private void insertAssetEvent(
+            Connection connection,
+            int assetId,
+            String eventType,
+            String eventDate,
+            double amount,
+            String currency,
+            String counterparty,
+            Integer transactionId,
+            String paymentStatus,
+            String reason,
+            String referenceNumber,
+            String notes
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO asset_events (
+                    asset_id, event_type, event_date, amount, currency, counterparty,
+                    transaction_id, payment_status, reason, reference_number, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            statement.setInt(1, assetId);
+            statement.setString(2, safeText(eventType, "ASSET_EVENT").toUpperCase(Locale.ENGLISH).replace(' ', '_'));
+            statement.setString(3, eventDate);
+            statement.setDouble(4, Math.max(0, amount));
+            statement.setString(5, safeText(currency, DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH));
+            statement.setString(6, cleanNullable(counterparty));
+            setNullableInt(statement, 7, transactionId);
+            statement.setString(8, cleanNullable(paymentStatus));
+            statement.setString(9, safeText(reason, ""));
+            statement.setString(10, cleanNullable(referenceNumber));
+            statement.setString(11, safeText(notes, ""));
+            statement.executeUpdate();
+        }
+    }
+
+    private double validateExistingAssetPurchaseTransaction(Connection connection, int transactionId, String expectedCurrency) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT t.amount, t.transaction_status, t.transaction_type, a.currency
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                WHERE t.id = ?
+                """)) {
+            statement.setInt(1, transactionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid existing transaction.");
+                }
+                String status = safeText(resultSet.getString("transaction_status"), "COMPLETED").toUpperCase(Locale.ENGLISH);
+                if ("CANCELLED".equals(status) || "REVERSED".equals(status)) {
+                    throw new IllegalArgumentException("Cancelled or reversed transactions cannot be linked to assets.");
+                }
+                String type = safeText(resultSet.getString("transaction_type"), "");
+                if (!Set.of("EXPENSE", "TRANSFER", "LOAN").contains(type.toUpperCase(Locale.ENGLISH))) {
+                    throw new IllegalArgumentException("Asset purchases should link to a valid payment transaction.");
+                }
+                String transactionCurrency = safeText(resultSet.getString("currency"), DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+                if (expectedCurrency != null && !expectedCurrency.isBlank()
+                        && !transactionCurrency.equalsIgnoreCase(expectedCurrency)) {
+                    throw new IllegalArgumentException("Linked transaction account currency does not match the asset currency.");
+                }
+                return resultSet.getDouble("amount");
+            }
+        }
+    }
+
+    private double amountAllocatedToAssets(Connection connection, int transactionId, Integer excludedAssetId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COALESCE(SUM(purchase_cost + capitalized_costs), 0)
+                FROM assets
+                WHERE purchase_transaction_id = ?
+                  AND (? IS NULL OR id <> ?)
+                """)) {
+            statement.setInt(1, transactionId);
+            setNullableInt(statement, 2, excludedAssetId);
+            setNullableInt(statement, 3, excludedAssetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getDouble(1) : 0;
+            }
+        }
+    }
+
+    private Integer budgetCategoryId(Connection connection, int budgetId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT category_id FROM budgets WHERE id = ?")) {
+            statement.setInt(1, budgetId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid budget.");
+                }
+                return nullableInt(resultSet, "category_id");
+            }
+        }
+    }
+
+    private void requireActiveAssetAccount(Connection connection, int accountId, String currency, String role) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT currency, status
+                FROM accounts
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Choose a valid " + role + " account.");
+                }
+                if (!"ACTIVE".equalsIgnoreCase(safeText(resultSet.getString("status"), "ACTIVE"))) {
+                    throw new IllegalArgumentException("The " + role + " account must be active.");
+                }
+                String accountCurrency = safeText(resultSet.getString("currency"), DEFAULT_CURRENCY_CODE).toUpperCase(Locale.ENGLISH);
+                if (!accountCurrency.equalsIgnoreCase(safeText(currency, accountCurrency))) {
+                    throw new IllegalArgumentException("The " + role + " account currency must match the asset currency.");
+                }
+            }
+        }
+    }
+
+    private void requireEditableAsset(Asset asset) {
+        if (isTerminalAssetStatus(asset.getStatus())) {
+            throw new IllegalArgumentException("This asset is already closed, sold or disposed. Its history must be preserved.");
+        }
+    }
+
+    private void requireSaleableAsset(Asset asset) {
+        requireEditableAsset(asset);
+        String status = safeText(asset.getStatus(), "").toUpperCase(Locale.ENGLISH);
+        if ("UNDER_MAINTENANCE".equals(status) || "FROZEN".equals(status)) {
+            throw new IllegalArgumentException("Resolve maintenance or investigation status before selling this asset.");
+        }
+    }
+
+    private boolean isTerminalAssetStatus(String status) {
+        return Set.of("TRANSFERRED", "DONATED", "SOLD", "LOST", "WRITTEN_OFF", "DISPOSED", "ARCHIVED")
+                .contains(safeText(status, "").toUpperCase(Locale.ENGLISH));
+    }
+
+    private boolean closesAssetValue(String status) {
+        return Set.of("TRANSFERRED", "DONATED", "SOLD", "LOST", "WRITTEN_OFF", "DISPOSED")
+                .contains(safeText(status, "").toUpperCase(Locale.ENGLISH));
+    }
+
+    private String normalizedAssetStatus(String status) {
+        String value = safeText(status, "ACTIVE").toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if ("PENDING".equals(value)) {
+            return "PENDING_REGISTRATION";
+        }
+        if ("WRITE_OFF".equals(value)) {
+            return "WRITTEN_OFF";
+        }
+        if (Set.of(
+                "PENDING_REGISTRATION",
+                "ACTIVE",
+                "UNDER_MAINTENANCE",
+                "DAMAGED",
+                "FROZEN",
+                "TRANSFERRED",
+                "DONATED",
+                "SOLD",
+                "LOST",
+                "WRITTEN_OFF",
+                "DISPOSED",
+                "ARCHIVED"
+        ).contains(value)) {
+            return value;
+        }
+        return "ACTIVE";
+    }
+
+    private String normalizedAssetPaymentTreatment(String paymentTreatment) {
+        String value = safeText(paymentTreatment, "PURCHASED_BEFORE_PFMIS").toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if (value.contains("LINK")) {
+            return "LINK_EXISTING_TRANSACTION";
+        }
+        if (value.contains("CREATE")) {
+            return "CREATE_PAYMENT_TRANSACTION";
+        }
+        if (value.contains("BEFORE")) {
+            return "PURCHASED_BEFORE_PFMIS";
+        }
+        if (value.contains("PROJECT")) {
+            return "CONVERTED_FROM_PROJECT";
+        }
+        if (value.contains("BUDGET")) {
+            return "CONVERTED_FROM_BUDGET";
+        }
+        return switch (value) {
+            case "LINK_EXISTING_TRANSACTION", "CREATE_PAYMENT_TRANSACTION", "PURCHASED_BEFORE_PFMIS",
+                 "CONVERTED_FROM_PROJECT", "CONVERTED_FROM_BUDGET" -> value;
+            default -> "PURCHASED_BEFORE_PFMIS";
+        };
+    }
+
+    private double proratedBookValue(Asset asset, double removedQuantity) {
+        if (asset.getQuantity() <= 0) {
+            return asset.getCurrentValue();
+        }
+        return asset.getCurrentValue() * (removedQuantity / asset.getQuantity());
+    }
+
+    private String optionalSuffix(String prefix, String value) {
+        return value == null || value.isBlank() ? "" : prefix + value.trim();
+    }
+
+    private String allocationNote(String notes, double unallocatedAfter) {
+        String base = safeText(notes, "");
+        String allocation = "Unallocated purchase amount after link: " + unallocatedAfter;
+        return base.isBlank() ? allocation : base + System.lineSeparator() + allocation;
+    }
+
+    private String saleFinancialNote(
+            String notes,
+            String supportingDocument,
+            String paymentOption,
+            double cashReceived,
+            double outstanding,
+            String dueDate,
+            double sellingCosts,
+            double netProceeds,
+            double removedBookValue,
+            double gainOrLoss,
+            double remainingQuantity,
+            double remainingValue,
+            Integer sellingCostTransactionId
+    ) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(safeText(notes, ""));
+        if (!builder.isEmpty()) {
+            builder.append(System.lineSeparator());
+        }
+        builder.append("Payment option: ").append(safeText(paymentOption, "Full payment received")).append(System.lineSeparator());
+        builder.append("Cash received: ").append(cashReceived).append(System.lineSeparator());
+        builder.append("Outstanding receivable: ").append(outstanding);
+        if (dueDate != null && !dueDate.isBlank()) {
+            builder.append(" due ").append(dueDate.trim());
+        }
+        builder.append(System.lineSeparator());
+        builder.append("Selling costs: ").append(sellingCosts).append(System.lineSeparator());
+        builder.append("Net sale proceeds: ").append(netProceeds).append(System.lineSeparator());
+        builder.append("Book value removed: ").append(removedBookValue).append(System.lineSeparator());
+        builder.append("Gain or loss on disposal: ").append(gainOrLoss).append(System.lineSeparator());
+        builder.append("Remaining quantity: ").append(remainingQuantity).append(System.lineSeparator());
+        builder.append("Remaining value: ").append(remainingValue);
+        if (sellingCostTransactionId != null) {
+            builder.append(System.lineSeparator()).append("Selling cost transaction: ").append(sellingCostTransactionId);
+        }
+        if (supportingDocument != null && !supportingDocument.isBlank()) {
+            builder.append(System.lineSeparator()).append("Supporting document: ").append(supportingDocument.trim());
+        }
+        return builder.toString();
     }
 
     public List<ReportPositionItem> listReportPositionItems() {
@@ -3554,27 +15947,47 @@ public class DatabaseHandler {
         }
     }
 
+    public double calculateAccountBalanceOnDate(int accountId, String date) {
+        String cleanDate = requireText(date, "Balance date");
+        try (Connection connection = connect()) {
+            return accountBalanceOnDate(connection, accountId, cleanDate);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate account balance", exception);
+        }
+    }
+
     private double accountBalanceOnDate(Connection connection, int accountId, String date) throws SQLException {
         String sql = """
-                SELECT a.opening_balance + COALESCE(SUM(
+                SELECT CASE
+                           WHEN a.opening_balance_date IS NULL
+                             OR trim(a.opening_balance_date) = ''
+                             OR date(a.opening_balance_date) <= date(?)
+                           THEN a.opening_balance
+                           ELSE 0
+                       END + COALESCE(SUM(
                     CASE
                        WHEN t.transaction_type = 'INCOME' THEN t.amount
+                       WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
                        WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                       WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                       WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                       WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                       WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
                        ELSE 0
                     END
                 ), 0) AS balance
                 FROM accounts a
-                LEFT JOIN transactions t ON t.account_id = a.id
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
                     AND t.transaction_date <= ?
                 WHERE a.id = ?
                 GROUP BY a.id
                 """;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, date);
-            statement.setInt(2, accountId);
+            statement.setString(2, date);
+            statement.setInt(3, accountId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() ? resultSet.getDouble("balance") : 0;
             }
@@ -3588,7 +16001,7 @@ public class DatabaseHandler {
     public List<LoanScheduleRecord> listLoanSchedules() {
         List<LoanScheduleRecord> records = new ArrayList<>();
         String sql = """
-                SELECT l.id, pe.full_name, l.loan_direction, l.principal_amount, l.outstanding_amount,
+                SELECT l.id, l.person_id, pe.full_name, l.loan_direction, l.principal_amount, l.outstanding_amount,
                        l.interest_rate, l.payment_amount, l.due_date, l.frequency, l.status, l.notes
                 FROM loan_schedules l
                 LEFT JOIN people pe ON pe.id = l.person_id
@@ -3600,6 +16013,7 @@ public class DatabaseHandler {
             while (resultSet.next()) {
                 records.add(new LoanScheduleRecord(
                         resultSet.getInt("id"),
+                        nullableInt(resultSet, "person_id"),
                         resultSet.getString("full_name"),
                         resultSet.getString("loan_direction"),
                         resultSet.getDouble("principal_amount"),
@@ -3618,7 +16032,7 @@ public class DatabaseHandler {
         return records;
     }
 
-    public void saveLoanSchedule(
+    public int saveLoanSchedule(
             Integer id,
             Integer personId,
             String loanDirection,
@@ -3646,18 +16060,22 @@ public class DatabaseHandler {
                     statement.setInt(11, id);
                     statement.executeUpdate();
                 }
+                recordSystemLog("Report Inputs", "Save Loan Schedule", "INFO", cleanDirection + " schedule saved.");
+                return id;
             } else {
                 try (PreparedStatement statement = connection.prepareStatement("""
                         INSERT INTO loan_schedules (
                             person_id, loan_direction, principal_amount, outstanding_amount,
                             interest_rate, payment_amount, due_date, frequency, status, notes, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """)) {
+                        """, Statement.RETURN_GENERATED_KEYS)) {
                     bindLoanSchedule(statement, personId, cleanDirection, principalAmount, outstandingAmount, interestRate, paymentAmount, dueDate, frequency, cleanStatus, notes);
                     statement.executeUpdate();
+                    int generatedId = generatedId(connection, statement);
+                    recordSystemLog("Report Inputs", "Save Loan Schedule", "INFO", cleanDirection + " schedule saved.");
+                    return generatedId;
                 }
             }
-            recordSystemLog("Report Inputs", "Save Loan Schedule", "INFO", cleanDirection + " schedule saved.");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to save loan schedule", exception);
         }
@@ -3692,12 +16110,1152 @@ public class DatabaseHandler {
         deleteById("loan_schedules", id, "loan schedule");
     }
 
+    public int registerBorrowedLoan(CentralLoanRegistrationCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Loan details are required.");
+        }
+        String loanName = requireText(command.loanName(), "Loan name");
+        String lenderType = normalizedLenderType(command.lenderType());
+        String lenderName = requireText(command.lenderName(), "Lender");
+        double principal = positiveAmount(command.principalAmount(), "Principal amount");
+        String currency = requireIsoCurrencyCode(command.currency(), "Currency");
+        LocalDate startDate = requireDate(command.loanStartDate(), "Loan start date");
+        LocalDate firstPaymentDate = requireDate(command.firstRepaymentDate(), "First repayment date");
+        if (firstPaymentDate.isBefore(startDate)) {
+            throw new IllegalArgumentException("First repayment date cannot be before the loan start date.");
+        }
+        int installments = command.numberOfInstallments() <= 0 ? 1 : command.numberOfInstallments();
+        if (installments > 600) {
+            throw new IllegalArgumentException("Number of instalments is too large.");
+        }
+        double interestRate = nonNegativeAmount(command.interestRate(), "Interest rate");
+        double fixedInterest = nonNegativeAmount(command.fixedInterestAmount(), "Fixed interest amount");
+        double fees = nonNegativeAmount(command.fees(), "Fees");
+        String interestMethod = normalizedInterestMethod(command.interestMethod());
+        String frequency = normalizedRepaymentFrequency(command.repaymentFrequency());
+        String repaymentMode = normalizedRepaymentMode(command.repaymentMode());
+        String loanStatus = normalizedLoanStatus(command.status(), true);
+        if (requiresSavingsGroup(lenderType) && (command.savingsGroupId() == null || command.savingsGroupId() <= 0)) {
+            throw new IllegalArgumentException("Select the registered Savings Group that originated this loan.");
+        }
+        Integer savingsGroupId = command.savingsGroupId() == null || command.savingsGroupId() <= 0 ? null : command.savingsGroupId();
+        if (savingsGroupId != null) {
+            SavingsGroupProfileRecord profile = getSavingsGroupProfile(savingsGroupId);
+            if (!savingsLenderMatchesProfile(lenderType, profile.groupType())) {
+                throw new IllegalArgumentException("The selected Savings Group does not match the lender type.");
+            }
+        }
+        Account proceedsAccount = accountSnapshot(command.proceedsAccountId());
+        Account repaymentAccount = accountSnapshot(command.repaymentAccountId());
+        requireActiveTransferAccount(proceedsAccount, "loan proceeds");
+        requireActiveTransferAccount(repaymentAccount, "repayment");
+        if (!currency.equalsIgnoreCase(safeText(proceedsAccount.getCurrency(), DEFAULT_CURRENCY_CODE))) {
+            throw new IllegalArgumentException("Loan currency must match the proceeds account currency.");
+        }
+        if (!currency.equalsIgnoreCase(safeText(repaymentAccount.getCurrency(), DEFAULT_CURRENCY_CODE))) {
+            throw new IllegalArgumentException("Loan currency must match the repayment account currency.");
+        }
+        String reference = cleanNullable(command.referenceNumber());
+        String loanNumber = nextLoanNumber();
+        List<LoanInstallmentDraft> schedule = buildLoanInstallmentSchedule(principal, interestMethod, interestRate,
+                fixedInterest, fees, installments, firstPaymentDate, frequency);
+        double totalInterest = schedule.stream().mapToDouble(LoanInstallmentDraft::interestDue).sum();
+        double totalFees = schedule.stream().mapToDouble(LoanInstallmentDraft::feesDue).sum();
+        double totalRepayable = principal + totalInterest + totalFees;
+        int loanId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                int proceedsTransactionId = insertCentralLoanTransaction(
+                        connection,
+                        command.proceedsAccountId(),
+                        null,
+                        null,
+                        null,
+                        "LOAN",
+                        "LOAN_PROCEEDS",
+                        "COMPLETED",
+                        principal,
+                        startDate,
+                        "Loan proceeds received: " + loanName + " from " + lenderName,
+                        "LOANS",
+                        command.repaymentMethod(),
+                        reference == null ? loanNumber : reference
+                );
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT INTO loans (
+                            loan_number, loan_name, lender_type, lender_name, savings_group_id,
+                            principal_amount, currency, interest_method, interest_rate, fixed_interest_amount,
+                            fees, total_interest, total_repayable, total_paid, outstanding_balance,
+                            principal_outstanding, interest_outstanding, fees_outstanding, penalties_outstanding,
+                            repayment_frequency, repayment_method, number_of_installments, start_date,
+                            first_payment_date, expected_end_date, proceeds_account_id, repayment_account_id,
+                            repayment_mode, automatic_payment_day, automatic_amount, automatic_start_date,
+                            automatic_end_date, proceeds_transaction_id, source_module, status, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOANS', ?, ?, CURRENT_TIMESTAMP)
+                        """, Statement.RETURN_GENERATED_KEYS)) {
+                    statement.setString(1, loanNumber);
+                    statement.setString(2, loanName);
+                    statement.setString(3, lenderType);
+                    statement.setString(4, lenderName);
+                    setNullableInt(statement, 5, savingsGroupId);
+                    statement.setDouble(6, principal);
+                    statement.setString(7, currency);
+                    statement.setString(8, interestMethod);
+                    statement.setDouble(9, interestRate);
+                    statement.setDouble(10, fixedInterest);
+                    statement.setDouble(11, totalFees);
+                    statement.setDouble(12, totalInterest);
+                    statement.setDouble(13, totalRepayable);
+                    statement.setDouble(14, totalRepayable);
+                    statement.setDouble(15, principal);
+                    statement.setDouble(16, totalInterest);
+                    statement.setDouble(17, totalFees);
+                    statement.setString(18, frequency);
+                    statement.setString(19, safeText(command.repaymentMethod(), "Cash or transfer"));
+                    statement.setInt(20, installments);
+                    statement.setString(21, startDate.toString());
+                    statement.setString(22, firstPaymentDate.toString());
+                    statement.setString(23, schedule.isEmpty() ? firstPaymentDate.toString() : schedule.get(schedule.size() - 1).dueDate().toString());
+                    statement.setInt(24, command.proceedsAccountId());
+                    statement.setInt(25, command.repaymentAccountId());
+                    statement.setString(26, repaymentMode);
+                    if (command.automaticPaymentDay() == null) {
+                        statement.setNull(27, java.sql.Types.INTEGER);
+                    } else {
+                        statement.setInt(27, command.automaticPaymentDay());
+                    }
+                    if (command.automaticAmount() == null) {
+                        statement.setNull(28, java.sql.Types.REAL);
+                    } else {
+                        statement.setDouble(28, nonNegativeAmount(command.automaticAmount(), "Automatic repayment amount"));
+                    }
+                    statement.setString(29, dateString(command.automaticStartDate()));
+                    statement.setString(30, dateString(command.automaticEndDate()));
+                    statement.setInt(31, proceedsTransactionId);
+                    statement.setString(32, loanStatus);
+                    statement.setString(33, safeText(command.notes(), ""));
+                    statement.executeUpdate();
+                    loanId = generatedId(connection, statement);
+                }
+                try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE transactions
+                        SET loan_id = ?
+                        WHERE id = ?
+                        """)) {
+                    update.setInt(1, loanId);
+                    update.setInt(2, proceedsTransactionId);
+                    update.executeUpdate();
+                }
+                insertLoanInstallments(connection, loanId, loanNumber, schedule);
+                insertLoanAudit(connection, loanId, "LOAN_CREATED", "loan", loanId, "", loanName);
+                insertLoanAudit(connection, loanId, "REPAYMENT_SCHEDULE_GENERATED", "loan", loanId, "", installments + " instalments");
+                upsertLoanBudgetCommitments(connection, loanId);
+                refreshCentralLoanStatuses(connection);
+                recordSystemLog(connection, "Loans", "Loan Created", "INFO",
+                        loanNumber + " created for " + lenderName + ". Proceeds transaction: " + proceedsTransactionId + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to register loan", exception);
+        }
+        return loanId;
+    }
+
+    public int recordCentralLoanPayment(CentralLoanPaymentCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Loan repayment details are required.");
+        }
+        LocalDate paymentDate = requireDate(command.paymentDate(), "Payment date");
+        double amount = positiveAmount(command.amount(), "Amount being paid");
+        CentralLoanRecord loan = getCentralLoan(command.loanId());
+        if (List.of("COMPLETED", "CLOSED", "CANCELLED").contains(normalizedToken(loan.status(), ""))) {
+            throw new IllegalArgumentException("This loan is not open for repayment.");
+        }
+        if (amount - loan.outstandingBalance() > 0.01) {
+            throw new IllegalArgumentException("Payment cannot exceed the allowable settlement amount.");
+        }
+        Account account = accountSnapshot(command.accountId());
+        requireActiveTransferAccount(account, "repayment");
+        if (account.getCurrentBalance() + 0.005 < amount) {
+            if (command.automaticAttempt()) {
+                markAutomaticLoanPaymentFailed(command.loanId(), command.installmentId(), paymentDate, amount, command.reference(), command.notes());
+                throw new IllegalArgumentException("Automatic repayment failed because the source account has insufficient funds.");
+            }
+            throw new IllegalArgumentException("The repayment account does not have enough available funds.");
+        }
+        String reference = loanPaymentReference(command.reference(), loan.loanNumber());
+        String idempotencyKey = command.automaticAttempt()
+                ? "AUTO|" + command.loanId() + "|" + (command.installmentId() == null ? "" : command.installmentId()) + "|" + paymentDate + "|" + reference
+                : "MANUAL|" + command.loanId() + "|" + paymentDate + "|" + reference + "|" + String.format(Locale.ENGLISH, "%.2f", amount);
+        int paymentId;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                if (loanPaymentExists(connection, idempotencyKey)) {
+                    throw new IllegalArgumentException("This repayment has already been posted.");
+                }
+                PaymentAllocation allocation = allocateLoanPayment(connection, command.loanId(), command.installmentId(), amount);
+                if (allocation.total() <= 0.005) {
+                    throw new IllegalArgumentException("There is no outstanding repayment amount to allocate.");
+                }
+                Integer firstTransactionId = null;
+                if (allocation.principalPaid() > 0) {
+                    firstTransactionId = insertCentralLoanTransaction(connection, command.accountId(), command.loanId(),
+                            allocation.primaryInstallmentId(), null, "LOAN", "LOAN_PRINCIPAL_PAYMENT", "COMPLETED",
+                            allocation.principalPaid(), paymentDate, "Loan principal repayment for " + loan.loanNumber(),
+                            "LOANS", loan.repaymentMethod(), reference);
+                }
+                if (allocation.interestPaid() > 0) {
+                    int id = insertCentralLoanTransaction(connection, command.accountId(), command.loanId(),
+                            allocation.primaryInstallmentId(), firstTransactionId, "EXPENSE", "LOAN_INTEREST_PAYMENT", "COMPLETED",
+                            allocation.interestPaid(), paymentDate, "Loan interest payment for " + loan.loanNumber(),
+                            "LOANS", loan.repaymentMethod(), reference);
+                    if (firstTransactionId == null) {
+                        firstTransactionId = id;
+                    }
+                }
+                if (allocation.feesPaid() > 0) {
+                    int id = insertCentralLoanTransaction(connection, command.accountId(), command.loanId(),
+                            allocation.primaryInstallmentId(), firstTransactionId, "EXPENSE", "LOAN_FEE", "COMPLETED",
+                            allocation.feesPaid(), paymentDate, "Loan fee payment for " + loan.loanNumber(),
+                            "LOANS", loan.repaymentMethod(), reference);
+                    if (firstTransactionId == null) {
+                        firstTransactionId = id;
+                    }
+                }
+                if (allocation.penaltyPaid() > 0) {
+                    int id = insertCentralLoanTransaction(connection, command.accountId(), command.loanId(),
+                            allocation.primaryInstallmentId(), firstTransactionId, "EXPENSE", "LOAN_PENALTY", "COMPLETED",
+                            allocation.penaltyPaid(), paymentDate, "Loan penalty payment for " + loan.loanNumber(),
+                            "LOANS", loan.repaymentMethod(), reference);
+                    if (firstTransactionId == null) {
+                        firstTransactionId = id;
+                    }
+                }
+                paymentId = insertLoanPayment(connection, command, allocation, firstTransactionId, reference, idempotencyKey);
+                applyLoanPaymentAllocation(connection, allocation, paymentDate, firstTransactionId);
+                recalculateCentralLoanBalances(connection, command.loanId());
+                upsertLoanBudgetCommitments(connection, command.loanId());
+                insertLoanAudit(connection, command.loanId(),
+                        allocation.total() + 0.005 < amount ? "PARTIAL_PAYMENT_RECORDED" : "PAYMENT_RECORDED",
+                        "loan_payment", paymentId, "", "Paid " + allocation.total());
+                refreshCentralLoanStatuses(connection);
+                recordSystemLog(connection, "Loans", command.automaticAttempt() ? "Automatic Repayment Posted" : "Repayment Posted",
+                        "INFO", "Repayment " + paymentId + " posted for " + loan.loanNumber() + ".");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to record loan repayment", exception);
+        }
+        return paymentId;
+    }
+
+    public List<CentralLoanRecord> listCentralLoans() {
+        try (Connection connection = connect()) {
+            refreshCentralLoanStatuses(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to refresh loan statuses", exception);
+        }
+        List<CentralLoanRecord> loans = new ArrayList<>();
+        String sql = """
+                SELECT l.*, COALESCE(s.group_name, '') AS savings_group_name,
+                       COALESCE(pa.account_name, '') AS proceeds_account_name,
+                       COALESCE(ra.account_name, '') AS repayment_account_name,
+                       COALESCE((
+                           SELECT due_date
+                           FROM loan_installments i
+                           WHERE i.loan_id = l.id
+                             AND i.remaining_due > 0.005
+                             AND i.status NOT IN ('CANCELLED', 'SKIPPED')
+                           ORDER BY date(i.due_date), i.installment_number
+                           LIMIT 1
+                       ), '') AS next_payment_date,
+                       COALESCE((
+                           SELECT remaining_due
+                           FROM loan_installments i
+                           WHERE i.loan_id = l.id
+                             AND i.remaining_due > 0.005
+                             AND i.status NOT IN ('CANCELLED', 'SKIPPED')
+                           ORDER BY date(i.due_date), i.installment_number
+                           LIMIT 1
+                       ), 0) AS next_payment_amount
+                FROM loans l
+                LEFT JOIN community_savings_profiles s ON s.id = l.savings_group_id
+                LEFT JOIN accounts pa ON pa.id = l.proceeds_account_id
+                LEFT JOIN accounts ra ON ra.id = l.repayment_account_id
+                ORDER BY
+                    CASE WHEN l.status IN ('OVERDUE', 'ACTIVE') THEN 0 ELSE 1 END,
+                    date(COALESCE(next_payment_date, l.first_payment_date)),
+                    l.loan_number
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                loans.add(centralLoanRecord(resultSet));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list loans", exception);
+        }
+        return loans;
+    }
+
+    public CentralLoanRecord getCentralLoan(int loanId) {
+        return listCentralLoans().stream()
+                .filter(loan -> loan.id() == loanId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid loan."));
+    }
+
+    public List<CentralLoanInstallmentRecord> listCentralLoanInstallments(Integer loanId) {
+        try (Connection connection = connect()) {
+            refreshCentralLoanStatuses(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to refresh loan installment statuses", exception);
+        }
+        List<CentralLoanInstallmentRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT i.*, l.loan_number
+                FROM loan_installments i
+                JOIN loans l ON l.id = i.loan_id
+                WHERE (? IS NULL OR i.loan_id = ?)
+                ORDER BY date(i.due_date), i.installment_number
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, loanId);
+            setNullableInt(statement, 2, loanId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new CentralLoanInstallmentRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("loan_id"),
+                            resultSet.getString("loan_number"),
+                            resultSet.getInt("installment_number"),
+                            resultSet.getString("due_date"),
+                            resultSet.getDouble("principal_due"),
+                            resultSet.getDouble("interest_due"),
+                            resultSet.getDouble("fees_due"),
+                            resultSet.getDouble("penalty_due"),
+                            resultSet.getDouble("total_due"),
+                            resultSet.getDouble("amount_paid"),
+                            resultSet.getDouble("remaining_due"),
+                            resultSet.getString("status"),
+                            resultSet.getString("paid_date"),
+                            nullableInt(resultSet, "transaction_id"),
+                            resultSet.getString("created_at"),
+                            resultSet.getString("updated_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list loan instalments", exception);
+        }
+        return rows;
+    }
+
+    public List<CentralLoanPaymentRecord> listCentralLoanPayments(Integer loanId) {
+        List<CentralLoanPaymentRecord> rows = new ArrayList<>();
+        String sql = """
+                SELECT p.*, COALESCE(a.account_name, '') AS account_name
+                FROM loan_payments p
+                LEFT JOIN accounts a ON a.id = p.account_id
+                WHERE (? IS NULL OR p.loan_id = ?)
+                ORDER BY date(p.payment_date) DESC, p.id DESC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableInt(statement, 1, loanId);
+            setNullableInt(statement, 2, loanId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    rows.add(new CentralLoanPaymentRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("loan_id"),
+                            nullableInt(resultSet, "installment_id"),
+                            nullableInt(resultSet, "account_id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("payment_date"),
+                            resultSet.getDouble("principal_paid"),
+                            resultSet.getDouble("interest_paid"),
+                            resultSet.getDouble("fees_paid"),
+                            resultSet.getDouble("penalty_paid"),
+                            resultSet.getDouble("total_paid"),
+                            nullableInt(resultSet, "transaction_id"),
+                            resultSet.getString("reference"),
+                            resultSet.getString("status"),
+                            resultSet.getString("notes"),
+                            resultSet.getString("created_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list loan payments", exception);
+        }
+        return rows;
+    }
+
+    public List<LoanReportRow> listLoanReportRows(String reportType, LocalDate startDate, LocalDate endDate,
+                                                  String lenderType, String loanStatus, Integer accountId,
+                                                  Integer savingsGroupId) {
+        List<LoanReportRow> rows = new ArrayList<>();
+        String type = safeText(reportType, "Active Loans").toUpperCase(Locale.ENGLISH);
+        String sql = """
+                SELECT l.lender_name, l.lender_type, l.loan_number, l.status, l.start_date,
+                       l.principal_amount, l.total_paid, l.outstanding_balance,
+                       COALESCE(SUM(p.principal_paid), 0) AS principal_paid,
+                       COALESCE(SUM(p.interest_paid), 0) AS interest_paid,
+                       COALESCE(SUM(p.fees_paid + p.penalty_paid), 0) AS charges_paid
+                FROM loans l
+                LEFT JOIN loan_payments p ON p.loan_id = l.id
+                WHERE (? IS NULL OR date(l.start_date) >= date(?))
+                  AND (? IS NULL OR date(l.start_date) <= date(?))
+                  AND (? IS NULL OR l.lender_type = ?)
+                  AND (? IS NULL OR l.status = ?)
+                  AND (? IS NULL OR l.repayment_account_id = ? OR l.proceeds_account_id = ?)
+                  AND (? IS NULL OR l.savings_group_id = ?)
+                GROUP BY l.id
+                ORDER BY date(l.start_date) DESC, l.loan_number
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            String start = startDate == null ? null : startDate.toString();
+            String end = endDate == null ? null : endDate.toString();
+            String cleanLenderType = lenderType == null || lenderType.isBlank() ? null : normalizedLenderType(lenderType);
+            String cleanStatus = loanStatus == null || loanStatus.isBlank() ? null : normalizedLoanStatus(loanStatus, false);
+            statement.setString(1, start);
+            statement.setString(2, start);
+            statement.setString(3, end);
+            statement.setString(4, end);
+            statement.setString(5, cleanLenderType);
+            statement.setString(6, cleanLenderType);
+            statement.setString(7, cleanStatus);
+            statement.setString(8, cleanStatus);
+            setNullableInt(statement, 9, accountId);
+            setNullableInt(statement, 10, accountId);
+            setNullableInt(statement, 11, accountId);
+            setNullableInt(statement, 12, savingsGroupId);
+            setNullableInt(statement, 13, savingsGroupId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    double amount = switch (type) {
+                        case "COMPLETED LOANS" -> "COMPLETED".equals(resultSet.getString("status")) ? resultSet.getDouble("principal_amount") : 0;
+                        case "OUTSTANDING DEBT" -> resultSet.getDouble("outstanding_balance");
+                        case "INTEREST PAID" -> resultSet.getDouble("interest_paid");
+                        case "PRINCIPAL PAID" -> resultSet.getDouble("principal_paid");
+                        case "LOANS BY LENDER", "LOANS BY SOURCE TYPE" -> resultSet.getDouble("principal_amount");
+                        default -> resultSet.getDouble("outstanding_balance");
+                    };
+                    if (amount > 0.005 || type.contains("LOANS")) {
+                        rows.add(new LoanReportRow(
+                                resultSet.getString("lender_name") + " / " + resultSet.getString("loan_number"),
+                                resultSet.getString("lender_type"),
+                                amount,
+                                resultSet.getString("status"),
+                                resultSet.getString("start_date")
+                        ));
+                    }
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load loan report", exception);
+        }
+        return rows;
+    }
+
+    private record LoanInstallmentDraft(
+            int installmentNumber,
+            LocalDate dueDate,
+            double principalDue,
+            double interestDue,
+            double feesDue,
+            double penaltyDue
+    ) {
+        double totalDue() {
+            return principalDue + interestDue + feesDue + penaltyDue;
+        }
+    }
+
+    private record PaymentAllocation(
+            List<InstallmentAllocation> installments,
+            double principalPaid,
+            double interestPaid,
+            double feesPaid,
+            double penaltyPaid,
+            double total,
+            Integer primaryInstallmentId
+    ) {
+    }
+
+    private record InstallmentAllocation(
+            int installmentId,
+            double principalPaid,
+            double interestPaid,
+            double feesPaid,
+            double penaltyPaid,
+            double totalPaid
+    ) {
+    }
+
+    private String normalizedLenderType(String value) {
+        String clean = safeText(value, "").trim().toUpperCase(Locale.ENGLISH).replace('-', ' ').replace('_', ' ');
+        return switch (clean) {
+            case "COMMERCIAL BANK" -> "COMMERCIAL_BANK";
+            case "MICROFINANCE", "MICROFINANCE INSTITUTION" -> "MICROFINANCE_INSTITUTION";
+            case "VILLAGE BANK", "BANK NKHONDE", "VILLAGE BANK / BANK NKHONDE" -> "VILLAGE_BANK_BANK_NKHONDE";
+            case "SAVINGS GROUP", "CHIPELEGANYU", "SAVINGS GROUP / CHIPELEGANYU" -> "SAVINGS_GROUP_CHIPELEGANYU";
+            case "EMPLOYER" -> "EMPLOYER";
+            case "INDIVIDUAL" -> "INDIVIDUAL";
+            case "FRIEND", "FAMILY", "FRIEND / FAMILY", "FRIENDS/FAMILY", "FRIEND FAMILY" -> "FRIEND_FAMILY";
+            default -> "OTHER";
+        };
+    }
+
+    private String normalizedInterestMethod(String value) {
+        String clean = safeText(value, "NO_INTEREST").trim().toUpperCase(Locale.ENGLISH).replace('-', '_').replace(' ', '_').replace('/', '_');
+        return switch (clean) {
+            case "NONE", "NO_INTEREST", "NO_INTEREST_RATE" -> "NO_INTEREST";
+            case "FIXED", "FIXED_FLAT", "FIXED__FLAT_INTEREST_AMOUNT", "FIXED___FLAT_INTEREST_AMOUNT",
+                    "FIXED_FLAT_AMOUNT", "FIXED_TOTAL_INTEREST", "FLAT_INTEREST_AMOUNT" -> "FIXED_FLAT_AMOUNT";
+            case "FLAT", "FLAT_PERCENTAGE", "FLAT_PERCENTAGE_INTEREST" -> "FLAT_PERCENTAGE";
+            case "REDUCING", "REDUCING_BALANCE", "REDUCING_BALANCE_INTEREST" -> "REDUCING_BALANCE";
+            default -> throw new IllegalArgumentException("Select a valid interest calculation method.");
+        };
+    }
+
+    private String normalizedRepaymentFrequency(String value) {
+        String clean = safeText(value, "MONTHLY").trim().toUpperCase(Locale.ENGLISH).replace('-', '_').replace(' ', '_');
+        return switch (clean) {
+            case "WEEKLY" -> "WEEKLY";
+            case "FORTNIGHTLY", "BIWEEKLY" -> "FORTNIGHTLY";
+            case "MONTHLY" -> "MONTHLY";
+            case "QUARTERLY" -> "QUARTERLY";
+            case "YEARLY", "ANNUALLY", "ANNUAL" -> "YEARLY";
+            case "ONE_TIME", "ONETIME", "ONE_OFF" -> "ONE_TIME";
+            default -> "MONTHLY";
+        };
+    }
+
+    private String normalizedRepaymentMode(String value) {
+        String clean = safeText(value, "MANUAL").trim().toUpperCase(Locale.ENGLISH);
+        return "AUTOMATIC".equals(clean) ? "AUTOMATIC" : "MANUAL";
+    }
+
+    private String normalizedLoanStatus(String value, boolean allowDraft) {
+        String clean = safeText(value, allowDraft ? "ACTIVE" : "").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        return switch (clean) {
+            case "DRAFT" -> allowDraft ? "DRAFT" : null;
+            case "OVERDUE" -> "OVERDUE";
+            case "COMPLETED" -> "COMPLETED";
+            case "CLOSED" -> "CLOSED";
+            case "DEFAULTED" -> "DEFAULTED";
+            case "CANCELLED", "CANCELED" -> "CANCELLED";
+            case "ACTIVE", "" -> allowDraft ? "ACTIVE" : null;
+            default -> allowDraft ? "ACTIVE" : null;
+        };
+    }
+
+    private boolean requiresSavingsGroup(String lenderType) {
+        return "VILLAGE_BANK_BANK_NKHONDE".equals(lenderType) || "SAVINGS_GROUP_CHIPELEGANYU".equals(lenderType);
+    }
+
+    private boolean savingsLenderMatchesProfile(String lenderType, String groupType) {
+        String cleanGroup = safeText(groupType, "").toUpperCase(Locale.ENGLISH);
+        if ("VILLAGE_BANK_BANK_NKHONDE".equals(lenderType)) {
+            return cleanGroup.contains("BANK NKHONDE") || cleanGroup.contains("VILLAGE");
+        }
+        if ("SAVINGS_GROUP_CHIPELEGANYU".equals(lenderType)) {
+            return cleanGroup.contains("CHIPELEGANYU") || cleanGroup.contains("SAVINGS");
+        }
+        return true;
+    }
+
+    private double positiveAmount(double amount, String label) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException(label + " must be greater than zero.");
+        }
+        return amount;
+    }
+
+    private double nonNegativeAmount(double amount, String label) {
+        if (amount < 0) {
+            throw new IllegalArgumentException(label + " cannot be negative.");
+        }
+        return amount;
+    }
+
+    private String nextLoanNumber() {
+        String prefix = "LN-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement("SELECT COALESCE(MAX(id), 0) + 1 FROM loans");
+             ResultSet resultSet = statement.executeQuery()) {
+            int next = resultSet.next() ? resultSet.getInt(1) : 1;
+            return prefix + String.format(Locale.ENGLISH, "%05d", next);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to allocate loan number", exception);
+        }
+    }
+
+    private List<LoanInstallmentDraft> buildLoanInstallmentSchedule(double principal, String interestMethod,
+                                                                    double interestRate, double fixedInterest,
+                                                                    double fees, int installments,
+                                                                    LocalDate firstPaymentDate, String frequency) {
+        List<LoanInstallmentDraft> rows = new ArrayList<>();
+        double principalRemaining = principal;
+        double flatInterest = switch (interestMethod) {
+            case "FIXED_FLAT_AMOUNT" -> fixedInterest;
+            case "FLAT_PERCENTAGE" -> principal * interestRate / 100.0;
+            case "NO_INTEREST", "REDUCING_BALANCE" -> 0;
+            default -> 0;
+        };
+        double interestRemaining = flatInterest;
+        double feesRemaining = fees;
+        LocalDate dueDate = firstPaymentDate;
+        double periodicRate = periodicInterestRate(interestRate, frequency);
+        for (int i = 1; i <= installments; i++) {
+            int remainingPeriods = installments - i + 1;
+            double principalDue = roundMoney(i == installments ? principalRemaining : principal / installments);
+            double interestDue;
+            if ("REDUCING_BALANCE".equals(interestMethod)) {
+                interestDue = roundMoney(principalRemaining * periodicRate);
+            } else {
+                interestDue = roundMoney(i == installments ? interestRemaining : flatInterest / installments);
+            }
+            double feesDue = roundMoney(i == installments ? feesRemaining : fees / installments);
+            if (remainingPeriods == 1) {
+                principalDue = roundMoney(principalRemaining);
+                if (!"REDUCING_BALANCE".equals(interestMethod)) {
+                    interestDue = roundMoney(interestRemaining);
+                }
+                feesDue = roundMoney(feesRemaining);
+            }
+            rows.add(new LoanInstallmentDraft(i, dueDate, principalDue, interestDue, feesDue, 0));
+            principalRemaining = roundMoney(principalRemaining - principalDue);
+            if (!"REDUCING_BALANCE".equals(interestMethod)) {
+                interestRemaining = roundMoney(interestRemaining - interestDue);
+            }
+            feesRemaining = roundMoney(feesRemaining - feesDue);
+            dueDate = nextRepaymentDate(dueDate, frequency);
+        }
+        return rows;
+    }
+
+    private double periodicInterestRate(double annualRate, String frequency) {
+        double periods = switch (frequency) {
+            case "WEEKLY" -> 52.0;
+            case "FORTNIGHTLY" -> 26.0;
+            case "QUARTERLY" -> 4.0;
+            case "YEARLY", "ONE_TIME" -> 1.0;
+            default -> 12.0;
+        };
+        return annualRate / 100.0 / periods;
+    }
+
+    private LocalDate nextRepaymentDate(LocalDate date, String frequency) {
+        return switch (frequency) {
+            case "WEEKLY" -> date.plusWeeks(1);
+            case "FORTNIGHTLY" -> date.plusWeeks(2);
+            case "QUARTERLY" -> date.plusMonths(3);
+            case "YEARLY" -> date.plusYears(1);
+            case "ONE_TIME" -> date;
+            default -> date.plusMonths(1);
+        };
+    }
+
+    private double roundMoney(double value) {
+        return BigDecimal.valueOf(value).setScale(2, java.math.RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private void insertLoanInstallments(Connection connection, int loanId, String loanNumber,
+                                        List<LoanInstallmentDraft> schedule) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO loan_installments (
+                    loan_id, installment_number, due_date, principal_due, interest_due, fees_due,
+                    penalty_due, total_due, amount_paid, remaining_due, status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
+                """)) {
+            LocalDate today = LocalDate.now();
+            for (LoanInstallmentDraft row : schedule) {
+                statement.setInt(1, loanId);
+                statement.setInt(2, row.installmentNumber());
+                statement.setString(3, row.dueDate().toString());
+                statement.setDouble(4, row.principalDue());
+                statement.setDouble(5, row.interestDue());
+                statement.setDouble(6, row.feesDue());
+                statement.setDouble(7, row.penaltyDue());
+                statement.setDouble(8, row.totalDue());
+                statement.setDouble(9, row.totalDue());
+                statement.setString(10, row.dueDate().isEqual(today) ? "DUE" : row.dueDate().isBefore(today) ? "OVERDUE" : "SCHEDULED");
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private int insertCentralLoanTransaction(Connection connection, int accountId, Integer loanId, Integer installmentId,
+                                             Integer relatedTransactionId, String transactionType, String purpose,
+                                             String status, double amount, LocalDate date, String description,
+                                             String source, String paymentMethod, String referenceNumber) throws SQLException {
+        Integer categoryId = null;
+        if ("EXPENSE".equalsIgnoreCase(transactionType)) {
+            String categoryName = switch (safeText(purpose, "")) {
+                case "LOAN_INTEREST_PAYMENT" -> "Loan Interest Expense";
+                case "LOAN_FEE" -> "Loan Fees";
+                case "LOAN_PENALTY" -> "Loan Penalties and Fees";
+                default -> "Loan Repayment";
+            };
+            categoryId = findOrCreateCategoryId(connection, categoryName, "EXPENSE");
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO transactions (
+                    account_id, category_id, related_transaction_id, transaction_type, transaction_purpose,
+                    transaction_status, amount, transaction_date, description, source, payment_method,
+                    reference_number, loan_id, loan_installment_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, accountId);
+            setNullableInt(statement, 2, categoryId);
+            setNullableInt(statement, 3, relatedTransactionId);
+            statement.setString(4, transactionType);
+            statement.setString(5, purpose);
+            statement.setString(6, safeText(status, "COMPLETED"));
+            statement.setDouble(7, roundMoney(amount));
+            statement.setString(8, date.toString());
+            statement.setString(9, safeText(description, ""));
+            statement.setString(10, safeText(source, "LOANS"));
+            statement.setString(11, cleanNullable(paymentMethod));
+            statement.setString(12, cleanNullable(referenceNumber));
+            setNullableInt(statement, 13, loanId);
+            setNullableInt(statement, 14, installmentId);
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private boolean loanPaymentExists(Connection connection, String idempotencyKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT 1 FROM loan_payments WHERE idempotency_key = ? LIMIT 1
+                """)) {
+            statement.setString(1, idempotencyKey);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private PaymentAllocation allocateLoanPayment(Connection connection, int loanId, Integer requestedInstallmentId,
+                                                  double amount) throws SQLException {
+        List<InstallmentAllocation> rows = new ArrayList<>();
+        double remainingPayment = roundMoney(amount);
+        double principal = 0;
+        double interest = 0;
+        double fees = 0;
+        double penalties = 0;
+        Integer primaryInstallmentId = null;
+        String sql = """
+                SELECT id, principal_due, interest_due, fees_due, penalty_due, amount_paid, remaining_due
+                FROM loan_installments
+                WHERE loan_id = ?
+                  AND remaining_due > 0.005
+                  AND status NOT IN ('CANCELLED', 'SKIPPED')
+                  AND (? IS NULL OR id = ?)
+                ORDER BY date(due_date), installment_number
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, loanId);
+            setNullableInt(statement, 2, requestedInstallmentId);
+            setNullableInt(statement, 3, requestedInstallmentId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next() && remainingPayment > 0.005) {
+                    int installmentId = resultSet.getInt("id");
+                    if (primaryInstallmentId == null) {
+                        primaryInstallmentId = installmentId;
+                    }
+                    double paidSoFar = resultSet.getDouble("amount_paid");
+                    double penaltyOpen = Math.max(0, resultSet.getDouble("penalty_due") - paidComponentEstimate(resultSet, "penalty_due", paidSoFar));
+                    double feesOpen = Math.max(0, resultSet.getDouble("fees_due") - paidComponentEstimate(resultSet, "fees_due", paidSoFar));
+                    double interestOpen = Math.max(0, resultSet.getDouble("interest_due") - paidComponentEstimate(resultSet, "interest_due", paidSoFar));
+                    double principalOpen = Math.max(0, resultSet.getDouble("principal_due") - paidComponentEstimate(resultSet, "principal_due", paidSoFar));
+                    double penaltyPaid = Math.min(remainingPayment, penaltyOpen);
+                    remainingPayment = roundMoney(remainingPayment - penaltyPaid);
+                    double feesPaid = Math.min(remainingPayment, feesOpen);
+                    remainingPayment = roundMoney(remainingPayment - feesPaid);
+                    double interestPaid = Math.min(remainingPayment, interestOpen);
+                    remainingPayment = roundMoney(remainingPayment - interestPaid);
+                    double principalPaid = Math.min(remainingPayment, principalOpen);
+                    remainingPayment = roundMoney(remainingPayment - principalPaid);
+                    double totalPaid = roundMoney(principalPaid + interestPaid + feesPaid + penaltyPaid);
+                    if (totalPaid > 0.005) {
+                        rows.add(new InstallmentAllocation(installmentId, principalPaid, interestPaid, feesPaid, penaltyPaid, totalPaid));
+                        principal += principalPaid;
+                        interest += interestPaid;
+                        fees += feesPaid;
+                        penalties += penaltyPaid;
+                    }
+                }
+            }
+        }
+        if (requestedInstallmentId != null && rows.isEmpty()) {
+            throw new IllegalArgumentException("The selected instalment has no outstanding amount.");
+        }
+        if (remainingPayment > 0.01) {
+            throw new IllegalArgumentException("Payment exceeds the outstanding instalment balance.");
+        }
+        return new PaymentAllocation(rows, roundMoney(principal), roundMoney(interest), roundMoney(fees),
+                roundMoney(penalties), roundMoney(principal + interest + fees + penalties), primaryInstallmentId);
+    }
+
+    private double paidComponentEstimate(ResultSet resultSet, String componentColumn, double paidSoFar) throws SQLException {
+        if (paidSoFar <= 0) {
+            return 0;
+        }
+        double remaining = paidSoFar;
+        double penaltyPaid = Math.min(resultSet.getDouble("penalty_due"), remaining);
+        remaining = Math.max(0, remaining - penaltyPaid);
+        double feesPaid = Math.min(resultSet.getDouble("fees_due"), remaining);
+        remaining = Math.max(0, remaining - feesPaid);
+        double interestPaid = Math.min(resultSet.getDouble("interest_due"), remaining);
+        remaining = Math.max(0, remaining - interestPaid);
+        double principalPaid = Math.min(resultSet.getDouble("principal_due"), remaining);
+        return switch (componentColumn) {
+            case "penalty_due" -> penaltyPaid;
+            case "fees_due" -> feesPaid;
+            case "interest_due" -> interestPaid;
+            case "principal_due" -> principalPaid;
+            default -> 0;
+        };
+    }
+
+    private int insertLoanPayment(Connection connection, CentralLoanPaymentCommand command, PaymentAllocation allocation,
+                                  Integer transactionId, String reference, String idempotencyKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO loan_payments (
+                    loan_id, installment_id, account_id, payment_date, principal_paid, interest_paid,
+                    fees_paid, penalty_paid, total_paid, transaction_id, reference, status, notes, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setInt(1, command.loanId());
+            setNullableInt(statement, 2, allocation.primaryInstallmentId());
+            statement.setInt(3, command.accountId());
+            statement.setString(4, command.paymentDate().toString());
+            statement.setDouble(5, allocation.principalPaid());
+            statement.setDouble(6, allocation.interestPaid());
+            statement.setDouble(7, allocation.feesPaid());
+            statement.setDouble(8, allocation.penaltyPaid());
+            statement.setDouble(9, allocation.total());
+            setNullableInt(statement, 10, transactionId);
+            statement.setString(11, reference);
+            statement.setString(12, safeText(command.notes(), ""));
+            statement.setString(13, idempotencyKey);
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private void applyLoanPaymentAllocation(Connection connection, PaymentAllocation allocation,
+                                            LocalDate paymentDate, Integer transactionId) throws SQLException {
+        for (InstallmentAllocation row : allocation.installments()) {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE loan_installments
+                    SET amount_paid = amount_paid + ?,
+                        remaining_due = MAX(0, remaining_due - ?),
+                        status = CASE
+                            WHEN MAX(0, remaining_due - ?) <= 0.005 THEN 'PAID'
+                            ELSE 'PARTIALLY_PAID'
+                        END,
+                        paid_date = CASE
+                            WHEN MAX(0, remaining_due - ?) <= 0.005 THEN ?
+                            ELSE paid_date
+                        END,
+                        transaction_id = COALESCE(transaction_id, ?),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """)) {
+                statement.setDouble(1, row.totalPaid());
+                statement.setDouble(2, row.totalPaid());
+                statement.setDouble(3, row.totalPaid());
+                statement.setDouble(4, row.totalPaid());
+                statement.setString(5, paymentDate.toString());
+                setNullableInt(statement, 6, transactionId);
+                statement.setInt(7, row.installmentId());
+                statement.executeUpdate();
+            }
+        }
+    }
+
+    private void recalculateCentralLoanBalances(Connection connection, int loanId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE loans
+                SET total_paid = COALESCE((SELECT SUM(total_paid) FROM loan_payments WHERE loan_id = loans.id AND status = 'COMPLETED'), 0),
+                    outstanding_balance = COALESCE((SELECT SUM(remaining_due) FROM loan_installments WHERE loan_id = loans.id AND status NOT IN ('CANCELLED', 'SKIPPED')), 0),
+                    principal_outstanding = MAX(0, principal_amount - COALESCE((SELECT SUM(principal_paid) FROM loan_payments WHERE loan_id = loans.id AND status = 'COMPLETED'), 0)),
+                    interest_outstanding = MAX(0, total_interest - COALESCE((SELECT SUM(interest_paid) FROM loan_payments WHERE loan_id = loans.id AND status = 'COMPLETED'), 0)),
+                    fees_outstanding = MAX(0, fees - COALESCE((SELECT SUM(fees_paid) FROM loan_payments WHERE loan_id = loans.id AND status = 'COMPLETED'), 0)),
+                    penalties_outstanding = COALESCE((SELECT SUM(penalty_due) FROM loan_installments WHERE loan_id = loans.id), 0)
+                        - COALESCE((SELECT SUM(penalty_paid) FROM loan_payments WHERE loan_id = loans.id AND status = 'COMPLETED'), 0),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, loanId);
+            statement.executeUpdate();
+        }
+    }
+
+    private void refreshCentralLoanStatuses(Connection connection) throws SQLException {
+        if (!tableExists(connection, "loans") || !tableExists(connection, "loan_installments")) {
+            return;
+        }
+        String today = LocalDate.now().toString();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE loan_installments
+                SET status = CASE
+                        WHEN status IN ('PAID', 'CANCELLED', 'SKIPPED') THEN status
+                        WHEN remaining_due <= 0.005 THEN 'PAID'
+                        WHEN date(due_date) < date(?) THEN 'OVERDUE'
+                        WHEN amount_paid > 0.005 THEN 'PARTIALLY_PAID'
+                        WHEN date(due_date) = date(?) THEN 'DUE'
+                        ELSE 'SCHEDULED'
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status NOT IN ('CANCELLED', 'SKIPPED')
+                """)) {
+            statement.setString(1, today);
+            statement.setString(2, today);
+            statement.executeUpdate();
+        }
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT id FROM loans")) {
+            while (resultSet.next()) {
+                recalculateCentralLoanBalances(connection, resultSet.getInt("id"));
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    UPDATE loans
+                    SET status = CASE
+                            WHEN status IN ('CANCELLED', 'CLOSED') THEN status
+                            WHEN outstanding_balance <= 0.005 THEN 'COMPLETED'
+                            WHEN EXISTS (
+                                SELECT 1 FROM loan_installments i
+                                WHERE i.loan_id = loans.id
+                                  AND i.status = 'OVERDUE'
+                                  AND i.remaining_due > 0.005
+                            ) THEN 'OVERDUE'
+                            WHEN status = 'DRAFT' THEN 'DRAFT'
+                            ELSE 'ACTIVE'
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                    """);
+        }
+    }
+
+    private void upsertLoanBudgetCommitments(Connection connection, int loanId) throws SQLException {
+        CentralLoanRecord loan = centralLoanRecord(connection, loanId);
+        int categoryId = findOrCreateCategoryId(connection, "Loan Repayment", "BOTH");
+        try (PreparedStatement delete = connection.prepareStatement("""
+                DELETE FROM scheduled_obligations
+                WHERE obligation_type = 'Loan Repayment'
+                  AND notes LIKE ?
+                """)) {
+            delete.setString(1, "%Central loan ID: " + loanId + "%");
+            delete.executeUpdate();
+        }
+        try (PreparedStatement select = connection.prepareStatement("""
+                SELECT installment_number, due_date, remaining_due, status
+                FROM loan_installments
+                WHERE loan_id = ?
+                  AND remaining_due > 0.005
+                  AND status NOT IN ('PAID', 'CANCELLED', 'SKIPPED')
+                ORDER BY date(due_date), installment_number
+                """);
+             PreparedStatement insert = connection.prepareStatement("""
+                INSERT INTO scheduled_obligations (
+                    obligation_name, obligation_type, amount, due_date, frequency,
+                    account_id, category_id, status, notes, updated_at
+                ) VALUES (?, 'Loan Repayment', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """)) {
+            select.setInt(1, loanId);
+            try (ResultSet rows = select.executeQuery()) {
+                while (rows.next()) {
+                    insert.setString(1, loan.loanNumber() + " instalment " + rows.getInt("installment_number"));
+                    insert.setDouble(2, rows.getDouble("remaining_due"));
+                    insert.setString(3, rows.getString("due_date"));
+                    insert.setString(4, loan.repaymentFrequency());
+                    setNullableInt(insert, 5, loan.repaymentAccountId());
+                    insert.setInt(6, categoryId);
+                    insert.setString(7, "ACTIVE");
+                    insert.setString(8, "Generated from Loans module. Central loan ID: " + loanId);
+                    insert.addBatch();
+                }
+            }
+            insert.executeBatch();
+        }
+    }
+
+    private void markAutomaticLoanPaymentFailed(int loanId, Integer installmentId, LocalDate paymentDate,
+                                                double amount, String reference, String notes) {
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                if (installmentId != null) {
+                    try (PreparedStatement statement = connection.prepareStatement("""
+                            UPDATE loan_installments
+                            SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ? AND loan_id = ?
+                            """)) {
+                        statement.setInt(1, installmentId);
+                        statement.setInt(2, loanId);
+                        statement.executeUpdate();
+                    }
+                }
+                insertLoanAudit(connection, loanId, "AUTOMATIC_PAYMENT_FAILED", "loan_installment",
+                        installmentId, "", "Amount " + amount + " on " + paymentDate + optionalSuffix(" ref ", reference)
+                                + optionalSuffix(" notes ", notes));
+                recordSystemLog(connection, "Loans", "Automatic Repayment Failed", "WARNING",
+                        "Automatic repayment failed for loan " + loanId + " due to insufficient funds.");
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to mark automatic loan repayment failed", exception);
+        }
+    }
+
+    private int insertLoanAudit(Connection connection, Integer loanId, String action, String entityType,
+                                Integer entityId, String beforeValue, String afterValue) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO loan_audit_log (
+                    loan_id, action, entity_type, entity_id, before_value, after_value, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            setNullableInt(statement, 1, loanId);
+            statement.setString(2, action);
+            statement.setString(3, entityType);
+            setNullableInt(statement, 4, entityId);
+            statement.setString(5, safeText(beforeValue, ""));
+            statement.setString(6, safeText(afterValue, ""));
+            setNullableInt(statement, 7, currentUserIdOrNull());
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private CentralLoanRecord centralLoanRecord(Connection connection, int loanId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT l.*, COALESCE(s.group_name, '') AS savings_group_name,
+                       COALESCE(pa.account_name, '') AS proceeds_account_name,
+                       COALESCE(ra.account_name, '') AS repayment_account_name,
+                       COALESCE((
+                           SELECT due_date
+                           FROM loan_installments i
+                           WHERE i.loan_id = l.id
+                             AND i.remaining_due > 0.005
+                             AND i.status NOT IN ('CANCELLED', 'SKIPPED')
+                           ORDER BY date(i.due_date), i.installment_number
+                           LIMIT 1
+                       ), '') AS next_payment_date,
+                       COALESCE((
+                           SELECT remaining_due
+                           FROM loan_installments i
+                           WHERE i.loan_id = l.id
+                             AND i.remaining_due > 0.005
+                             AND i.status NOT IN ('CANCELLED', 'SKIPPED')
+                           ORDER BY date(i.due_date), i.installment_number
+                           LIMIT 1
+                       ), 0) AS next_payment_amount
+                FROM loans l
+                LEFT JOIN community_savings_profiles s ON s.id = l.savings_group_id
+                LEFT JOIN accounts pa ON pa.id = l.proceeds_account_id
+                LEFT JOIN accounts ra ON ra.id = l.repayment_account_id
+                WHERE l.id = ?
+                """)) {
+            statement.setInt(1, loanId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return centralLoanRecord(resultSet);
+                }
+            }
+        }
+        throw new IllegalArgumentException("Select a valid loan.");
+    }
+
+    private CentralLoanRecord centralLoanRecord(ResultSet resultSet) throws SQLException {
+        return new CentralLoanRecord(
+                resultSet.getInt("id"),
+                resultSet.getString("loan_number"),
+                resultSet.getString("loan_name"),
+                resultSet.getString("lender_type"),
+                resultSet.getString("lender_name"),
+                nullableInt(resultSet, "savings_group_id"),
+                resultSet.getString("savings_group_name"),
+                resultSet.getDouble("principal_amount"),
+                resultSet.getString("currency"),
+                resultSet.getString("interest_method"),
+                resultSet.getDouble("interest_rate"),
+                resultSet.getDouble("fixed_interest_amount"),
+                resultSet.getDouble("fees"),
+                resultSet.getDouble("total_interest"),
+                resultSet.getDouble("total_repayable"),
+                resultSet.getDouble("total_paid"),
+                resultSet.getDouble("outstanding_balance"),
+                resultSet.getDouble("principal_outstanding"),
+                resultSet.getDouble("interest_outstanding"),
+                resultSet.getDouble("fees_outstanding"),
+                resultSet.getDouble("penalties_outstanding"),
+                resultSet.getString("repayment_frequency"),
+                resultSet.getString("repayment_method"),
+                resultSet.getInt("number_of_installments"),
+                resultSet.getString("start_date"),
+                resultSet.getString("first_payment_date"),
+                resultSet.getString("expected_end_date"),
+                nullableInt(resultSet, "proceeds_account_id"),
+                resultSet.getString("proceeds_account_name"),
+                nullableInt(resultSet, "repayment_account_id"),
+                resultSet.getString("repayment_account_name"),
+                resultSet.getString("repayment_mode"),
+                resultSet.getString("next_payment_date"),
+                resultSet.getDouble("next_payment_amount"),
+                resultSet.getString("status"),
+                resultSet.getString("source_module"),
+                nullableInt(resultSet, "source_record_id"),
+                nullableInt(resultSet, "proceeds_transaction_id"),
+                resultSet.getString("notes"),
+                resultSet.getString("created_at"),
+                resultSet.getString("updated_at")
+        );
+    }
+
+    private String loanPaymentReference(String reference, String loanNumber) {
+        String clean = cleanNullable(reference);
+        return clean == null ? loanNumber + "-PAY-" + LocalDateTime.now(ZoneId.systemDefault()).format(FILE_TIMESTAMP_FORMAT) : clean;
+    }
+
     private String normalizedReportStatus(String status) {
         String value = safeText(status, "ACTIVE").toUpperCase(Locale.ENGLISH);
         return switch (value) {
+            case "DRAFT" -> "DRAFT";
             case "PAID", "COMPLETED", "CLOSED" -> "COMPLETED";
-            case "CANCELLED" -> "CANCELLED";
+            case "SETTLED" -> "SETTLED";
+            case "CANCELLED", "CANCELED" -> "CANCELLED";
             case "INACTIVE" -> "INACTIVE";
+            case "PARTIALLY_REPAID", "PARTIALLY REPAID", "PARTIAL" -> "PARTIALLY_REPAID";
+            case "OVERDUE" -> "OVERDUE";
+            case "RESTRUCTURED" -> "RESTRUCTURED";
+            case "DEFAULTED" -> "DEFAULTED";
+            case "WRITTEN_OFF", "WRITTEN OFF" -> "WRITTEN_OFF";
+            case "ARCHIVED" -> "ARCHIVED";
             default -> "ACTIVE";
         };
     }
@@ -3710,27 +17268,1271 @@ public class DatabaseHandler {
         }
     }
 
-    private void deleteById(String tableName, int id, String label) {
-        requireSuperAdminForPhysicalDeletion("delete " + label + " " + id);
-        try (Connection connection = connect();
-             PreparedStatement statement = connection.prepareStatement("DELETE FROM " + tableName + " WHERE id = ?")) {
-            statement.setInt(1, id);
-            statement.executeUpdate();
-            recordSystemLog("Report Inputs", "Delete " + label, "INFO", label + " " + id + " deleted.");
+    public List<RecordDisposalCandidateData> searchRecordDisposalCandidates(
+            String recordType,
+            String recordId,
+            String status,
+            LocalDate fromDate,
+            LocalDate toDate,
+            String importBatch,
+            boolean testDemoOnly
+    ) {
+        requireSuperAdminForPhysicalDeletion("search record disposal candidates");
+        List<RecordDisposalCandidateData> candidates = new ArrayList<>();
+        try (Connection connection = connect()) {
+            for (DisposalTableSpec spec : disposalSpecsFor(recordType)) {
+                appendDisposalCandidates(connection, candidates, spec, recordId, status, fromDate, toDate, importBatch, testDemoOnly);
+            }
         } catch (SQLException exception) {
-            throw new IllegalStateException("Failed to delete " + label, exception);
+            throw new IllegalStateException("Failed to search record disposal candidates", exception);
         }
+        return candidates;
+    }
+
+    public RecordDisposalImpact previewRecordDisposalImpact(List<RecordDisposalCandidateData> selectedRecords) {
+        List<RecordDisposalCandidateData> selected = selectedRecords == null ? List.of() : selectedRecords;
+        int eligible = 0;
+        int blocked = 0;
+        double income = 0;
+        double expenses = 0;
+        double balanceEffect = 0;
+        List<String> accountKeys = new ArrayList<>();
+        List<String> importKeys = new ArrayList<>();
+        int reportEffects = 0;
+        int syncEffects = 0;
+        for (RecordDisposalCandidateData candidate : selected) {
+            if ("ELIGIBLE".equals(candidate.eligibility())) {
+                eligible++;
+                balanceEffect += candidate.balanceEffect();
+                if ("INCOME".equalsIgnoreCase(candidate.financialType())) {
+                    income += Math.max(0, candidate.amount());
+                } else if ("EXPENSE".equalsIgnoreCase(candidate.financialType())) {
+                    expenses += Math.max(0, candidate.amount());
+                }
+            } else {
+                blocked++;
+            }
+            if (candidate.accountKey() != null && !candidate.accountKey().isBlank() && !accountKeys.contains(candidate.accountKey())) {
+                accountKeys.add(candidate.accountKey());
+            }
+            if (candidate.importKey() != null && !candidate.importKey().isBlank() && !importKeys.contains(candidate.importKey())) {
+                importKeys.add(candidate.importKey());
+            }
+            if (candidate.dependencies() > 0 || candidate.tableName().startsWith("report_") || "account_reconciliations".equals(candidate.tableName())) {
+                reportEffects++;
+            }
+            if ("transactions".equals(candidate.tableName()) && "NOT ELIGIBLE".equals(candidate.eligibility())) {
+                syncEffects++;
+            }
+        }
+        double currentBalance;
+        try (Connection connection = connect()) {
+            currentBalance = totalWorkspaceBalance(connection);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate disposal impact", exception);
+        }
+        double projected = currentBalance - balanceEffect;
+        String recommendation = blocked > 0
+                ? "Physical deletion is not recommended for " + blocked + " selected record(s). Use cancellation, reversal, freezing or archiving for blocked financial records."
+                : eligible == 0
+                ? "No eligible records are selected."
+                : Math.abs(balanceEffect) > 0.005
+                ? "Selected eligible records would change balances. Review the candidates before execution."
+                : "Selected eligible records can proceed to request, backup and confirmation.";
+        return new RecordDisposalImpact(
+                selected.size(),
+                eligible,
+                blocked,
+                income,
+                expenses,
+                accountKeys.size(),
+                reportEffects,
+                importKeys.size(),
+                syncEffects,
+                currentBalance,
+                projected,
+                projected - currentBalance,
+                recommendation
+        );
+    }
+
+    public int requestRecordDeletion(String recordType, int recordId, String reason, String supportingNotes) {
+        if (!UserSession.isAuthenticated()) {
+            throw new SecurityException("Sign in before submitting a deletion request.");
+        }
+        String cleanReason = requireText(reason, "Deletion request reason");
+        try (Connection connection = connect()) {
+            DisposalTableSpec spec = firstDisposalSpecForRecordType(recordType);
+            RecordDisposalCandidateData candidate = loadDisposalCandidate(connection, spec, recordId);
+            if (candidate == null) {
+                throw new IllegalArgumentException("Select a valid record before requesting deletion.");
+            }
+            try (PreparedStatement duplicate = connection.prepareStatement("""
+                    SELECT id
+                    FROM deletion_requests
+                    WHERE table_name = ?
+                      AND record_id = ?
+                      AND upper(approval_status) = 'PENDING'
+                    LIMIT 1
+                    """)) {
+                duplicate.setString(1, candidate.tableName());
+                duplicate.setInt(2, candidate.recordId());
+                try (ResultSet resultSet = duplicate.executeQuery()) {
+                    if (resultSet.next()) {
+                        throw new IllegalArgumentException("A pending deletion request already exists for this record.");
+                    }
+                }
+            }
+            int requestId;
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO deletion_requests (
+                        record_type, table_name, record_id, record_description, requested_by,
+                        reason, supporting_notes, dependencies, current_status, approval_status, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', CURRENT_TIMESTAMP)
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                statement.setString(1, candidate.recordType());
+                statement.setString(2, candidate.tableName());
+                statement.setInt(3, candidate.recordId());
+                statement.setString(4, candidate.description());
+                setNullableInt(statement, 5, currentUserIdOrNull());
+                statement.setString(6, cleanReason);
+                statement.setString(7, safeText(supportingNotes, ""));
+                statement.setInt(8, candidate.dependencies());
+                statement.setString(9, candidate.status());
+                statement.executeUpdate();
+                requestId = generatedId(connection, statement);
+            }
+            recordSystemLog("Data And Records", "Deletion Request Submitted", "WARNING",
+                    candidate.recordType() + " " + candidate.recordId()
+                            + " requested for deletion. Request " + requestId
+                            + ". Reason: " + cleanReason);
+            return requestId;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to submit deletion request", exception);
+        }
+    }
+
+    public List<DeletionRequestRecord> listDeletionRequests(String status, int limit) {
+        String cleanStatus = status == null || status.isBlank() || status.toLowerCase(Locale.ENGLISH).startsWith("all")
+                ? null
+                : status.trim().toUpperCase(Locale.ENGLISH);
+        List<DeletionRequestRecord> requests = new ArrayList<>();
+        String sql = """
+                SELECT dr.id, dr.record_type, dr.table_name, dr.record_id, dr.record_description,
+                       CASE
+                           WHEN dr.requested_by IS NULL OR dr.requested_by <= 0 THEN 'System'
+                           ELSE 'User #' || dr.requested_by
+                       END AS requested_by_name,
+                       dr.request_date, dr.reason, dr.supporting_notes, dr.dependencies,
+                       dr.current_status, dr.approval_status,
+                       CASE
+                           WHEN dr.reviewed_by IS NULL OR dr.reviewed_by <= 0 THEN ''
+                           ELSE 'User #' || dr.reviewed_by
+                       END AS reviewed_by_name,
+                       dr.reviewed_at, dr.review_notes
+                FROM deletion_requests dr
+                WHERE (? IS NULL OR upper(dr.approval_status) = ?)
+                ORDER BY dr.request_date DESC, dr.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, cleanStatus);
+            statement.setString(2, cleanStatus);
+            statement.setInt(3, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    requests.add(new DeletionRequestRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getString("record_type"),
+                            resultSet.getString("table_name"),
+                            resultSet.getInt("record_id"),
+                            resultSet.getString("record_description"),
+                            resultSet.getString("requested_by_name"),
+                            resultSet.getString("request_date"),
+                            resultSet.getString("reason"),
+                            resultSet.getString("supporting_notes"),
+                            resultSet.getInt("dependencies"),
+                            resultSet.getString("current_status"),
+                            resultSet.getString("approval_status"),
+                            resultSet.getString("reviewed_by_name"),
+                            resultSet.getString("reviewed_at"),
+                            resultSet.getString("review_notes")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list deletion requests", exception);
+        }
+        return requests;
+    }
+
+    public void reviewDeletionRequest(int requestId, String decision, String reviewNotes) {
+        requireSuperAdminForPhysicalDeletion("review deletion request " + requestId);
+        String cleanDecision = requireText(decision, "Deletion request decision").trim().toUpperCase(Locale.ENGLISH);
+        if (!Set.of("APPROVED", "REJECTED", "RETURNED", "CANCELLED").contains(cleanDecision)) {
+            throw new IllegalArgumentException("Unsupported deletion request decision.");
+        }
+        String cleanNotes = requireText(reviewNotes, "Review notes");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                DeletionRequestRecord request = deletionRequestById(connection, requestId);
+                if (request == null) {
+                    throw new IllegalArgumentException("Select a valid deletion request.");
+                }
+                if (!"PENDING".equalsIgnoreCase(request.approvalStatus())) {
+                    throw new IllegalArgumentException("This deletion request has already been reviewed.");
+                }
+                if ("APPROVED".equals(cleanDecision)) {
+                    DisposalTableSpec spec = disposalSpecFor(request.recordType(), request.tableName());
+                    if (spec == null) {
+                        throw new IllegalArgumentException("The requested record type is not eligible for deletion workflow.");
+                    }
+                    RecordDisposalCandidateData candidate = loadDisposalCandidate(connection, spec, request.recordId());
+                    if (candidate == null) {
+                        throw new IllegalArgumentException("The requested record is no longer available.");
+                    }
+                    softDeleteCandidate(connection, candidate, request.reason(), "DEL-REQ-" + request.id());
+                    cleanDecision = "COMPLETED";
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        UPDATE deletion_requests
+                        SET approval_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP,
+                            review_notes = ?, completed_at = CASE WHEN ? = 'COMPLETED' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """)) {
+                    statement.setString(1, cleanDecision);
+                    setNullableInt(statement, 2, currentUserIdOrNull());
+                    statement.setString(3, cleanNotes);
+                    statement.setString(4, cleanDecision);
+                    statement.setInt(5, requestId);
+                    statement.executeUpdate();
+                }
+                recordSystemLog(connection, "Data And Records", "Deletion Request Reviewed", "WARNING",
+                        "Deletion request " + requestId + " decision: " + cleanDecision
+                                + ". Notes: " + cleanNotes);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to review deletion request", exception);
+        }
+    }
+
+    public void softDeleteRecord(String recordType, int recordId, String reason) {
+        requireSuperAdminForPhysicalDeletion("soft delete " + recordType + " " + recordId);
+        String cleanReason = requireText(reason, "Deletion reason");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                DisposalTableSpec spec = firstDisposalSpecForRecordType(recordType);
+                RecordDisposalCandidateData candidate = loadDisposalCandidate(connection, spec, recordId);
+                if (candidate == null) {
+                    throw new IllegalArgumentException("Select a valid record to delete.");
+                }
+                softDeleteCandidate(connection, candidate, cleanReason, deletionReference(candidate));
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to delete record", exception);
+        }
+    }
+
+    private void softDeleteRecordByTable(String tableName, int recordId, String reason) {
+        requireSuperAdminForPhysicalDeletion("soft delete " + tableName + " " + recordId);
+        String cleanReason = requireText(reason, "Deletion reason");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                DisposalTableSpec spec = allDisposalSpecs().stream()
+                        .filter(candidate -> candidate.tableName().equals(tableName))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("Deletion workflow is not supported for " + tableName + "."));
+                RecordDisposalCandidateData candidate = loadDisposalCandidate(connection, spec, recordId);
+                if (candidate == null) {
+                    throw new IllegalArgumentException("Select a valid record to delete.");
+                }
+                softDeleteCandidate(connection, candidate, cleanReason, deletionReference(candidate));
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to delete record", exception);
+        }
+    }
+
+    public List<DeletedRecordRecord> listDeletedRecords(String recordType, String searchText, int limit) {
+        requireSuperAdminForPhysicalDeletion("list deleted records");
+        List<DeletedRecordRecord> records = new ArrayList<>();
+        String search = searchText == null ? "" : searchText.trim().toLowerCase(Locale.ENGLISH);
+        try (Connection connection = connect()) {
+            for (DisposalTableSpec spec : disposalSpecsFor(recordType == null || recordType.isBlank() ? "Other" : recordType)) {
+                List<RecordDisposalCandidateData> candidates = new ArrayList<>();
+                appendDisposalCandidates(connection, candidates, spec, "", "Deleted", null, null, "", false);
+                for (RecordDisposalCandidateData candidate : candidates) {
+                    if (!search.isBlank()
+                            && !(candidate.description() + " " + candidate.recordType() + " " + candidate.recordId())
+                            .toLowerCase(Locale.ENGLISH).contains(search)) {
+                        continue;
+                    }
+                    records.add(deletedRecord(connection, candidate));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list deleted records", exception);
+        }
+        return records.stream().limit(boundedLimit(limit)).toList();
+    }
+
+    public void restoreDeletedRecord(String recordType, int recordId, String reason) {
+        requireSuperAdminForPhysicalDeletion("restore deleted " + recordType + " " + recordId);
+        String cleanReason = requireText(reason, "Restoration reason");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                DisposalTableSpec spec = firstDisposalSpecForRecordType(recordType);
+                RecordDisposalCandidateData candidate = loadDeletedDisposalCandidate(connection, spec, recordId);
+                if (candidate == null) {
+                    throw new IllegalArgumentException("Select a valid deleted record to restore.");
+                }
+                String previousStatus = deletedRecordValue(connection, candidate.tableName(), candidate.recordId(), "previous_status");
+                StringBuilder sql = new StringBuilder("""
+                        UPDATE %s
+                        SET is_deleted = 0
+                        """.formatted(candidate.tableName()));
+                String statusColumn = statusColumnForTable(connection, candidate.tableName());
+                if (statusColumn != null && previousStatus != null && !previousStatus.isBlank()) {
+                    sql.append(", ").append(statusColumn).append(" = ? ");
+                }
+                if (columnExists(connection, candidate.tableName(), "updated_at")) {
+                    sql.append(", updated_at = CURRENT_TIMESTAMP ");
+                }
+                sql.append("WHERE id = ?");
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    int index = 1;
+                    if (statusColumn != null && previousStatus != null && !previousStatus.isBlank()) {
+                        statement.setString(index++, previousStatus);
+                    }
+                    statement.setInt(index, candidate.recordId());
+                    statement.executeUpdate();
+                }
+                recordSystemLog(connection, "Data And Records", "Record Restored", "WARNING",
+                        candidate.recordType() + " " + candidate.recordId()
+                                + " restored. Reason: " + cleanReason);
+                refreshAllLoanStatuses(connection);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to restore deleted record", exception);
+        }
+    }
+
+    public void permanentlyPurgeDeletedRecord(String recordType, int recordId, String reason,
+                                               String typedConfirmation, String backupReference) {
+        requireSuperAdminForPhysicalDeletion("permanently purge " + recordType + " " + recordId);
+        if (!"DELETE PERMANENTLY".equals(typedConfirmation)) {
+            throw new SecurityException("Type DELETE PERMANENTLY to confirm permanent purge.");
+        }
+        String cleanReason = requireText(reason, "Permanent purge reason");
+        String cleanBackup = requireText(backupReference, "Verified backup reference");
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                DisposalTableSpec spec = firstDisposalSpecForRecordType(recordType);
+                RecordDisposalCandidateData candidate = loadDeletedDisposalCandidate(connection, spec, recordId);
+                if (candidate == null) {
+                    throw new IllegalArgumentException("Select a valid soft-deleted record to purge.");
+                }
+                if (candidate.dependencies() > 0 || !"ELIGIBLE".equals(candidate.eligibility())) {
+                    throw new IllegalArgumentException("This record still has dependencies or retention requirements and cannot be permanently purged.");
+                }
+                try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + candidate.tableName() + " WHERE id = ? AND COALESCE(is_deleted, 0) = 1")) {
+                    statement.setInt(1, candidate.recordId());
+                    if (statement.executeUpdate() == 0) {
+                        throw new IllegalArgumentException("The selected record was not purged because it is not soft-deleted.");
+                    }
+                }
+                recordSystemLog(connection, "Data And Records", "Permanent Purge Executed", "CRITICAL",
+                        candidate.recordType() + " " + candidate.recordId()
+                                + " permanently purged. Backup: " + cleanBackup
+                                + ". Reason: " + cleanReason);
+                refreshAllLoanStatuses(connection);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to permanently purge deleted record", exception);
+        }
+    }
+
+    public RecordDisposalExecutionResult executeRecordDisposal(
+            List<RecordDisposalCandidateData> selectedRecords,
+            String reason,
+            String authority,
+            String backupReference,
+            String backupChecksum
+    ) {
+        requireSuperAdminForPhysicalDeletion("execute record disposal");
+        List<RecordDisposalCandidateData> selected = selectedRecords == null ? List.of() : selectedRecords;
+        if (selected.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one eligible record before executing disposal.");
+        }
+        String cleanReason = requireText(reason, "Disposal reason");
+        String cleanAuthority = requireText(authority, "Policy or authority");
+        String cleanBackup = requireText(backupReference, "Verified backup reference");
+        String cleanChecksum = requireText(backupChecksum, "Verified backup checksum");
+        int disposed = 0;
+        int skipped = 0;
+        String integrity;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                for (RecordDisposalCandidateData requested : selected) {
+                    DisposalTableSpec spec = disposalSpecFor(requested.recordType(), requested.tableName());
+                    if (spec == null) {
+                        skipped++;
+                        continue;
+                    }
+                    RecordDisposalCandidateData current = loadDisposalCandidate(connection, spec, requested.recordId());
+                    if (current == null || !"ELIGIBLE".equals(current.eligibility())) {
+                        skipped++;
+                        continue;
+                    }
+                    LoanSide affectedLoanSide = "transactions".equals(current.tableName())
+                            ? loanSideForTransaction(connection, current.recordId())
+                            : null;
+                    softDeleteCandidate(connection, current, cleanReason, deletionReference(current));
+                    disposed++;
+                    refreshLoanStatuses(connection, affectedLoanSide);
+                }
+                if (disposed == 0) {
+                    throw new IllegalStateException("No records were eligible for physical disposal at execution time.");
+                }
+                refreshAllLoanStatuses(connection);
+                integrity = sqliteQuickCheck(connection);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to execute record disposal", exception);
+        }
+        String executionTime = LocalDateTime.now().toString();
+        String executor = UserSession.getAuthenticatedUser().getDisplayName();
+        String auditSummary = "Soft-deleted " + disposed + " of " + selected.size()
+                + " requested record(s). Authority: " + cleanAuthority
+                + ". Reason: " + cleanReason
+                + ". Backup: " + cleanBackup
+                + ". Checksum: " + cleanChecksum;
+        recordSystemLog("Data And Records", "Record Disposal Executed", "WARNING", auditSummary);
+        return new RecordDisposalExecutionResult(
+                "Successful",
+                selected.size(),
+                disposed,
+                skipped,
+                cleanBackup,
+                executor,
+                executionTime,
+                integrity,
+                "Passed",
+                auditSummary
+        );
+    }
+
+    public WorkspaceMaintenanceSummary workspaceMaintenanceSummary() {
+        try (Connection connection = connect()) {
+            int accounts = countRows(connection, "accounts");
+            int transactions = countRows(connection, "transactions");
+            int budgets = countRows(connection, "budgets") + countRows(connection, "household_budget_members");
+            int projects = countRows(connection, "projects") + countRows(connection, "project_activities");
+            int goals = countRows(connection, "goals") + countRows(connection, "goal_steps");
+            int loans = countRows(connection, "loan_schedules");
+            int reports = countRows(connection, "report_position_items")
+                    + countRows(connection, "scheduled_obligations")
+                    + countRows(connection, "recurring_transaction_plans")
+                    + countRows(connection, "account_reconciliations");
+            int financialRecords = accounts + transactions + budgets + projects + goals + loans + reports;
+            return new WorkspaceMaintenanceSummary(accounts, transactions, budgets, projects, goals, loans, reports, financialRecords);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to calculate workspace maintenance summary", exception);
+        }
+    }
+
+    public WorkspaceMaintenanceExecutionResult resetWorkspaceData(
+            String resetType,
+            String backupReference,
+            String backupChecksum
+    ) {
+        requireSuperAdminForPhysicalDeletion("reset workspace");
+        String cleanResetType = safeText(resetType, "Clear transactions only");
+        String cleanBackup = requireText(backupReference, "Verified backup reference");
+        String cleanChecksum = requireText(backupChecksum, "Verified backup checksum");
+        int affected = 0;
+        String integrity;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                if (cleanResetType.toLowerCase(Locale.ENGLISH).contains("transactions only")) {
+                    affected += deleteFromTable(connection, "transactions");
+                    affected += deleteFromTable(connection, "account_reconciliations");
+                    refreshAllLoanStatuses(connection);
+                } else if (cleanResetType.toLowerCase(Locale.ENGLISH).contains("keep categories")) {
+                    affected += clearFinancialWorkspaceTables(connection, false, false);
+                } else {
+                    affected += clearFinancialWorkspaceTables(connection, true, false);
+                    initializeCurrencies(connection);
+                    initializePaymentMethods(connection);
+                    initializeAiSettings(connection);
+                    seedCategories(connection);
+                }
+                integrity = sqliteQuickCheck(connection);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to reset workspace", exception);
+        }
+        String executionTime = LocalDateTime.now().toString();
+        String executor = UserSession.getAuthenticatedUser().getDisplayName();
+        String auditSummary = "Workspace reset completed. Reset type: " + cleanResetType
+                + ". Records affected: " + affected
+                + ". Backup: " + cleanBackup
+                + ". Checksum: " + cleanChecksum;
+        recordSystemLog("Data And Records", "Workspace Reset", "WARNING", auditSummary);
+        return new WorkspaceMaintenanceExecutionResult("Successful", affected, cleanBackup, integrity, executor, executionTime, auditSummary);
+    }
+
+    public WorkspaceMaintenanceExecutionResult deleteWorkspaceData(
+            String backupReference,
+            String backupChecksum
+    ) {
+        requireSuperAdminForPhysicalDeletion("delete workspace");
+        String cleanBackup = requireText(backupReference, "Verified backup reference");
+        String cleanChecksum = requireText(backupChecksum, "Verified backup checksum");
+        int affected;
+        String integrity;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                affected = clearFinancialWorkspaceTables(connection, true, true);
+                integrity = sqliteQuickCheck(connection);
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to delete workspace data", exception);
+        }
+        String executionTime = LocalDateTime.now().toString();
+        String executor = UserSession.getAuthenticatedUser().getDisplayName();
+        String auditSummary = "Workspace financial data deleted. Records affected: " + affected
+                + ". User identity retained. Backup: " + cleanBackup
+                + ". Checksum: " + cleanChecksum;
+        recordSystemLog("Data And Records", "Workspace Deleted", "WARNING", auditSummary);
+        return new WorkspaceMaintenanceExecutionResult("Successful", affected, cleanBackup, integrity, executor, executionTime, auditSummary);
+    }
+
+    private int clearFinancialWorkspaceTables(Connection connection, boolean clearSetup, boolean clearLocalLogs) throws SQLException {
+        int affected = 0;
+        affected += deleteFromTable(connection, "transactions");
+        affected += deleteFromTable(connection, "account_reconciliations");
+        affected += deleteFromTable(connection, "recurring_transaction_plans");
+        affected += deleteFromTable(connection, "scheduled_obligations");
+        affected += deleteFromTable(connection, "report_position_items");
+        affected += deleteFromTable(connection, "project_activities");
+        affected += deleteFromTable(connection, "goal_steps");
+        affected += deleteFromTable(connection, "household_budget_members");
+        affected += deleteFromTable(connection, "loan_schedules");
+        affected += deleteFromTable(connection, "projects");
+        affected += deleteFromTable(connection, "goals");
+        affected += deleteFromTable(connection, "budgets");
+        affected += deleteFromTable(connection, "accounts");
+        if (clearSetup) {
+            affected += deleteFromTable(connection, "payment_methods");
+            affected += deleteFromTable(connection, "currencies");
+            affected += deleteFromTable(connection, "categories");
+            affected += deleteFromTable(connection, "app_settings");
+            affected += deleteFromTable(connection, "ai_settings");
+        }
+        if (clearLocalLogs) {
+            affected += deleteFromTable(connection, "ai_interaction_log");
+            affected += deleteFromTable(connection, "setup_policy_records");
+            affected += deleteFromTable(connection, "people");
+        }
+        return affected;
+    }
+
+    private int deleteFromTable(Connection connection, String tableName) throws SQLException {
+        if (!tableExists(connection, tableName)) {
+            return 0;
+        }
+        try (Statement statement = connection.createStatement()) {
+            return statement.executeUpdate("DELETE FROM " + tableName);
+        }
+    }
+
+    private DisposalTableSpec firstDisposalSpecForRecordType(String recordType) {
+        List<DisposalTableSpec> specs = disposalSpecsFor(recordType);
+        if (specs.isEmpty()) {
+            throw new IllegalArgumentException("Deletion workflow is not supported for " + safeText(recordType, "this record type") + ".");
+        }
+        return specs.getFirst();
+    }
+
+    private RecordDisposalCandidateData loadDeletedDisposalCandidate(Connection connection, DisposalTableSpec spec, int id) throws SQLException {
+        List<RecordDisposalCandidateData> candidates = new ArrayList<>();
+        appendDisposalCandidates(connection, candidates, spec, String.valueOf(id), "Deleted", null, null, "", false);
+        return candidates.isEmpty() ? null : candidates.getFirst();
+    }
+
+    private void softDeleteCandidate(Connection connection, RecordDisposalCandidateData candidate,
+                                     String reason, String deletionReference) throws SQLException {
+        if (!columnExists(connection, candidate.tableName(), "is_deleted")) {
+            throw new IllegalArgumentException("This record type does not support soft deletion.");
+        }
+        if (!"ELIGIBLE".equals(candidate.eligibility())) {
+            throw new IllegalArgumentException(candidate.recommendation() + " " + candidate.eligibilityReason());
+        }
+        String previousStatus = candidate.status();
+        StringBuilder sql = new StringBuilder("UPDATE ")
+                .append(candidate.tableName())
+                .append("""
+                         SET is_deleted = 1,
+                             deleted_at = CURRENT_TIMESTAMP,
+                             deleted_by = ?,
+                             deletion_reason = ?,
+                             deletion_reference = ?,
+                             previous_status = ?
+                        """);
+        if (columnExists(connection, candidate.tableName(), "updated_at")) {
+            sql.append(", updated_at = CURRENT_TIMESTAMP ");
+        }
+        sql.append(" WHERE id = ? AND COALESCE(is_deleted, 0) = 0");
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            setNullableInt(statement, 1, currentUserIdOrNull());
+            statement.setString(2, requireText(reason, "Deletion reason"));
+            statement.setString(3, safeText(deletionReference, deletionReference(candidate)));
+            statement.setString(4, previousStatus);
+            statement.setInt(5, candidate.recordId());
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("The selected record is already deleted or no longer exists.");
+            }
+        }
+        recordSystemLog(connection, "Data And Records", "Record Soft Deleted", "WARNING",
+                candidate.recordType() + " " + candidate.recordId()
+                        + " soft-deleted. Record: " + candidate.description()
+                        + ". Previous status: " + previousStatus
+                        + ". Reason: " + reason);
+    }
+
+    private DeletedRecordRecord deletedRecord(Connection connection, RecordDisposalCandidateData candidate) throws SQLException {
+        String sql = """
+                SELECT deleted_at, deleted_by, deletion_reason, deletion_reference, previous_status
+                FROM %s
+                WHERE id = ?
+                """.formatted(candidate.tableName());
+        String deletedAt = "";
+        String deletedBy = "";
+        String reason = "";
+        String reference = "";
+        String previousStatus = "";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, candidate.recordId());
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    deletedAt = safeText(resultSet.getString("deleted_at"), "");
+                    deletedBy = deletedByName(connection, nullableInt(resultSet, "deleted_by"));
+                    reason = safeText(resultSet.getString("deletion_reason"), "");
+                    reference = safeText(resultSet.getString("deletion_reference"), "");
+                    previousStatus = safeText(resultSet.getString("previous_status"), candidate.status());
+                }
+            }
+        }
+        return new DeletedRecordRecord(
+                candidate.tableName(),
+                candidate.recordType(),
+                candidate.recordId(),
+                candidate.description(),
+                previousStatus,
+                deletedAt,
+                deletedBy,
+                reason,
+                reference,
+                candidate.dependencies(),
+                candidate.dependencies() == 0
+        );
+    }
+
+    private String deletedRecordValue(Connection connection, String tableName, int id, String columnName) throws SQLException {
+        if (!columnExists(connection, tableName, columnName)) {
+            return "";
+        }
+        try (PreparedStatement statement = connection.prepareStatement("SELECT " + columnName + " FROM " + tableName + " WHERE id = ?")) {
+            statement.setInt(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? safeText(resultSet.getString(1), "") : "";
+            }
+        }
+    }
+
+    private String deletedByName(Connection connection, Integer userId) throws SQLException {
+        if (userId == null || userId <= 0 || !tableExists(connection, "users")) {
+            return "System";
+        }
+        try (PreparedStatement statement = connection.prepareStatement("SELECT COALESCE(display_name, username, 'System') FROM users WHERE id = ?")) {
+            statement.setInt(1, userId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? safeText(resultSet.getString(1), "System") : "System";
+            }
+        }
+    }
+
+    private String statusColumnForTable(Connection connection, String tableName) throws SQLException {
+        for (String column : List.of("status", "transaction_status", "membership_status")) {
+            if (columnExists(connection, tableName, column)) {
+                return column;
+            }
+        }
+        return null;
+    }
+
+    private String deletionReference(RecordDisposalCandidateData candidate) {
+        return "DEL-" + candidate.tableName() + "-" + candidate.recordId() + "-" + LocalDateTime.now().format(FILE_TIMESTAMP_FORMAT);
+    }
+
+    private DeletionRequestRecord deletionRequestById(Connection connection, int requestId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT dr.id, dr.record_type, dr.table_name, dr.record_id, dr.record_description,
+                       CASE
+                           WHEN dr.requested_by IS NULL OR dr.requested_by <= 0 THEN 'System'
+                           ELSE 'User #' || dr.requested_by
+                       END AS requested_by_name,
+                       dr.request_date, dr.reason, dr.supporting_notes, dr.dependencies,
+                       dr.current_status, dr.approval_status,
+                       CASE
+                           WHEN dr.reviewed_by IS NULL OR dr.reviewed_by <= 0 THEN ''
+                           ELSE 'User #' || dr.reviewed_by
+                       END AS reviewed_by_name,
+                       dr.reviewed_at, dr.review_notes
+                FROM deletion_requests dr
+                WHERE dr.id = ?
+                """)) {
+            statement.setInt(1, requestId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                return new DeletionRequestRecord(
+                        resultSet.getInt("id"),
+                        resultSet.getString("record_type"),
+                        resultSet.getString("table_name"),
+                        resultSet.getInt("record_id"),
+                        resultSet.getString("record_description"),
+                        resultSet.getString("requested_by_name"),
+                        resultSet.getString("request_date"),
+                        resultSet.getString("reason"),
+                        resultSet.getString("supporting_notes"),
+                        resultSet.getInt("dependencies"),
+                        resultSet.getString("current_status"),
+                        resultSet.getString("approval_status"),
+                        resultSet.getString("reviewed_by_name"),
+                        resultSet.getString("reviewed_at"),
+                        resultSet.getString("review_notes")
+                );
+            }
+        }
+    }
+
+    private List<DisposalTableSpec> disposalSpecsFor(String recordType) {
+        String cleanType = safeText(recordType, "Transaction");
+        List<DisposalTableSpec> specs = new ArrayList<>();
+        for (DisposalTableSpec spec : allDisposalSpecs()) {
+            if ("Other".equals(cleanType) || spec.recordType().equals(cleanType)) {
+                specs.add(spec);
+            }
+        }
+        return specs;
+    }
+
+    private DisposalTableSpec disposalSpecFor(String recordType, String tableName) {
+        for (DisposalTableSpec spec : allDisposalSpecs()) {
+            if (spec.tableName().equals(tableName) && spec.recordType().equals(recordType)) {
+                return spec;
+            }
+        }
+        return null;
+    }
+
+    private List<DisposalTableSpec> allDisposalSpecs() {
+        String transactionBalanceEffect = """
+                CASE
+                    WHEN COALESCE(transaction_status, 'COMPLETED') = 'CANCELLED' THEN 0
+                    WHEN transaction_type = 'INCOME' THEN amount
+                    WHEN transaction_type = 'EXPENSE' THEN -amount
+                    WHEN transaction_type = 'TRANSFER' AND transaction_purpose = 'TRANSFER_IN' THEN amount
+                    WHEN transaction_type = 'TRANSFER' AND transaction_purpose = 'TRANSFER_OUT' THEN -amount
+                    WHEN transaction_type = 'LOAN' AND transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN amount
+                    WHEN transaction_type = 'LOAN' AND transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -amount
+                    WHEN transaction_type = 'ADJUSTMENT' AND transaction_purpose = 'BALANCE_INCREASE' THEN amount
+                    WHEN transaction_type = 'ADJUSTMENT' AND transaction_purpose = 'BALANCE_DECREASE' THEN -amount
+                    ELSE 0
+                END
+                """;
+        DisposalTableSpec transactionSpec = new DisposalTableSpec(
+                "Transaction",
+                "transactions",
+                "COALESCE(NULLIF(trim(description), ''), transaction_type || ' ' || transaction_purpose)",
+                "COALESCE(transaction_status, 'COMPLETED')",
+                "transaction_date",
+                "amount",
+                "COALESCE(source, 'MANUAL')",
+                "lower(COALESCE(description, '') || ' ' || COALESCE(source, '') || ' ' || COALESCE(reference_number, ''))",
+                "transaction_type",
+                transactionBalanceEffect,
+                "CAST(account_id AS TEXT)",
+                "CASE WHEN lower(COALESCE(source, '') || ' ' || COALESCE(reference_number, '')) LIKE '%import%' THEN COALESCE(source, reference_number, '') ELSE '' END",
+                ""
+        );
+        DisposalTableSpec importSpec = new DisposalTableSpec(
+                "Import Record",
+                "transactions",
+                "COALESCE(NULLIF(trim(description), ''), 'Imported ' || transaction_type || ' row')",
+                "COALESCE(transaction_status, 'COMPLETED')",
+                "transaction_date",
+                "amount",
+                "COALESCE(source, 'IMPORT')",
+                "lower(COALESCE(description, '') || ' ' || COALESCE(source, '') || ' ' || COALESCE(reference_number, ''))",
+                "transaction_type",
+                transactionBalanceEffect,
+                "CAST(account_id AS TEXT)",
+                "COALESCE(source, reference_number, '')",
+                "lower(COALESCE(source, '') || ' ' || COALESCE(reference_number, '') || ' ' || COALESCE(description, '')) LIKE '%import%'"
+        );
+        DisposalTableSpec repaymentSpec = new DisposalTableSpec(
+                "Repayment",
+                "transactions",
+                "COALESCE(NULLIF(trim(description), ''), transaction_purpose)",
+                "COALESCE(transaction_status, 'COMPLETED')",
+                "transaction_date",
+                "amount",
+                "COALESCE(source, 'MANUAL')",
+                "lower(COALESCE(description, '') || ' ' || COALESCE(source, '') || ' ' || COALESCE(reference_number, ''))",
+                "transaction_type",
+                transactionBalanceEffect,
+                "CAST(account_id AS TEXT)",
+                "",
+                "transaction_purpose IN ('LENT_REPAID', 'BORROWED_REPAID')"
+        );
+        return List.of(
+                transactionSpec,
+                new DisposalTableSpec("Account", "accounts", "account_name", "COALESCE(status, 'ACTIVE')", "created_at", "opening_balance", "COALESCE(notes, '')", "lower(COALESCE(account_name, '') || ' ' || COALESCE(notes, ''))", "'ACCOUNT'", "opening_balance", "CAST(id AS TEXT)", "", ""),
+                new DisposalTableSpec("Budget", "budgets", "budget_name", "COALESCE(status, 'ACTIVE')", "budget_month", "amount_limit", "COALESCE(notes, '')", "lower(COALESCE(budget_name, '') || ' ' || COALESCE(notes, ''))", "'BUDGET'", "0", "", "", ""),
+                new DisposalTableSpec("Project", "projects", "project_name", "COALESCE(status, 'ACTIVE')", "COALESCE(start_date, created_at)", "planned_budget", "COALESCE(description, '')", "lower(COALESCE(project_name, '') || ' ' || COALESCE(description, ''))", "'PROJECT'", "0", "", "", ""),
+                new DisposalTableSpec("Project Activity", "project_activities", "activity_name", "COALESCE(status, 'ACTIVE')", "COALESCE(activity_date, created_at)", "COALESCE(amount_used, planned_cost, 0)", "COALESCE(reason, description, '')", "lower(COALESCE(activity_name, '') || ' ' || COALESCE(description, '') || ' ' || COALESCE(reason, ''))", "'PROJECT_ACTIVITY'", "0", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Goal", "goals", "goal_name", "COALESCE(status, 'ACTIVE')", "COALESCE(target_date, created_at)", "current_amount", "''", "lower(COALESCE(goal_name, ''))", "'GOAL'", "0", "", "", ""),
+                new DisposalTableSpec("Goal Step", "goal_steps", "step_name", "COALESCE(status, 'NEEDED')", "COALESCE(target_date, created_at)", "amount_reached", "COALESCE(description, '')", "lower(COALESCE(step_name, '') || ' ' || COALESCE(description, ''))", "'GOAL_STEP'", "0", "", "", ""),
+                new DisposalTableSpec("Loan", "loan_schedules", "loan_direction || ' loan schedule'", "COALESCE(status, 'ACTIVE')", "COALESCE(due_date, created_at)", "outstanding_amount", "COALESCE(notes, '')", "lower(COALESCE(loan_direction, '') || ' ' || COALESCE(notes, ''))", "'LOAN'", "0", "", "", ""),
+                repaymentSpec,
+                new DisposalTableSpec("Category", "categories", "category_name", "category_type", "''", "0", "''", "lower(COALESCE(category_name, '') || ' ' || COALESCE(category_type, ''))", "'CATEGORY'", "0", "", "", ""),
+                new DisposalTableSpec("Payment Method", "payment_methods", "method_name", "COALESCE(status, 'ACTIVE')", "updated_at", "0", "COALESCE(provider, default_account, '')", "lower(COALESCE(method_name, '') || ' ' || COALESCE(provider, '') || ' ' || COALESCE(default_account, ''))", "'PAYMENT_METHOD'", "0", "", "", ""),
+                new DisposalTableSpec("Currency", "currencies", "currency_code || ' - ' || currency_name", "CASE WHEN base_currency = 1 THEN 'BASE' ELSE COALESCE(status, 'ACTIVE') END", "updated_at", "0", "symbol", "lower(COALESCE(currency_code, '') || ' ' || COALESCE(currency_name, ''))", "'CURRENCY'", "0", "", "", ""),
+                new DisposalTableSpec("Community Savings", "community_savings_groups", "group_name", "COALESCE(status, 'ACTIVE')", "COALESCE(start_date, created_at)", "opening_balance", "COALESCE(notes, '')", "lower(COALESCE(group_name, '') || ' ' || COALESCE(group_type, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_SAVINGS_GROUP'", "0", "CAST(linked_account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Community Member", "community_savings_members", "member_name", "COALESCE(membership_status, 'ACTIVE')", "COALESCE(joined_date, created_at)", "0", "COALESCE(notes, '')", "lower(COALESCE(member_name, '') || ' ' || COALESCE(member_number, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_MEMBER'", "0", "", "", ""),
+                new DisposalTableSpec("Community Contribution", "community_contributions", "COALESCE(reference_number, 'Contribution')", "COALESCE(status, 'PAID')", "transaction_date", "amount_paid + social_fund_amount + penalty_amount", "COALESCE(notes, '')", "lower(COALESCE(reference_number, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_CONTRIBUTION'", "amount_paid + social_fund_amount + penalty_amount", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Community Loan", "community_group_loans", "COALESCE(purpose, loan_direction || ' loan')", "COALESCE(status, 'ACTIVE')", "loan_date", "principal_amount", "COALESCE(notes, '')", "lower(COALESCE(purpose, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_LOAN'", "0", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Community Repayment", "community_loan_repayments", "COALESCE(reference_number, 'Community loan repayment')", "'COMPLETED'", "repayment_date", "total_paid", "COALESCE(notes, '')", "lower(COALESCE(reference_number, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_REPAYMENT'", "total_paid", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Community Payout Order", "community_payout_orders", "'Payout order ' || position_number", "COALESCE(status, 'WAITING')", "COALESCE(expected_date, created_at)", "expected_amount", "COALESCE(notes, '')", "lower(COALESCE(notes, ''))", "'COMMUNITY_PAYOUT_ORDER'", "0", "", "", ""),
+                new DisposalTableSpec("Community Payout", "community_payouts", "COALESCE(reference_number, 'Community payout')", "COALESCE(status, 'PAID')", "payout_date", "actual_amount", "COALESCE(notes, '')", "lower(COALESCE(reference_number, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_PAYOUT'", "actual_amount", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Community Share-out", "community_share_outs", "'Share-out ' || COALESCE(cycle_label, id)", "COALESCE(status, 'COMPLETED')", "share_out_date", "total_contributions + profit_distributed", "COALESCE(notes, '')", "lower(COALESCE(cycle_label, '') || ' ' || COALESCE(notes, ''))", "'COMMUNITY_SHARE_OUT'", "0", "", "", ""),
+                importSpec,
+                new DisposalTableSpec("Report Input", "report_position_items", "item_name", "COALESCE(status, 'ACTIVE')", "COALESCE(valuation_date, created_at)", "current_value", "COALESCE(notes, '')", "lower(COALESCE(item_name, '') || ' ' || COALESCE(notes, ''))", "'REPORT_INPUT'", "0", "", "", ""),
+                new DisposalTableSpec("Report Input", "scheduled_obligations", "obligation_name", "COALESCE(status, 'ACTIVE')", "COALESCE(due_date, created_at)", "amount", "COALESCE(notes, '')", "lower(COALESCE(obligation_name, '') || ' ' || COALESCE(notes, ''))", "'REPORT_INPUT'", "0", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Report Input", "recurring_transaction_plans", "plan_name", "COALESCE(status, 'ACTIVE')", "COALESCE(next_due_date, created_at)", "amount", "COALESCE(notes, '')", "lower(COALESCE(plan_name, '') || ' ' || COALESCE(notes, ''))", "transaction_type", "0", "CAST(account_id AS TEXT)", "", ""),
+                new DisposalTableSpec("Report Input", "account_reconciliations", "'Account reconciliation ' || id", "COALESCE(status, 'MATCHED')", "reconciliation_date", "difference", "COALESCE(notes, '')", "lower(COALESCE(notes, ''))", "'RECONCILIATION'", "0", "CAST(account_id AS TEXT)", "", "")
+        );
+    }
+
+    private void appendDisposalCandidates(
+            Connection connection,
+            List<RecordDisposalCandidateData> candidates,
+            DisposalTableSpec spec,
+            String recordId,
+            String status,
+            LocalDate fromDate,
+            LocalDate toDate,
+            String importBatch,
+            boolean testDemoOnly
+    ) throws SQLException {
+        if (!tableExists(connection, spec.tableName())) {
+            return;
+        }
+        StringBuilder sql = new StringBuilder()
+                .append("SELECT id AS record_id, ")
+                .append(spec.descriptionExpression()).append(" AS description_value, ")
+                .append(spec.statusExpression()).append(" AS status_value, ")
+                .append(spec.dateExpression()).append(" AS date_value, ")
+                .append(spec.amountExpression()).append(" AS amount_value, ")
+                .append(spec.createdExpression()).append(" AS created_value, ")
+                .append(spec.financialTypeExpression()).append(" AS financial_type_value, ")
+                .append(spec.balanceEffectExpression()).append(" AS balance_effect_value, ")
+                .append(spec.accountKeyExpression().isBlank() ? "''" : spec.accountKeyExpression()).append(" AS account_key_value, ")
+                .append(spec.importKeyExpression().isBlank() ? "''" : spec.importKeyExpression()).append(" AS import_key_value ")
+                .append("FROM ").append(spec.tableName()).append(" WHERE 1 = 1 ");
+        List<Object> params = new ArrayList<>();
+        if (!spec.extraWhere().isBlank()) {
+            sql.append("AND (").append(spec.extraWhere()).append(") ");
+        }
+        boolean hasSoftDelete = columnExists(connection, spec.tableName(), "is_deleted");
+        String cleanStatus = status == null ? "" : status.trim();
+        boolean deletedOnly = "Deleted".equalsIgnoreCase(cleanStatus)
+                || "Deleted only".equalsIgnoreCase(cleanStatus);
+        if (hasSoftDelete) {
+            sql.append(deletedOnly ? "AND COALESCE(is_deleted, 0) = 1 " : "AND COALESCE(is_deleted, 0) = 0 ");
+        }
+        if (recordId != null && !recordId.isBlank()) {
+            sql.append("AND id = ? ");
+            params.add(parseRecordId(recordId));
+        }
+        if (!cleanStatus.isBlank()
+                && !"All".equalsIgnoreCase(cleanStatus)
+                && !"Deleted".equalsIgnoreCase(cleanStatus)
+                && !"Deleted only".equalsIgnoreCase(cleanStatus)) {
+            sql.append("AND upper(").append(spec.statusExpression()).append(") = ? ");
+            params.add(cleanStatus.toUpperCase(Locale.ENGLISH));
+        }
+        if (fromDate != null && !spec.dateExpression().isBlank() && !"''".equals(spec.dateExpression())) {
+            sql.append("AND date(").append(spec.dateExpression()).append(") >= date(?) ");
+            params.add(fromDate.toString());
+        }
+        if (toDate != null && !spec.dateExpression().isBlank() && !"''".equals(spec.dateExpression())) {
+            sql.append("AND date(").append(spec.dateExpression()).append(") <= date(?) ");
+            params.add(toDate.toString());
+        }
+        if (importBatch != null && !importBatch.isBlank()) {
+            sql.append("AND ").append(spec.searchExpression()).append(" LIKE ? ");
+            params.add("%" + importBatch.toLowerCase(Locale.ENGLISH).trim() + "%");
+        }
+        if (testDemoOnly) {
+            sql.append("AND (")
+                    .append(spec.searchExpression()).append(" LIKE '%test%' OR ")
+                    .append(spec.searchExpression()).append(" LIKE '%demo%' OR ")
+                    .append(spec.searchExpression()).append(" LIKE '%sample%' OR ")
+                    .append(spec.searchExpression()).append(" LIKE '%training%') ");
+        }
+        sql.append("ORDER BY id DESC LIMIT 250");
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            bindParameters(statement, params);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    candidates.add(readDisposalCandidate(connection, spec, resultSet));
+                }
+            }
+        }
+    }
+
+    private RecordDisposalCandidateData loadDisposalCandidate(Connection connection, DisposalTableSpec spec, int id) throws SQLException {
+        List<RecordDisposalCandidateData> candidates = new ArrayList<>();
+        appendDisposalCandidates(connection, candidates, spec, String.valueOf(id), "All", null, null, "", false);
+        return candidates.isEmpty() ? null : candidates.getFirst();
+    }
+
+    private RecordDisposalCandidateData readDisposalCandidate(Connection connection, DisposalTableSpec spec, ResultSet resultSet) throws SQLException {
+        int id = resultSet.getInt("record_id");
+        String status = safeText(resultSet.getString("status_value"), "");
+        String description = safeText(resultSet.getString("description_value"), spec.recordType() + " " + id);
+        double amount = resultSet.getDouble("amount_value");
+        int dependencies = dependencyCountForDisposal(connection, spec.tableName(), id, status);
+        DisposalAssessment assessment = disposalAssessment(spec.recordType(), spec.tableName(), id, status, description, amount, dependencies);
+        return new RecordDisposalCandidateData(
+                spec.tableName(),
+                spec.recordType(),
+                id,
+                description,
+                status,
+                safeText(resultSet.getString("date_value"), ""),
+                amount,
+                safeText(resultSet.getString("created_value"), ""),
+                dependencies,
+                assessment.eligibility(),
+                assessment.recommendation(),
+                assessment.reason(),
+                safeText(resultSet.getString("financial_type_value"), ""),
+                resultSet.getDouble("balance_effect_value"),
+                safeText(resultSet.getString("account_key_value"), ""),
+                safeText(resultSet.getString("import_key_value"), "")
+        );
+    }
+
+    private DisposalAssessment disposalAssessment(
+            String recordType,
+            String tableName,
+            int id,
+            String status,
+            String description,
+            double amount,
+            int dependencies
+    ) throws SQLException {
+        String cleanStatus = safeText(status, "").toUpperCase(Locale.ENGLISH);
+        if ("system_event_log".equals(tableName) || "ai_interaction_log".equals(tableName)) {
+            return new DisposalAssessment("NOT ELIGIBLE", "Do not delete audit evidence.", "Audit and Smart Analysis logs are retained as evidence.");
+        }
+        if ("transactions".equals(tableName)) {
+            boolean explicitNonProduction = containsAny(description + " " + status, "test", "demo", "sample", "training", "temporary");
+            boolean safeStatus = List.of("DRAFT", "FAILED", "REJECTED", "ABANDONED", "TEMPORARY").contains(cleanStatus);
+            if (dependencies == 0 && (safeStatus || explicitNonProduction)) {
+                return new DisposalAssessment("ELIGIBLE", "Proceed with request, backup and confirmation.", "The transaction is not posted or is explicitly marked non-production.");
+            }
+            if ("CANCELLED".equals(cleanStatus)) {
+                return new DisposalAssessment("REQUIRES REVIEW", "Archive the cancelled record unless retention policy requires disposal.", "Cancelled records usually preserve financial history.");
+            }
+            return new DisposalAssessment("NOT ELIGIBLE", "Create cancellation, reversal, freeze or archive action instead.", "Posted, open, transferred, loan or reporting-linked transactions must not be physically deleted.");
+        }
+        if ("currencies".equals(tableName) && "BASE".equals(cleanStatus)) {
+            return new DisposalAssessment("NOT ELIGIBLE", "Keep the base currency.", "The workspace base currency is required for reports.");
+        }
+        if ("account_reconciliations".equals(tableName)) {
+            return new DisposalAssessment("NOT ELIGIBLE", "Keep reconciliation evidence.", "Reconciled account records should remain available for audit.");
+        }
+        if (dependencies > 0) {
+            return new DisposalAssessment("NOT ELIGIBLE", saferAlternativeFor(recordType), dependencies + " dependency/dependencies were found.");
+        }
+        if (List.of("ACTIVE", "OPEN", "MATCHED", "CLEARED", "COMPLETED").contains(cleanStatus) && Math.abs(amount) > 0.005) {
+            return new DisposalAssessment("REQUIRES REVIEW", saferAlternativeFor(recordType), "The record is active or financially meaningful; review lifecycle alternatives before disposal.");
+        }
+        return new DisposalAssessment("ELIGIBLE", "Proceed with request, backup and confirmation.", "No blocking dependency was found.");
+    }
+
+    private String saferAlternativeFor(String recordType) {
+        return switch (safeText(recordType, "")) {
+            case "Transaction", "Repayment" -> "Use cancellation or reversal.";
+            case "Account", "Project", "Goal", "Budget" -> "Freeze, deactivate or archive the record.";
+            default -> "Archive the record or create a controlled correction.";
+        };
+    }
+
+    private int dependencyCountForDisposal(Connection connection, String tableName, int id, String status) throws SQLException {
+        return switch (tableName) {
+            case "transactions" -> transactionDisposalDependencies(connection, id, status);
+            case "accounts" -> countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE account_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM account_reconciliations WHERE account_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM scheduled_obligations WHERE account_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM recurring_transaction_plans WHERE account_id = ?", id);
+            case "categories" -> countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE category_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM budgets WHERE category_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM project_activities WHERE category_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM scheduled_obligations WHERE category_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM recurring_transaction_plans WHERE category_id = ?", id);
+            case "projects" -> countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE project_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM project_activities WHERE project_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM scheduled_obligations WHERE project_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM recurring_transaction_plans WHERE project_id = ?", id);
+            case "project_activities" -> countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE project_activity_id = ?", id);
+            case "goals" -> countPrepared(connection, "SELECT COUNT(*) FROM goal_steps WHERE goal_id = ?", id)
+                    + (Math.abs(doubleValue(connection, "SELECT current_amount FROM goals WHERE id = ?", id)) > 0.005 ? 1 : 0);
+            case "goal_steps" -> Math.abs(doubleValue(connection, "SELECT amount_reached FROM goal_steps WHERE id = ?", id)) > 0.005 ? 1 : 0;
+            case "loan_schedules" -> (Math.abs(doubleValue(connection, "SELECT outstanding_amount FROM loan_schedules WHERE id = ?", id)) > 0.005 ? 1 : 0)
+                    + countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE person_id = (SELECT person_id FROM loan_schedules WHERE id = ?)
+                      AND transaction_purpose IN ('MONEY_LENT','MONEY_BORROWED','LENT_REPAID','BORROWED_REPAID')
+                    """, id);
+            case "payment_methods" -> countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM transactions
+                    WHERE lower(COALESCE(payment_method, '')) = lower((SELECT method_name FROM payment_methods WHERE id = ?))
+                    """, id);
+            case "currencies" -> countPrepared(connection, """
+                    SELECT COUNT(*)
+                    FROM accounts
+                    WHERE upper(currency) = upper((SELECT currency_code FROM currencies WHERE id = ?))
+                    """, id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM currencies WHERE id = ? AND base_currency = 1", id);
+            case "scheduled_obligations" -> "ACTIVE".equalsIgnoreCase(status) ? 1 : 0;
+            case "recurring_transaction_plans" -> "ACTIVE".equalsIgnoreCase(status) ? 1 : 0;
+            case "report_position_items" -> "ACTIVE".equalsIgnoreCase(status) ? 1 : 0;
+            case "account_reconciliations" -> 1;
+            case "community_savings_groups" -> countPrepared(connection, "SELECT COUNT(*) FROM community_savings_members WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_contributions WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_group_loans WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_payout_orders WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_payouts WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_share_outs WHERE group_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM accounts WHERE community_group_id = ? OR id = (SELECT linked_account_id FROM community_savings_groups WHERE id = ?)", id, id);
+            case "community_savings_members" -> countPrepared(connection, "SELECT COUNT(*) FROM community_contributions WHERE member_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_group_loans WHERE member_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_payout_orders WHERE member_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_payouts WHERE member_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_share_out_members WHERE member_id = ?", id);
+            case "community_contributions" -> countPrepared(connection, "SELECT COUNT(*) FROM community_penalties WHERE contribution_id = ?", id)
+                    + countPrepared(connection, "SELECT COUNT(*) FROM community_social_fund WHERE contribution_id = ?", id);
+            case "community_group_loans" -> countPrepared(connection, "SELECT COUNT(*) FROM community_loan_repayments WHERE loan_id = ?", id);
+            case "community_payout_orders" -> countPrepared(connection, "SELECT COUNT(*) FROM community_payouts WHERE payout_order_id = ?", id);
+            case "community_share_outs" -> countPrepared(connection, "SELECT COUNT(*) FROM community_share_out_members WHERE share_out_id = ?", id);
+            default -> 0;
+        };
+    }
+
+    private int transactionDisposalDependencies(Connection connection, int id, String status) throws SQLException {
+        int dependencies = countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE related_transaction_id = ?", id);
+        dependencies += countPrepared(connection, "SELECT COUNT(*) FROM transactions WHERE id = ? AND related_transaction_id IS NOT NULL", id);
+        String cleanStatus = safeText(status, "COMPLETED").toUpperCase(Locale.ENGLISH);
+        if (List.of("COMPLETED", "OPEN", "PARTIALLY_CLEARED", "CLEARED").contains(cleanStatus)) {
+            dependencies++;
+        }
+        String purpose = stringValue(connection, "SELECT COALESCE(transaction_purpose, '') FROM transactions WHERE id = ?", id);
+        if (List.of("MONEY_LENT", "MONEY_BORROWED", "LENT_REPAID", "BORROWED_REPAID", "TRANSFER_IN", "TRANSFER_OUT", "PROJECT_EXPENSE").contains(purpose)) {
+            dependencies++;
+        }
+        return dependencies;
+    }
+
+    private double totalWorkspaceBalance(Connection connection) throws SQLException {
+        return doubleValue(connection, """
+                SELECT COALESCE(SUM(account_balance), 0)
+                FROM (
+                    SELECT a.id,
+                           (
+                               CASE
+                                   WHEN a.opening_balance_date IS NULL
+                                     OR trim(a.opening_balance_date) = ''
+                          OR date(a.opening_balance_date) <= date('now', 'localtime')
+                                   THEN a.opening_balance
+                                   ELSE 0
+                               END + COALESCE(SUM(
+                               CASE
+                                   WHEN t.transaction_type = 'INCOME' THEN t.amount
+                                   WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
+                                   WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                                  WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                                  WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                                  WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                                  WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                                  ELSE 0
+                               END
+                           ), 0)
+                           ) * COALESCE(cur.rate_to_base, 1) AS account_balance
+                    FROM accounts a
+                    LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                    LEFT JOIN valid_transactions t ON t.account_id = a.id
+                    WHERE a.status = 'ACTIVE'
+                      AND COALESCE(a.account_category, 'ASSET') <> 'LIABILITY'
+                    GROUP BY a.id
+                )
+                """);
+    }
+
+    private int parseRecordId(String recordId) {
+        try {
+            return Integer.parseInt(recordId.trim());
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Record ID must be a number.");
+        }
+    }
+
+    private boolean containsAny(String value, String... terms) {
+        String lower = value == null ? "" : value.toLowerCase(Locale.ENGLISH);
+        for (String term : terms) {
+            if (lower.contains(term)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int countPrepared(Connection connection, String sql, Object... params) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindParameters(statement, List.of(params));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt(1) : 0;
+            }
+        }
+    }
+
+    private double doubleValue(Connection connection, String sql, Object... params) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindParameters(statement, List.of(params));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getDouble(1) : 0;
+            }
+        }
+    }
+
+    private String stringValue(Connection connection, String sql, Object... params) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindParameters(statement, List.of(params));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? safeText(resultSet.getString(1), "") : "";
+            }
+        }
+    }
+
+    private void bindParameters(PreparedStatement statement, List<Object> params) throws SQLException {
+        for (int index = 0; index < params.size(); index++) {
+            Object value = params.get(index);
+            if (value instanceof Integer integer) {
+                statement.setInt(index + 1, integer);
+            } else if (value instanceof Long longValue) {
+                statement.setLong(index + 1, longValue);
+            } else if (value instanceof Double doubleValue) {
+                statement.setDouble(index + 1, doubleValue);
+            } else {
+                statement.setString(index + 1, value == null ? "" : value.toString());
+            }
+        }
+    }
+
+    private void deleteById(String tableName, int id, String label) {
+        softDeleteRecordByTable(tableName, id, "Super Administrator " + label + " deletion.");
     }
 
     public BackupRecord createBackup(Path backupDirectory, String requestedName) {
         Path directory = backupDirectory == null ? defaultBackupDirectory() : backupDirectory.toAbsolutePath().normalize();
-        return createBackupFile(
-                directory,
-                backupFileName(requestedName),
-                "SQLite database, settings, accounts, transactions, goals, projects, reports data",
-                "CREATED",
-                false
-        );
+        synchronized (BACKUP_RESTORE_LOCK) {
+            return createBackupFile(
+                    directory,
+                    backupFileName(requestedName),
+                    "SQLite database, settings, accounts, transactions, goals, projects, reports data",
+                    "CREATED",
+                    false
+            );
+        }
     }
 
     public BackupRecord ensureDailyBackup() {
@@ -3742,13 +18544,15 @@ public class DatabaseHandler {
     }
 
     public BackupRecord createLatestDailyBackup() {
-        return createBackupFile(
-                defaultBackupDirectory(),
-                LATEST_DAILY_BACKUP_FILE_NAME,
-                "Automatic daily backup: SQLite database, settings, accounts, transactions, goals, projects, reports data",
-                "AUTO_DAILY",
-                true
-        );
+        synchronized (BACKUP_RESTORE_LOCK) {
+            return createBackupFile(
+                    defaultBackupDirectory(),
+                    LATEST_DAILY_BACKUP_FILE_NAME,
+                    "Automatic daily backup: SQLite database, settings, accounts, transactions, goals, projects, reports data",
+                    "AUTO_DAILY",
+                    true
+            );
+        }
     }
 
     public BackupRecord latestDailyBackupRecord() {
@@ -3848,6 +18652,10 @@ public class DatabaseHandler {
                 if (!"ok".equalsIgnoreCase(quickCheck)) {
                     throw new IllegalStateException("SQLite integrity check failed: " + quickCheck);
                 }
+                String foreignKeyCheck = sqliteForeignKeyCheck(connection);
+                if (!foreignKeyCheck.isBlank()) {
+                    throw new IllegalStateException("SQLite foreign key check failed: " + foreignKeyCheck);
+                }
                 for (String tableName : List.of("accounts", "categories", "transactions", "projects", "goals")) {
                     if (!tableExists(connection, tableName)) {
                         throw new IllegalStateException("Backup is missing required table: " + tableName);
@@ -3862,20 +18670,651 @@ public class DatabaseHandler {
 
     public void restoreBackup(Path backupFile) {
         Path normalized = requireBackupFile(backupFile);
-        validateBackup(normalized);
-        createBackup(defaultBackupDirectory(), "pre-restore");
-        try {
-            Files.copy(normalized, databasePath(), StandardCopyOption.REPLACE_EXISTING);
-            recordBackup(new BackupRecord(
-                    normalized.toString(),
-                    LocalDateTime.now().toString(),
-                    Files.size(normalized),
-                    Files.isRegularFile(checksumFile(normalized)) ? Files.readString(checksumFile(normalized)).trim() : sha256(normalized),
-                    "Database restored from selected backup",
-                    "RESTORED"
-            ));
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to restore backup", exception);
+        synchronized (BACKUP_RESTORE_LOCK) {
+            DATABASE_FILE_ACCESS_LOCK.writeLock().lock();
+            try {
+                validateBackup(normalized);
+                createBackup(defaultBackupDirectory(), "pre-restore");
+                Path database = databasePath();
+                Path restoreTemp = null;
+                try {
+                    restoreTemp = Files.createTempFile(database.getParent(), "pfmis-restore-", ".db");
+                    Files.copy(normalized, restoreTemp, StandardCopyOption.REPLACE_EXISTING);
+                    validateBackup(restoreTemp);
+                    try {
+                        Files.move(restoreTemp, database, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException atomicMoveFailed) {
+                        Files.move(restoreTemp, database, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    validateBackup(database);
+                    recordBackup(new BackupRecord(
+                            normalized.toString(),
+                            LocalDateTime.now().toString(),
+                            Files.size(normalized),
+                            Files.isRegularFile(checksumFile(normalized)) ? Files.readString(checksumFile(normalized)).trim() : sha256(normalized),
+                            "Database restored from selected backup",
+                            "RESTORED"
+                    ));
+                } catch (IOException exception) {
+                    throw new IllegalStateException("Failed to restore backup", exception);
+                } finally {
+                    if (restoreTemp != null) {
+                        try {
+                            Files.deleteIfExists(restoreTemp);
+                        } catch (IOException ignored) {
+                            // Best-effort cleanup only.
+                        }
+                    }
+                }
+            } finally {
+                DATABASE_FILE_ACCESS_LOCK.writeLock().unlock();
+            }
+        }
+    }
+
+    public List<HistoryRecoveryCandidate> discoverHistoryRecoveryCandidates() {
+        List<HistoryRecoveryCandidate> candidates = new ArrayList<>();
+        List<Path> roots = List.of(applicationDataDirectory(), Path.of(DB_FILE_NAME).toAbsolutePath().normalize().getParent());
+        for (Path root : roots) {
+            if (root == null || !Files.exists(root)) {
+                continue;
+            }
+            try (var stream = Files.walk(root)) {
+                stream.filter(path -> Files.isRegularFile(path)
+                                && path.getFileName().toString().toLowerCase(Locale.ENGLISH).endsWith(".db")
+                                && !path.toAbsolutePath().normalize().equals(databasePath()))
+                        .forEach(path -> {
+                            HistoryRecoveryCandidate candidate = inspectHistoryRecoveryCandidate(path);
+                            if (candidate != null && candidate.transactionCount() > 0) {
+                                candidates.add(candidate);
+                            }
+                        });
+            } catch (IOException exception) {
+                throw new IllegalStateException("Failed to scan PFMIS database backups.", exception);
+            }
+        }
+        candidates.sort(Comparator.comparing(HistoryRecoveryCandidate::modifiedAt).reversed());
+        return candidates;
+    }
+
+    private HistoryRecoveryCandidate inspectHistoryRecoveryCandidate(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + normalized)) {
+            if (!tableExists(connection, "transactions")) {
+                return null;
+            }
+            try (Statement statement = connection.createStatement();
+                 ResultSet resultSet = statement.executeQuery("""
+                         SELECT COUNT(*) AS total,
+                                SUM(CASE WHEN substr(transaction_date, 1, 7) = '2026-07' THEN 1 ELSE 0 END) AS july,
+                                MIN(transaction_date) AS first_date,
+                                MAX(transaction_date) AS last_date
+                         FROM transactions
+                         """)) {
+                if (resultSet.next()) {
+                    return new HistoryRecoveryCandidate(
+                            normalized,
+                            Files.size(normalized),
+                            Files.getLastModifiedTime(normalized).toInstant()
+                                    .atZone(ZoneId.systemDefault())
+                                    .toLocalDateTime()
+                                    .toString(),
+                            resultSet.getInt("total"),
+                            resultSet.getInt("july"),
+                            resultSet.getString("first_date"),
+                            resultSet.getString("last_date")
+                    );
+                }
+            }
+        } catch (SQLException | IOException exception) {
+            return null;
+        }
+        return null;
+    }
+
+    public HistoryRecoveryResult recoverFinancialHistoryFromBackup(Path backupFile) {
+        Path source = requireBackupFile(backupFile);
+        BackupRecord safetyBackup = createBackup(defaultBackupDirectory(), "pre-history-recovery");
+        int accountsRecovered = 0;
+        int categoriesRecovered = 0;
+        int peopleRecovered = 0;
+        int projectsRecovered = 0;
+        int transactionsRecovered = 0;
+        int transactionsSkipped = 0;
+        try (Connection target = connect();
+             Connection sourceConnection = DriverManager.getConnection("jdbc:sqlite:" + source)) {
+            if (!tableExists(sourceConnection, "transactions")) {
+                throw new IllegalArgumentException("Selected database has no transactions table.");
+            }
+            target.setAutoCommit(false);
+            try {
+                RecoveryMaps maps = new RecoveryMaps();
+                categoriesRecovered = recoverCategories(target, sourceConnection, maps);
+                accountsRecovered = recoverAccounts(target, sourceConnection, maps);
+                peopleRecovered = recoverPeople(target, sourceConnection, maps);
+                projectsRecovered = recoverProjects(target, sourceConnection, maps);
+                int[] transactionCounts = recoverTransactions(target, sourceConnection, maps);
+                transactionsRecovered = transactionCounts[0];
+                transactionsSkipped = transactionCounts[1];
+                String integrity = sqliteQuickCheck(target);
+                recordSystemLog(target, "Database", "Financial History Recovered", "WARNING",
+                        "Recovered " + transactionsRecovered + " transaction(s) from " + source
+                                + ". Skipped duplicates: " + transactionsSkipped
+                                + ". Safety backup: " + safetyBackup.getBackupFile());
+                target.commit();
+                return new HistoryRecoveryResult(
+                        source,
+                        Path.of(safetyBackup.getBackupFile()),
+                        accountsRecovered,
+                        categoriesRecovered,
+                        peopleRecovered,
+                        projectsRecovered,
+                        transactionsRecovered,
+                        transactionsSkipped,
+                        integrity
+                );
+            } catch (SQLException | RuntimeException exception) {
+                target.rollback();
+                throw exception;
+            } finally {
+                target.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to recover transaction history", exception);
+        }
+    }
+
+    private record RecoveryMaps(
+            java.util.Map<Integer, Integer> accounts,
+            java.util.Map<Integer, Integer> categories,
+            java.util.Map<Integer, Integer> people,
+            java.util.Map<Integer, Integer> projects
+    ) {
+        RecoveryMaps() {
+            this(new java.util.HashMap<>(), new java.util.HashMap<>(), new java.util.HashMap<>(), new java.util.HashMap<>());
+        }
+    }
+
+    private int recoverCategories(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
+        if (!tableExists(source, "categories")) {
+            return 0;
+        }
+        int recovered = 0;
+        try (Statement select = source.createStatement();
+             ResultSet rows = select.executeQuery("SELECT id, category_name, category_type FROM categories ORDER BY id")) {
+            while (rows.next()) {
+                int sourceId = rows.getInt("id");
+                String name = rows.getString("category_name");
+                String type = safeText(rows.getString("category_type"), "BOTH");
+                int targetId = findOrCreateCategoryId(target, name, type);
+                maps.categories().put(sourceId, targetId);
+                if (targetId != sourceId) {
+                    recovered++;
+                }
+            }
+        }
+        return recovered;
+    }
+
+    private int recoverAccounts(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
+        if (!tableExists(source, "accounts")) {
+            return 0;
+        }
+        int recovered = 0;
+        String sql = """
+                SELECT id, account_name, account_type, currency, bank_provider_name, account_number,
+                       opening_balance, opening_balance_date, minimum_balance, account_purpose,
+                       branch_name, status, notes
+                FROM accounts
+                ORDER BY id
+                """;
+        try (Statement select = source.createStatement();
+             ResultSet rows = select.executeQuery(sql)) {
+            while (rows.next()) {
+                int sourceId = rows.getInt("id");
+                Integer existingId = findAccountByRecoveryIdentity(
+                        target,
+                        rows.getString("account_name"),
+                        rows.getString("account_type"),
+                        safeText(rows.getString("currency"), DEFAULT_CURRENCY_CODE),
+                        rows.getString("account_number")
+                );
+                int targetId = existingId == null ? insertRecoveredAccount(target, rows) : existingId;
+                if (existingId == null) {
+                    recovered++;
+                }
+                maps.accounts().put(sourceId, targetId);
+            }
+        }
+        return recovered;
+    }
+
+    private Integer findAccountByRecoveryIdentity(Connection connection, String accountName, String accountType,
+                                                  String currency, String accountNumber) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT id
+                FROM accounts
+                WHERE lower(trim(account_name)) = lower(trim(?))
+                  AND lower(trim(account_type)) = lower(trim(?))
+                  AND upper(trim(COALESCE(currency, 'MWK'))) = upper(trim(?))
+                  AND COALESCE(account_number, '') = COALESCE(?, '')
+                LIMIT 1
+                """)) {
+            statement.setString(1, safeText(accountName, ""));
+            statement.setString(2, safeText(accountType, ""));
+            statement.setString(3, safeText(currency, DEFAULT_CURRENCY_CODE));
+            statement.setString(4, cleanNullable(accountNumber));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("id") : null;
+            }
+        }
+    }
+
+    private int insertRecoveredAccount(Connection connection, ResultSet row) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO accounts (
+                    account_name, account_type, currency, bank_provider_name, account_number,
+                    opening_balance, opening_balance_date, minimum_balance, account_purpose,
+                    branch_name, status, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, requireText(row.getString("account_name"), "Account name"));
+            statement.setString(2, requireText(row.getString("account_type"), "Account type"));
+            statement.setString(3, normalizedCurrency(safeText(row.getString("currency"), DEFAULT_CURRENCY_CODE)));
+            statement.setString(4, cleanNullable(row.getString("bank_provider_name")));
+            statement.setString(5, cleanNullable(row.getString("account_number")));
+            statement.setDouble(6, Math.max(0, row.getDouble("opening_balance")));
+            statement.setString(7, cleanNullable(row.getString("opening_balance_date")));
+            statement.setDouble(8, Math.max(0, row.getDouble("minimum_balance")));
+            statement.setString(9, safeText(row.getString("account_purpose"), ""));
+            statement.setString(10, safeText(row.getString("branch_name"), ""));
+            statement.setString(11, normalizedAccountStatus(row.getString("status")));
+            statement.setString(12, safeText(row.getString("notes"), "Recovered from historical database."));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int recoverPeople(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
+        if (!tableExists(source, "people")) {
+            return 0;
+        }
+        int recovered = 0;
+        try (Statement select = source.createStatement();
+             ResultSet rows = select.executeQuery("SELECT id, full_name, phone_number, relationship, notes FROM people ORDER BY id")) {
+            while (rows.next()) {
+                int sourceId = rows.getInt("id");
+                String name = safeText(rows.getString("full_name"), "");
+                if (name.isBlank()) {
+                    continue;
+                }
+                Integer existing = findPersonIdByName(target, name);
+                int targetId = existing == null
+                        ? insertRecoveredPerson(target, name, rows.getString("phone_number"), rows.getString("relationship"), rows.getString("notes"))
+                        : existing;
+                if (existing == null) {
+                    recovered++;
+                }
+                maps.people().put(sourceId, targetId);
+            }
+        }
+        return recovered;
+    }
+
+    private Integer findPersonIdByName(Connection connection, String fullName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT id FROM people WHERE lower(trim(full_name)) = lower(trim(?)) LIMIT 1")) {
+            statement.setString(1, fullName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("id") : null;
+            }
+        }
+    }
+
+    private int insertRecoveredPerson(Connection connection, String fullName, String phone, String relationship, String notes) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO people (full_name, phone_number, relationship, notes)
+                VALUES (?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, fullName);
+            statement.setString(2, cleanNullable(phone));
+            statement.setString(3, cleanNullable(relationship));
+            statement.setString(4, safeText(notes, "Recovered from historical database."));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int recoverProjects(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
+        if (!tableExists(source, "projects")) {
+            return 0;
+        }
+        int recovered = 0;
+        try (Statement select = source.createStatement();
+             ResultSet rows = select.executeQuery("SELECT id, project_name, description, planned_budget, start_date, end_date, status FROM projects ORDER BY id")) {
+            while (rows.next()) {
+                int sourceId = rows.getInt("id");
+                String name = safeText(rows.getString("project_name"), "");
+                if (name.isBlank()) {
+                    continue;
+                }
+                Integer existing = findProjectIdByName(target, name);
+                int targetId = existing == null ? insertRecoveredProject(target, rows) : existing;
+                if (existing == null) {
+                    recovered++;
+                }
+                maps.projects().put(sourceId, targetId);
+            }
+        }
+        return recovered;
+    }
+
+    private Integer findProjectIdByName(Connection connection, String projectName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT id FROM projects WHERE lower(trim(project_name)) = lower(trim(?)) LIMIT 1")) {
+            statement.setString(1, projectName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("id") : null;
+            }
+        }
+    }
+
+    private int insertRecoveredProject(Connection connection, ResultSet row) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO projects (project_name, description, planned_budget, start_date, end_date, status)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, requireText(row.getString("project_name"), "Project name"));
+            statement.setString(2, safeText(row.getString("description"), ""));
+            statement.setDouble(3, Math.max(0, row.getDouble("planned_budget")));
+            statement.setString(4, cleanNullable(row.getString("start_date")));
+            statement.setString(5, cleanNullable(row.getString("end_date")));
+            statement.setString(6, safeText(row.getString("status"), "ACTIVE"));
+            statement.executeUpdate();
+            return generatedId(connection, statement);
+        }
+    }
+
+    private int[] recoverTransactions(Connection target, Connection source, RecoveryMaps maps) throws SQLException {
+        int recovered = 0;
+        int skipped = 0;
+        String selectSql = """
+                SELECT id, account_id, category_id, project_id, person_id,
+                       %s AS project_activity_id,
+                       %s AS related_transaction_id,
+                       transaction_type,
+                       %s AS transaction_purpose,
+                       %s AS transaction_status,
+                       amount, transaction_date, description,
+                       %s AS source,
+                       %s AS payment_method,
+                       %s AS reference_number,
+                       %s AS created_at
+                FROM transactions
+                WHERE %s = 0
+                ORDER BY date(transaction_date), id
+                """.formatted(
+                recoveryColumnExpression(source, "transactions", "project_activity_id", "NULL"),
+                recoveryColumnExpression(source, "transactions", "related_transaction_id", "NULL"),
+                recoveryColumnExpression(source, "transactions", "transaction_purpose", "'NORMAL'"),
+                recoveryColumnExpression(source, "transactions", "transaction_status", "'COMPLETED'"),
+                recoveryColumnExpression(source, "transactions", "source", "'RECOVERED'"),
+                recoveryColumnExpression(source, "transactions", "payment_method", "NULL"),
+                recoveryColumnExpression(source, "transactions", "reference_number", "NULL"),
+                recoveryColumnExpression(source, "transactions", "created_at", "CURRENT_TIMESTAMP"),
+                recoveryColumnExpression(source, "transactions", "is_deleted", "0")
+        );
+        try (Statement select = source.createStatement();
+             ResultSet rows = select.executeQuery(selectSql)) {
+            while (rows.next()) {
+                Integer accountId = maps.accounts().get(rows.getInt("account_id"));
+                if (accountId == null) {
+                    skipped++;
+                    continue;
+                }
+                Integer categoryId = nullableSourceMappedId(rows, "category_id", maps.categories());
+                Integer projectId = nullableSourceMappedId(rows, "project_id", maps.projects());
+                Integer personId = nullableSourceMappedId(rows, "person_id", maps.people());
+                String transactionDate = safeText(rows.getString("transaction_date"), "");
+                if (transactionDate.isBlank() || transactionDuplicateExists(target, accountId, rows, categoryId, projectId, personId)) {
+                    skipped++;
+                    continue;
+                }
+                insertRecoveredTransaction(target, rows, accountId, categoryId, projectId, personId);
+                recovered++;
+            }
+        }
+        return new int[]{recovered, skipped};
+    }
+
+    private String recoveryColumnExpression(Connection connection, String tableName, String columnName, String fallback) throws SQLException {
+        return columnExists(connection, tableName, columnName) ? columnName : fallback;
+    }
+
+    private Integer nullableSourceMappedId(ResultSet rows, String columnName, java.util.Map<Integer, Integer> map) throws SQLException {
+        int sourceId = rows.getInt(columnName);
+        return rows.wasNull() || sourceId <= 0 ? null : map.get(sourceId);
+    }
+
+    private boolean transactionDuplicateExists(Connection connection, Integer accountId, ResultSet row,
+                                               Integer categoryId, Integer projectId, Integer personId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT 1
+                FROM transactions
+                WHERE account_id = ?
+                  AND COALESCE(category_id, 0) = COALESCE(?, 0)
+                  AND COALESCE(project_id, 0) = COALESCE(?, 0)
+                  AND COALESCE(person_id, 0) = COALESCE(?, 0)
+                  AND transaction_type = ?
+                  AND transaction_purpose = ?
+                  AND transaction_status = ?
+                  AND ABS(amount - ?) < 0.005
+                  AND transaction_date = ?
+                  AND COALESCE(reference_number, '') = COALESCE(?, '')
+                  AND COALESCE(description, '') = COALESCE(?, '')
+                LIMIT 1
+                """)) {
+            statement.setInt(1, accountId);
+            setNullableInt(statement, 2, categoryId);
+            setNullableInt(statement, 3, projectId);
+            setNullableInt(statement, 4, personId);
+            statement.setString(5, rowsText(row, "transaction_type", "EXPENSE"));
+            statement.setString(6, rowsText(row, "transaction_purpose", "NORMAL"));
+            statement.setString(7, rowsText(row, "transaction_status", "COMPLETED"));
+            statement.setDouble(8, row.getDouble("amount"));
+            statement.setString(9, row.getString("transaction_date"));
+            statement.setString(10, cleanNullable(row.getString("reference_number")));
+            statement.setString(11, safeText(row.getString("description"), ""));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void insertRecoveredTransaction(Connection connection, ResultSet row, Integer accountId,
+                                            Integer categoryId, Integer projectId, Integer personId) throws SQLException {
+        boolean idAvailable = !transactionIdExists(connection, row.getInt("id"));
+        String sql = idAvailable
+                ? """
+                INSERT INTO transactions (
+                    id, account_id, category_id, project_id, person_id, project_activity_id,
+                    related_transaction_id, transaction_type, transaction_purpose, transaction_status,
+                    amount, transaction_date, description, source, payment_method, reference_number, created_at
+                ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                : """
+                INSERT INTO transactions (
+                    account_id, category_id, project_id, person_id, project_activity_id,
+                    related_transaction_id, transaction_type, transaction_purpose, transaction_status,
+                    amount, transaction_date, description, source, payment_method, reference_number, created_at
+                ) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            if (idAvailable) {
+                statement.setInt(index++, row.getInt("id"));
+            }
+            statement.setInt(index++, accountId);
+            setNullableInt(statement, index++, categoryId);
+            setNullableInt(statement, index++, projectId);
+            setNullableInt(statement, index++, personId);
+            statement.setString(index++, rowsText(row, "transaction_type", "EXPENSE"));
+            statement.setString(index++, rowsText(row, "transaction_purpose", "NORMAL"));
+            statement.setString(index++, rowsText(row, "transaction_status", "COMPLETED"));
+            statement.setDouble(index++, row.getDouble("amount"));
+            statement.setString(index++, row.getString("transaction_date"));
+            statement.setString(index++, safeText(row.getString("description"), ""));
+            statement.setString(index++, safeText(row.getString("source"), "RECOVERED"));
+            statement.setString(index++, cleanNullable(row.getString("payment_method")));
+            statement.setString(index++, cleanNullable(row.getString("reference_number")));
+            statement.setString(index, safeText(row.getString("created_at"), LocalDateTime.now().toString()));
+            statement.executeUpdate();
+        }
+    }
+
+    private boolean transactionIdExists(Connection connection, int id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM transactions WHERE id = ? LIMIT 1")) {
+            statement.setInt(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private String rowsText(ResultSet row, String columnName, String fallback) throws SQLException {
+        String value = row.getString(columnName);
+        return safeText(value, fallback);
+    }
+
+    private String sqliteForeignKeyCheck(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("PRAGMA foreign_key_check")) {
+            List<String> failures = new ArrayList<>();
+            while (resultSet.next()) {
+                failures.add(resultSet.getString(1) + "#" + resultSet.getString(2));
+                if (failures.size() >= 5) {
+                    break;
+                }
+            }
+            return String.join(", ", failures);
+        }
+    }
+
+    public String validateDatabaseHealth() {
+        try (Connection connection = connect()) {
+            validateDatabaseHealth(connection);
+            return "Database health check passed.";
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Database health check failed", exception);
+        }
+    }
+
+    private void validateDatabaseHealth(Connection connection) throws SQLException {
+        String integrity = sqliteIntegrityCheck(connection);
+        if (!"ok".equalsIgnoreCase(integrity)) {
+            throw new SQLException("SQLite integrity check failed: " + integrity);
+        }
+        String foreignKeyCheck = sqliteForeignKeyCheck(connection);
+        if (!foreignKeyCheck.isBlank()) {
+            throw new SQLException("SQLite foreign key check failed: " + foreignKeyCheck);
+        }
+
+        requireTableColumns(connection, "accounts", List.of(
+                "id",
+                "account_name",
+                "account_type",
+                "currency",
+                "bank_provider_name",
+                "account_number",
+                "opening_balance",
+                "opening_balance_date",
+                "minimum_balance",
+                "account_purpose",
+                "branch_name",
+                "account_category",
+                "account_subtype",
+                "community_group_id",
+                "is_system_account",
+                "status",
+                "notes",
+                "created_at",
+                "updated_at",
+                "is_deleted"
+        ));
+        requireTableColumns(connection, "transactions", List.of(
+                "id",
+                "account_id",
+                "transaction_type",
+                "transaction_purpose",
+                "transaction_status",
+                "amount",
+                "transaction_date",
+                "source",
+                "payment_method",
+                "reference_number",
+                "is_deleted"
+        ));
+        requireTableColumns(connection, "schema_version", List.of("version", "description", "applied_at"));
+        requireTableColumns(connection, "schema_migration_history", List.of("migration_key", "version", "description", "applied_at"));
+        requireTableColumns(connection, "system_event_log", List.of("id", "module_name", "action_name", "severity", "details", "created_at"));
+        if (!viewExists(connection, "valid_transactions")) {
+            throw new SQLException("Required view is missing: valid_transactions");
+        }
+        requireReadableQuery(connection, """
+                SELECT a.id, a.account_name, COALESCE(a.is_system_account, 0) AS is_system_account
+                FROM accounts a
+                WHERE COALESCE(a.is_deleted, 0) = 0
+                LIMIT 1
+                """, "accounts controller compatibility query");
+        requireReadableQuery(connection, """
+                SELECT id, account_id, transaction_type, transaction_purpose,
+                       transaction_status, amount, transaction_date, is_deleted
+                FROM valid_transactions
+                LIMIT 1
+                """, "valid transaction ledger compatibility query");
+    }
+
+    private String sqliteIntegrityCheck(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("PRAGMA integrity_check")) {
+            return resultSet.next() ? safeText(resultSet.getString(1), "") : "";
+        }
+    }
+
+    private void requireTableColumns(Connection connection, String tableName, List<String> requiredColumns) throws SQLException {
+        if (!tableExists(connection, tableName)) {
+            throw new SQLException("Required table is missing: " + tableName);
+        }
+        List<String> missing = new ArrayList<>();
+        for (String column : requiredColumns) {
+            if (!columnExists(connection, tableName, column)) {
+                missing.add(column);
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw new SQLException(tableName + " is missing required column(s): " + String.join(", ", missing));
+        }
+    }
+
+    private boolean viewExists(Connection connection, String viewName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'view'
+                  AND name = ?
+                LIMIT 1
+                """)) {
+            statement.setString(1, viewName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void requireReadableQuery(Connection connection, String sql, String description) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet ignored = statement.executeQuery()) {
+            // Preparing and executing the query verifies the schema contract used by functional controllers.
+        } catch (SQLException exception) {
+            throw new SQLException("Failed " + description + ": " + exception.getMessage(), exception);
         }
     }
 
@@ -4014,6 +19453,18 @@ public class DatabaseHandler {
         }
     }
 
+    private boolean columnExists(Connection connection, String tableName, String columnName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(" + tableName + ")");
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                if (columnName.equalsIgnoreCase(resultSet.getString("name"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private String sha256(Path file) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -4096,31 +19547,50 @@ public class DatabaseHandler {
         if (amount <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero");
         }
+        GenericTransactionCommand command = validateGenericTransactionCommand(
+                transactionType,
+                purpose,
+                status,
+                projectId,
+                personId,
+                date
+        );
         String insertSql = """
                 INSERT INTO transactions (
                     account_id, category_id, project_id, project_activity_id, person_id, transaction_type,
-                    transaction_purpose, transaction_status, amount, transaction_date, description,
+                    transaction_purpose, transaction_status, amount, transaction_date, description, source,
                     payment_method, reference_number
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?)
                 """;
         try (Connection connection = connect()) {
+            requireActiveAccountForPosting(connection, accountId);
+            requireCategoryCompatible(connection, categoryId, command.transactionType());
             connection.setAutoCommit(false);
-            try (PreparedStatement insert = connection.prepareStatement(insertSql)) {
+            try (PreparedStatement insert = connection.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
                 insert.setInt(1, accountId);
                 setNullableInt(insert, 2, categoryId);
                 setNullableInt(insert, 3, projectId);
                 setNullableInt(insert, 4, projectActivityId);
                 setNullableInt(insert, 5, personId);
-                insert.setString(6, transactionType);
-                insert.setString(7, purpose);
-                insert.setString(8, status);
+                insert.setString(6, command.transactionType());
+                insert.setString(7, command.purpose());
+                insert.setString(8, command.status());
                 insert.setDouble(9, amount);
                 insert.setString(10, date.toString());
-                insert.setString(11, description);
-                insert.setString(12, paymentMethod);
-                insert.setString(13, referenceNumber);
+                insert.setString(11, safeText(description, ""));
+                insert.setString(12, cleanNullable(paymentMethod));
+                insert.setString(13, cleanNullable(referenceNumber));
                 insert.executeUpdate();
-                refreshRelatedLoanStatuses(connection, personId, purpose);
+                int transactionId = generatedId(connection, insert);
+                refreshRelatedLoanStatuses(connection, personId, command.purpose());
+                recordSystemLog(
+                        connection,
+                        "Transaction Ledger",
+                        "Post Transaction",
+                        "INFO",
+                        command.transactionType() + " transaction " + transactionId + " posted. Purpose: "
+                                + command.purpose() + "; Status: " + command.status() + "."
+                );
                 connection.commit();
             } catch (SQLException | RuntimeException exception) {
                 connection.rollback();
@@ -4143,46 +19613,85 @@ public class DatabaseHandler {
             String paymentMethod,
             String referenceNumber
     ) {
+        recordTransferWithFee(
+                fromAccountId,
+                toAccountId,
+                amountSent,
+                amountReceived,
+                0,
+                null,
+                date,
+                description,
+                paymentMethod,
+                referenceNumber
+        );
+    }
+
+    public TransferPostingResult recordTransferWithFee(
+            int fromAccountId,
+            int toAccountId,
+            double amountSent,
+            double amountReceived,
+            double transferFee,
+            Integer feeCategoryId,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) {
         if (fromAccountId == toAccountId) {
             throw new IllegalArgumentException("Choose two different accounts for a transfer");
         }
         if (amountSent <= 0 || amountReceived <= 0) {
             throw new IllegalArgumentException("Transfer amounts must be greater than zero");
         }
+        if (transferFee < 0) {
+            throw new IllegalArgumentException("Transfer fee cannot be negative");
+        }
         if (date == null) {
             throw new IllegalArgumentException("Transfer date is required");
         }
 
+        Account fromSnapshot = accountSnapshot(fromAccountId);
+        Account toSnapshot = accountSnapshot(toAccountId);
+        requireActiveTransferAccount(fromSnapshot, "source");
+        requireActiveTransferAccount(toSnapshot, "destination");
+        double sourceDeduction = amountSent + transferFee;
+        if (fromSnapshot.getCurrentBalance() + 0.005 < sourceDeduction) {
+            throw new IllegalArgumentException("The source account does not have enough available funds to complete the transfer and fee.");
+        }
+
+        String transferReference = transferReference(referenceNumber);
+        Integer resolvedFeeCategoryId = transferFee > 0
+                ? (feeCategoryId == null ? Integer.valueOf(findOrCreateCategory("Transaction Fees", "EXPENSE").getId()) : feeCategoryId)
+                : feeCategoryId;
+        int outgoingId;
+        int incomingId;
+        Integer feeTransactionId = null;
         try (Connection connection = connect()) {
             connection.setAutoCommit(false);
             try {
-                String fromAccountName = accountNameById(connection, fromAccountId);
-                String toAccountName = accountNameById(connection, toAccountId);
-                if (fromAccountName == null || toAccountName == null) {
-                    throw new IllegalArgumentException("Select valid source and destination accounts");
-                }
-
-                int outgoingId = insertTransferRow(
+                outgoingId = insertTransferRow(
                         connection,
                         fromAccountId,
                         null,
                         "TRANSFER_OUT",
                         amountSent,
                         date,
-                        transferDescription("Transfer to " + toAccountName, description),
+                        transferDescription("Transfer to " + toSnapshot.getAccountName(), description),
                         paymentMethod,
-                        referenceNumber
+                        transferReference
                 );
-                int incomingId = insertTransferRow(
+                incomingId = insertTransferRow(
                         connection,
                         toAccountId,
                         outgoingId,
                         "TRANSFER_IN",
                         amountReceived,
                         date,
-                        transferDescription("Transfer from " + fromAccountName, description),
+                        transferDescription("Transfer from " + fromSnapshot.getAccountName(), description),
                         paymentMethod,
-                        referenceNumber
+                        transferReference
                 );
                 try (PreparedStatement update = connection.prepareStatement(
                         "UPDATE transactions SET related_transaction_id = ? WHERE id = ?")) {
@@ -4190,6 +19699,32 @@ public class DatabaseHandler {
                     update.setInt(2, outgoingId);
                     update.executeUpdate();
                 }
+                if (transferFee > 0) {
+                    feeTransactionId = insertTransferFeeRow(
+                            connection,
+                            fromAccountId,
+                            resolvedFeeCategoryId,
+                            outgoingId,
+                            transferFee,
+                            date,
+                            "Transfer fee for " + transferReference,
+                            paymentMethod,
+                            transferReference
+                    );
+                }
+                recordSystemLog(
+                        connection,
+                        "Transaction Ledger",
+                        "Transfer Completed",
+                        "INFO",
+                        "Transfer " + transferReference + " completed from " + fromSnapshot.getAccountName()
+                                + " to " + toSnapshot.getAccountName()
+                                + ". Amount: " + amountSent
+                                + "; Fee: " + transferFee
+                                + "; Outgoing: " + outgoingId
+                                + "; Incoming: " + incomingId
+                                + (feeTransactionId == null ? "" : "; Fee transaction: " + feeTransactionId)
+                );
                 connection.commit();
             } catch (SQLException | RuntimeException exception) {
                 connection.rollback();
@@ -4200,6 +19735,16 @@ public class DatabaseHandler {
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to record transfer", exception);
         }
+        Account updatedSource = accountSnapshot(fromAccountId);
+        Account updatedDestination = accountSnapshot(toAccountId);
+        return new TransferPostingResult(
+                outgoingId,
+                incomingId,
+                feeTransactionId,
+                transferReference,
+                updatedSource.getCurrentBalance(),
+                updatedDestination.getCurrentBalance()
+        );
     }
 
     private int insertTransferRow(
@@ -4216,8 +19761,8 @@ public class DatabaseHandler {
         String sql = """
                 INSERT INTO transactions (
                     account_id, related_transaction_id, transaction_type, transaction_purpose,
-                    transaction_status, amount, transaction_date, description, payment_method, reference_number
-                ) VALUES (?, ?, 'TRANSFER', ?, 'COMPLETED', ?, ?, ?, ?, ?)
+                    transaction_status, amount, transaction_date, description, source, payment_method, reference_number
+                ) VALUES (?, ?, 'TRANSFER', ?, 'COMPLETED', ?, ?, ?, 'TRANSFER', ?, ?)
                 """;
         try (PreparedStatement insert = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             insert.setInt(1, accountId);
@@ -4238,6 +19783,68 @@ public class DatabaseHandler {
         throw new SQLException("Transfer row was saved without a generated id");
     }
 
+    private int insertTransferFeeRow(
+            Connection connection,
+            int accountId,
+            Integer categoryId,
+            int relatedTransactionId,
+            double amount,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        String sql = """
+                INSERT INTO transactions (
+                    account_id, category_id, related_transaction_id, transaction_type, transaction_purpose,
+                    transaction_status, amount, transaction_date, description, source, payment_method, reference_number
+                ) VALUES (?, ?, ?, 'EXPENSE', 'TRANSFER_FEE', 'COMPLETED', ?, ?, ?, 'TRANSFER_FEE', ?, ?)
+                """;
+        try (PreparedStatement insert = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            insert.setInt(1, accountId);
+            setNullableInt(insert, 2, categoryId);
+            insert.setInt(3, relatedTransactionId);
+            insert.setDouble(4, amount);
+            insert.setString(5, date.toString());
+            insert.setString(6, safeText(description, ""));
+            insert.setString(7, cleanNullable(paymentMethod));
+            insert.setString(8, cleanNullable(referenceNumber));
+            insert.executeUpdate();
+            return generatedId(connection, insert);
+        }
+    }
+
+    private int insertTransferFeeReversalRow(
+            Connection connection,
+            int accountId,
+            Integer categoryId,
+            int relatedTransactionId,
+            double amount,
+            LocalDate date,
+            String description,
+            String paymentMethod,
+            String referenceNumber
+    ) throws SQLException {
+        String sql = """
+                INSERT INTO transactions (
+                    account_id, category_id, related_transaction_id, transaction_type, transaction_purpose,
+                    transaction_status, amount, transaction_date, description, source, payment_method, reference_number
+                ) VALUES (?, ?, ?, 'INCOME', 'TRANSFER_FEE_REVERSAL', 'COMPLETED', ?, ?, ?, 'REVERSAL', ?, ?)
+                """;
+        try (PreparedStatement insert = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            insert.setInt(1, accountId);
+            setNullableInt(insert, 2, categoryId);
+            insert.setInt(3, relatedTransactionId);
+            insert.setDouble(4, amount);
+            insert.setString(5, date.toString());
+            insert.setString(6, safeText(description, ""));
+            insert.setString(7, cleanNullable(paymentMethod));
+            insert.setString(8, cleanNullable(referenceNumber));
+            insert.executeUpdate();
+            return generatedId(connection, insert);
+        }
+    }
+
     private String accountNameById(Connection connection, int accountId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("SELECT account_name FROM accounts WHERE id = ?")) {
             statement.setInt(1, accountId);
@@ -4250,6 +19857,246 @@ public class DatabaseHandler {
     private String transferDescription(String base, String note) {
         String cleanNote = cleanNullable(note);
         return cleanNote == null ? base : base + " - " + cleanNote;
+    }
+
+    private String transferReference(String referenceNumber) {
+        String cleanReference = cleanNullable(referenceNumber);
+        if (cleanReference != null) {
+            return cleanReference;
+        }
+        return "TRF-" + LocalDateTime.now(ZoneId.systemDefault()).format(FILE_TIMESTAMP_FORMAT);
+    }
+
+    private Account accountSnapshot(int accountId) {
+        return listAccounts().stream()
+                .filter(account -> account.getId() == accountId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Select a valid account."));
+    }
+
+    public Account getInternalAccountById(int accountId) {
+        return internalAccountSnapshot(accountId);
+    }
+
+    private Account internalAccountSnapshot(int accountId) {
+        String sql = """
+                SELECT id, account_name, account_type, currency, bank_provider_name, account_number,
+                       opening_balance, opening_balance_date, minimum_balance, account_purpose,
+                       branch_name, status, notes, created_at,
+                       COALESCE(account_category, 'ASSET') AS account_category,
+                       COALESCE(account_subtype, '') AS account_subtype,
+                       community_group_id,
+                       COALESCE(is_system_account, 0) AS is_system_account
+                FROM accounts
+                WHERE id = ? AND COALESCE(is_deleted, 0) = 0
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid Savings Group ledger account.");
+                }
+                if (resultSet.getInt("is_system_account") != 1) {
+                    throw new IllegalArgumentException("The selected Savings Group ledger is not marked as an internal system account.");
+                }
+                return new Account(
+                        resultSet.getInt("id"),
+                        resultSet.getString("account_name"),
+                        resultSet.getString("account_type"),
+                        resultSet.getString("currency"),
+                        resultSet.getString("bank_provider_name"),
+                        resultSet.getString("account_number"),
+                        resultSet.getDouble("opening_balance"),
+                        resultSet.getString("opening_balance_date"),
+                        resultSet.getDouble("minimum_balance"),
+                        resultSet.getString("account_purpose"),
+                        resultSet.getString("branch_name"),
+                        currentAccountBalance(connection, accountId),
+                        resultSet.getString("status"),
+                        resultSet.getString("notes"),
+                        resultSet.getString("created_at"),
+                        resultSet.getString("account_category"),
+                        resultSet.getString("account_subtype"),
+                        nullableInt(resultSet, "community_group_id"),
+                        true
+                );
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load Savings Group ledger account", exception);
+        }
+    }
+
+    private void requireActiveTransferAccount(Account account, String role) {
+        if (!"ACTIVE".equalsIgnoreCase(safeText(account.getStatus(), ""))) {
+            throw new IllegalArgumentException("The " + role + " account must be active.");
+        }
+    }
+
+    private GenericTransactionCommand validateGenericTransactionCommand(
+            String transactionType,
+            String purpose,
+            String status,
+            Integer projectId,
+            Integer personId,
+            LocalDate date
+    ) {
+        if (date == null) {
+            throw new IllegalArgumentException("Transaction date is required.");
+        }
+        String normalizedPurpose = normalizedToken(purpose, PURPOSE_NORMAL);
+        String normalizedStatus = normalizedToken(status, "COMPLETED");
+        if (TERMINAL_TRANSACTION_STATUSES.contains(normalizedStatus)) {
+            throw new IllegalArgumentException("Use the cancellation or reversal workflow for terminal transaction statuses.");
+        }
+        if (!GENERIC_TRANSACTION_STATUSES.contains(normalizedStatus)) {
+            throw new IllegalArgumentException("Invalid transaction status: " + normalizedStatus + ".");
+        }
+        if (Set.of(PURPOSE_REVERSAL, PURPOSE_INCOME_REVERSAL, PURPOSE_TRANSFER_FEE, PURPOSE_TRANSFER_FEE_REVERSAL).contains(normalizedPurpose)) {
+            throw new IllegalArgumentException("Use the dedicated posting workflow for " + normalizedPurpose + ".");
+        }
+
+        String normalizedType = normalizedToken(transactionType, "EXPENSE");
+        if ("TRANSFER".equals(normalizedType)) {
+            throw new IllegalArgumentException("Use Transfer Money for transfers so both sides are posted atomically.");
+        }
+        if (!GENERIC_TRANSACTION_TYPES.contains(normalizedType)) {
+            throw new IllegalArgumentException("Invalid transaction type: " + normalizedType + ".");
+        }
+
+        boolean loanPrincipal = Set.of(PURPOSE_MONEY_LENT, PURPOSE_MONEY_BORROWED).contains(normalizedPurpose);
+        boolean loanRepayment = Set.of(PURPOSE_LENT_REPAID, PURPOSE_BORROWED_REPAID).contains(normalizedPurpose);
+        if (STATUS_OPEN.equals(normalizedStatus) && !loanPrincipal) {
+            throw new IllegalArgumentException("OPEN status is only valid for active loan principal postings.");
+        }
+
+        switch (normalizedPurpose) {
+            case PURPOSE_NORMAL -> {
+                if (!Set.of("INCOME", "EXPENSE").contains(normalizedType)) {
+                    throw new IllegalArgumentException("Normal transactions must be income or expense records.");
+                }
+            }
+            case PURPOSE_PROJECT_EXPENSE -> {
+                if (!"EXPENSE".equals(normalizedType)) {
+                    throw new IllegalArgumentException("Project spending must be posted as an expense.");
+                }
+                if (projectId == null) {
+                    throw new IllegalArgumentException("Select a project for project spending.");
+                }
+            }
+            case PURPOSE_MONEY_LENT, PURPOSE_BORROWED_REPAID -> {
+                requirePerson(personId, normalizedPurpose);
+                normalizedType = "LOAN";
+            }
+            case PURPOSE_MONEY_BORROWED, PURPOSE_LENT_REPAID -> {
+                requirePerson(personId, normalizedPurpose);
+                normalizedType = "LOAN";
+            }
+            case PURPOSE_SUPPORT_GIVEN -> {
+                if (!"EXPENSE".equals(normalizedType)) {
+                    throw new IllegalArgumentException("Support given must be posted as an expense.");
+                }
+                requirePerson(personId, normalizedPurpose);
+            }
+            case PURPOSE_SAVINGS, PURPOSE_GOAL_CONTRIBUTION -> {
+                if (!"EXPENSE".equals(normalizedType)) {
+                    throw new IllegalArgumentException(normalizedPurpose + " must be posted as an expense or through a dedicated transfer workflow.");
+                }
+            }
+            case PURPOSE_LOAN_INTEREST, PURPOSE_LOAN_PENALTY -> {
+                if (!Set.of("INCOME", "EXPENSE").contains(normalizedType)) {
+                    throw new IllegalArgumentException(normalizedPurpose + " must be posted as income or expense.");
+                }
+                requirePerson(personId, normalizedPurpose);
+            }
+            default -> throw new IllegalArgumentException("Unsupported transaction purpose: " + normalizedPurpose + ".");
+        }
+
+        if ((loanPrincipal || loanRepayment) && !Set.of("LOAN", "INCOME", "EXPENSE").contains(normalizedType)) {
+            throw new IllegalArgumentException("Loan postings must use the loan workflow.");
+        }
+        return new GenericTransactionCommand(normalizedType, normalizedPurpose, normalizedStatus);
+    }
+
+    private String normalizedToken(String value, String fallback) {
+        return safeText(value, fallback)
+                .trim()
+                .toUpperCase(Locale.ENGLISH)
+                .replace(' ', '_');
+    }
+
+    private void requirePerson(Integer personId, String purpose) {
+        if (personId == null) {
+            throw new IllegalArgumentException("Select a person for " + purpose + ".");
+        }
+    }
+
+    private void requireActiveAccountForPosting(Connection connection, int accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT status
+                FROM accounts
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid account.");
+                }
+                if (!"ACTIVE".equalsIgnoreCase(safeText(resultSet.getString("status"), "ACTIVE"))) {
+                    throw new IllegalArgumentException("The account must be active before posting a transaction.");
+                }
+            }
+        }
+    }
+
+    private void requireCategoryCompatible(Connection connection, Integer categoryId, String transactionType) throws SQLException {
+        if (categoryId == null || "LOAN".equals(transactionType)) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT category_type
+                FROM categories
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid category.");
+                }
+                String categoryType = safeText(resultSet.getString("category_type"), "BOTH").toUpperCase(Locale.ENGLISH);
+                if (!"BOTH".equals(categoryType) && !categoryType.equals(transactionType)) {
+                    throw new IllegalArgumentException("The selected category is not valid for " + transactionType.toLowerCase(Locale.ENGLISH) + " transactions.");
+                }
+            }
+        }
+    }
+
+    private void requireEditableTransaction(Connection connection, int transactionId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT transaction_type, transaction_purpose, transaction_status, source
+                FROM transactions
+                WHERE id = ?
+                """)) {
+            statement.setInt(1, transactionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalArgumentException("Select a valid transaction.");
+                }
+                String type = normalizedToken(resultSet.getString("transaction_type"), "");
+                String purpose = normalizedToken(resultSet.getString("transaction_purpose"), PURPOSE_NORMAL);
+                String status = normalizedToken(resultSet.getString("transaction_status"), "COMPLETED");
+                String source = normalizedToken(resultSet.getString("source"), "MANUAL");
+                if ("TRANSFER".equals(type) || purpose.startsWith("TRANSFER_") || "TRANSFER".equals(source)) {
+                    throw new IllegalArgumentException("Use the transfer workflow to change transfer records.");
+                }
+                if (TERMINAL_TRANSACTION_STATUSES.contains(status) || "REVERSAL".equals(source)) {
+                    throw new IllegalArgumentException("Cancelled, reversed and reversal records cannot be edited through the generic transaction form.");
+                }
+                if ("CORRECTION".equals(source)) {
+                    throw new IllegalArgumentException("Correction drafts are managed outside the posted ledger.");
+                }
+            }
+        }
     }
 
     private String cleanNullable(String value) {
@@ -4345,6 +20192,14 @@ public class DatabaseHandler {
         if (amount <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero");
         }
+        GenericTransactionCommand command = validateGenericTransactionCommand(
+                transactionType,
+                purpose,
+                status,
+                projectId,
+                personId,
+                date
+        );
         String sql = updateProjectActivity
                 ? """
                     UPDATE transactions
@@ -4380,6 +20235,9 @@ public class DatabaseHandler {
                     WHERE id = ?
                     """;
         try (Connection connection = connect()) {
+            requireEditableTransaction(connection, transactionId);
+            requireActiveAccountForPosting(connection, accountId);
+            requireCategoryCompatible(connection, categoryId, command.transactionType());
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 LoanSide previousLoanSide = loanSideForTransaction(connection, transactionId);
@@ -4391,18 +20249,26 @@ public class DatabaseHandler {
                     setNullableInt(statement, index++, projectActivityId);
                 }
                 setNullableInt(statement, index++, personId);
-                statement.setString(index++, transactionType);
-                statement.setString(index++, purpose);
-                statement.setString(index++, status);
+                statement.setString(index++, command.transactionType());
+                statement.setString(index++, command.purpose());
+                statement.setString(index++, command.status());
                 statement.setDouble(index++, amount);
                 statement.setString(index++, date.toString());
-                statement.setString(index++, description);
-                statement.setString(index++, paymentMethod);
-                statement.setString(index++, referenceNumber);
+                statement.setString(index++, safeText(description, ""));
+                statement.setString(index++, cleanNullable(paymentMethod));
+                statement.setString(index++, cleanNullable(referenceNumber));
                 statement.setInt(index, transactionId);
                 statement.executeUpdate();
                 refreshLoanStatuses(connection, previousLoanSide);
-                refreshRelatedLoanStatuses(connection, personId, purpose);
+                refreshRelatedLoanStatuses(connection, personId, command.purpose());
+                recordSystemLog(
+                        connection,
+                        "Transaction Ledger",
+                        "Update Transaction",
+                        "WARNING",
+                        "Transaction " + transactionId + " updated through the generic editor. Purpose: "
+                                + command.purpose() + "; Status: " + command.status() + "."
+                );
                 connection.commit();
             } catch (SQLException | RuntimeException exception) {
                 connection.rollback();
@@ -4413,6 +20279,170 @@ public class DatabaseHandler {
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to update transaction", exception);
         }
+    }
+
+    public void updateRecordLifecycleStatus(String recordType, int recordId, String status, String reason) {
+        requireLifecycleAdministrator("update " + recordType + " " + recordId + " to " + status);
+        String cleanType = requireText(recordType, "Record type");
+        String cleanStatus = requireText(status, "Record status").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        String cleanReason = requireText(reason, "Reason");
+        LifecycleTarget target = lifecycleTarget(cleanType, cleanStatus);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE " + target.tableName() + " SET " + target.statusColumn() + " = ?" + target.updatedAtClause() + " WHERE id = ?")) {
+            statement.setString(1, target.status());
+            statement.setInt(2, recordId);
+            if (statement.executeUpdate() == 0) {
+                throw new IllegalArgumentException("Select a valid " + cleanType + " record.");
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to update record lifecycle status", exception);
+        }
+        recordSystemLog(
+                "Data And Records",
+                "Record Lifecycle Updated",
+                "WARNING",
+                cleanType + " " + recordId + " set to " + target.status() + ". Reason: " + cleanReason
+        );
+    }
+
+    public int createCorrectedTransactionDraft(int transactionId, String reason) {
+        requireLifecycleAdministrator("create corrected draft for transaction " + transactionId);
+        String cleanReason = requireText(reason, "Reason");
+        int draftId;
+        String sql = """
+                INSERT INTO transaction_correction_drafts (
+                    original_transaction_id, account_id, category_id, project_id, project_activity_id, person_id,
+                    transaction_type, transaction_purpose, amount, transaction_date,
+                    description, payment_method, reference_number, reason, status, updated_at
+                )
+                SELECT id, account_id, category_id, project_id, project_activity_id, person_id,
+                       transaction_type, transaction_purpose, amount, transaction_date,
+                       trim(COALESCE(description, '') || ' (corrected draft from record #' || id || ')'),
+                       payment_method, reference_number, ?, 'Draft', CURRENT_TIMESTAMP
+                FROM transactions
+                WHERE id = ?
+                  AND COALESCE(transaction_status, 'COMPLETED') IN ('CANCELLED', 'REVERSED')
+                """;
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                statement.setString(1, cleanReason);
+                statement.setInt(2, transactionId);
+                if (statement.executeUpdate() == 0) {
+                    throw new IllegalArgumentException("Select a valid cancelled or reversed transaction.");
+                }
+                draftId = generatedId(connection, statement);
+                recordSystemLog(
+                        connection,
+                        "Data And Records",
+                        "Corrected Draft Created",
+                        "WARNING",
+                        "Correction draft " + draftId + " created from transaction " + transactionId + ". Reason: " + cleanReason
+                );
+                connection.commit();
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to create corrected draft", exception);
+        }
+        return draftId;
+    }
+
+    public List<TransactionCorrectionDraftRecord> listTransactionCorrectionDrafts(int limit) {
+        List<TransactionCorrectionDraftRecord> drafts = new ArrayList<>();
+        String sql = """
+                SELECT d.id, d.original_transaction_id, a.account_name,
+                       d.transaction_type, d.transaction_purpose, d.amount, d.transaction_date,
+                       d.description, d.payment_method, d.reference_number, d.reason,
+                       d.status, d.created_at, d.updated_at
+                FROM transaction_correction_drafts d
+                JOIN accounts a ON a.id = d.account_id
+                ORDER BY d.created_at DESC, d.id DESC
+                LIMIT ?
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, boundedLimit(limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    drafts.add(new TransactionCorrectionDraftRecord(
+                            resultSet.getInt("id"),
+                            resultSet.getInt("original_transaction_id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("transaction_type"),
+                            resultSet.getString("transaction_purpose"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("description"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            resultSet.getString("reason"),
+                            resultSet.getString("status"),
+                            resultSet.getString("created_at"),
+                            resultSet.getString("updated_at")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list transaction correction drafts", exception);
+        }
+        return drafts;
+    }
+
+    private void requireLifecycleAdministrator(String action) {
+        if (UserSession.isAdminOrSuperAdmin()) {
+            return;
+        }
+        try {
+            recordSystemLog(
+                    "Data And Records",
+                    "Blocked lifecycle action",
+                    "WARNING",
+                    action + " blocked. Lifecycle actions require an Administrator or Super Administrator."
+            );
+        } catch (RuntimeException ignored) {
+            // The lifecycle action remains blocked even if the audit log is temporarily unavailable.
+        }
+        throw new SecurityException("Only an Administrator or Super Administrator can apply Records Control lifecycle actions.");
+    }
+
+    private LifecycleTarget lifecycleTarget(String recordType, String requestedStatus) {
+        String cleanType = recordType.trim().toLowerCase(Locale.ENGLISH);
+        if (cleanType.contains("transaction")) {
+            return new LifecycleTarget("transactions", "transaction_status", lifecycleStatus(requestedStatus), "");
+        }
+        if (cleanType.contains("account")) {
+            return new LifecycleTarget("accounts", "status", lifecycleStatus(requestedStatus), ", updated_at = CURRENT_TIMESTAMP");
+        }
+        if (cleanType.contains("budget")) {
+            return new LifecycleTarget("budgets", "status", lifecycleStatus(requestedStatus), ", updated_at = CURRENT_TIMESTAMP");
+        }
+        if (cleanType.contains("project")) {
+            return new LifecycleTarget("projects", "status", lifecycleStatus(requestedStatus), "");
+        }
+        if (cleanType.contains("goal")) {
+            return new LifecycleTarget("goals", "status", lifecycleStatus(requestedStatus), "");
+        }
+        if (cleanType.contains("payment")) {
+            String activeStatus = "ACTIVE".equals(requestedStatus) ? "ACTIVE" : "INACTIVE";
+            return new LifecycleTarget("payment_methods", "status", activeStatus, ", updated_at = CURRENT_TIMESTAMP");
+        }
+        throw new IllegalArgumentException("Lifecycle status is not supported for " + recordType + ".");
+    }
+
+    private String lifecycleStatus(String requestedStatus) {
+        if (Set.of("ACTIVE", "COMPLETED", "OPEN", "FROZEN", "CANCELLED", "REVERSED", "ARCHIVED", "INACTIVE", "CLOSED", "ON_BUDGET", "PLANNED").contains(requestedStatus)) {
+            return requestedStatus;
+        }
+        throw new IllegalArgumentException("Unsupported lifecycle status: " + requestedStatus);
+    }
+
+    private record LifecycleTarget(String tableName, String statusColumn, String status, String updatedAtClause) {
     }
 
     public void deleteTransaction(int transactionId) {
@@ -4431,17 +20461,15 @@ public class DatabaseHandler {
                         }
                     }
                 }
-                try (PreparedStatement statement = connection.prepareStatement("""
-                        DELETE FROM transactions
-                        WHERE id = ?
-                           OR related_transaction_id = ?
-                           OR (? IS NOT NULL AND id = ?)
-                        """)) {
-                    statement.setInt(1, transactionId);
-                    statement.setInt(2, transactionId);
-                    setNullableInt(statement, 3, relatedTransactionId);
-                    setNullableInt(statement, 4, relatedTransactionId);
-                    statement.executeUpdate();
+                DisposalTableSpec spec = firstDisposalSpecForRecordType("Transaction");
+                for (Integer id : List.of(transactionId, relatedTransactionId == null ? -1 : relatedTransactionId)) {
+                    if (id == null || id <= 0) {
+                        continue;
+                    }
+                    RecordDisposalCandidateData candidate = loadDisposalCandidate(connection, spec, id);
+                    if (candidate != null) {
+                        softDeleteCandidate(connection, candidate, "Super Administrator transaction deletion.", deletionReference(candidate));
+                    }
                 }
                 refreshLoanStatuses(connection, affectedLoanSide);
                 connection.commit();
@@ -4539,11 +20567,12 @@ public class DatabaseHandler {
                 FROM transactions
                 WHERE person_id = ?
                   AND transaction_purpose = ?
-                  AND COALESCE(transaction_status, 'COMPLETED') <> ?
+                  AND COALESCE(transaction_status, 'COMPLETED') NOT IN (?, ?)
                 """)) {
             statement.setInt(1, loanSide.personId());
             statement.setString(2, loanSide.repaymentPurpose());
             statement.setString(3, STATUS_CANCELLED);
+            statement.setString(4, STATUS_REVERSED);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() ? resultSet.getDouble(1) : 0;
             }
@@ -4557,12 +20586,13 @@ public class DatabaseHandler {
                 FROM transactions
                 WHERE person_id = ?
                   AND transaction_purpose = ?
-                  AND COALESCE(transaction_status, 'COMPLETED') <> ?
+                  AND COALESCE(transaction_status, 'COMPLETED') NOT IN (?, ?)
                 ORDER BY transaction_date, id
                 """)) {
             statement.setInt(1, loanSide.personId());
             statement.setString(2, loanSide.principalPurpose());
             statement.setString(3, STATUS_CANCELLED);
+            statement.setString(4, STATUS_REVERSED);
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     principals.add(new LoanPrincipal(
@@ -4617,15 +20647,17 @@ public class DatabaseHandler {
                 SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
                        c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
                        t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
-                LEFT JOIN categories c ON c.id = t.category_id
-                LEFT JOIN projects p ON p.id = t.project_id
-                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
-                LEFT JOIN people pe ON pe.id = t.person_id
-                ORDER BY t.transaction_date DESC, t.id DESC
-                LIMIT ?
-                """;
+                  FROM valid_transactions t
+                  JOIN accounts a ON a.id = t.account_id
+                  LEFT JOIN categories c ON c.id = t.category_id
+                  LEFT JOIN projects p ON p.id = t.project_id
+                  LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                  LEFT JOIN people pe ON pe.id = t.person_id
+                  WHERE COALESCE(a.is_deleted, 0) = 0
+                    AND COALESCE(a.is_system_account, 0) = 0
+                  ORDER BY t.transaction_date DESC, t.id DESC
+                  LIMIT ?
+                  """;
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setInt(1, limit);
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -4655,13 +20687,177 @@ public class DatabaseHandler {
         return transactions;
     }
 
+    public TransactionHistoryPage listTransactionHistory(TransactionHistoryFilter filter) {
+        TransactionHistoryFilter cleanFilter = filter == null
+                ? new TransactionHistoryFilter(null, null, null, null, null, null, null, true, 500, 0)
+                : filter;
+        if (cleanFilter.startDate() != null && cleanFilter.endDate() != null
+                && cleanFilter.startDate().isAfter(cleanFilter.endDate())) {
+            throw new IllegalArgumentException("From date cannot be after To date.");
+        }
+        List<Object> params = new ArrayList<>();
+        String where = transactionHistoryWhereClause(cleanFilter, params);
+        int limit = cleanFilter.limit() <= 0 ? 500 : Math.min(cleanFilter.limit(), 5000);
+        int offset = Math.max(0, cleanFilter.offset());
+        String selectSql = """
+                SELECT t.id,
+                       COALESCE(a.account_name, 'Deleted account #' || t.account_id) AS account_name,
+                       t.transaction_type, t.transaction_purpose, t.transaction_status,
+                       COALESCE(c.category_name, '') AS category_name,
+                       COALESCE(p.project_name, '') AS project_name,
+                       t.project_activity_id,
+                       COALESCE(pa.activity_name, '') AS activity_name,
+                       COALESCE(pe.full_name, '') AS full_name,
+                       t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number,
+                       t.created_at, t.loan_id, t.loan_installment_id
+                FROM transactions t
+                LEFT JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE %s
+                ORDER BY date(t.transaction_date) DESC, t.id DESC
+                LIMIT ? OFFSET ?
+                """.formatted(where);
+        String countSql = """
+                SELECT COUNT(*)
+                FROM transactions t
+                LEFT JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE %s
+                """.formatted(where);
+        List<FinanceTransaction> transactions = new ArrayList<>();
+        try (Connection connection = connect()) {
+            int total;
+            try (PreparedStatement count = connection.prepareStatement(countSql)) {
+                bindParameters(count, params);
+                try (ResultSet resultSet = count.executeQuery()) {
+                    total = resultSet.next() ? resultSet.getInt(1) : 0;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement(selectSql)) {
+                bindParameters(statement, params);
+                statement.setInt(params.size() + 1, limit);
+                statement.setInt(params.size() + 2, offset);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        transactions.add(new FinanceTransaction(
+                                resultSet.getInt("id"),
+                                resultSet.getString("account_name"),
+                                resultSet.getString("transaction_type"),
+                                resultSet.getString("transaction_purpose"),
+                                resultSet.getString("transaction_status"),
+                                resultSet.getString("category_name"),
+                                resultSet.getString("project_name"),
+                                resultSet.getString("full_name"),
+                                resultSet.getDouble("amount"),
+                                resultSet.getString("transaction_date"),
+                                resultSet.getString("description"),
+                                resultSet.getString("payment_method"),
+                                resultSet.getString("reference_number"),
+                                nullableInt(resultSet, "project_activity_id"),
+                                resultSet.getString("activity_name"),
+                                resultSet.getString("created_at"),
+                                nullableInt(resultSet, "loan_id"),
+                                nullableInt(resultSet, "loan_installment_id")
+                        ));
+                    }
+                }
+            }
+            return new TransactionHistoryPage(transactions, total);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load transaction history", exception);
+        }
+    }
+
+    private String transactionHistoryWhereClause(TransactionHistoryFilter filter, List<Object> params) {
+        List<String> clauses = new ArrayList<>();
+        clauses.add("COALESCE(t.is_deleted, 0) = 0");
+        if (!filter.includeTransferIn()) {
+            clauses.add("NOT (t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN')");
+        }
+        if (filter.startDate() != null) {
+            clauses.add("date(t.transaction_date) >= date(?)");
+            params.add(filter.startDate().toString());
+        }
+        if (filter.endDate() != null) {
+            clauses.add("date(t.transaction_date) <= date(?)");
+            params.add(filter.endDate().toString());
+        }
+        if (filter.accountId() != null && filter.accountId() > 0) {
+            clauses.add("t.account_id = ?");
+            params.add(filter.accountId());
+        }
+        if (filter.categoryId() != null && filter.categoryId() > 0) {
+            clauses.add("t.category_id = ?");
+            params.add(filter.categoryId());
+        }
+        String type = safeText(filter.transactionType(), "").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_').replace('-', '_');
+        if (!type.isBlank() && !type.startsWith("ALL")) {
+            switch (type) {
+                case "INCOME", "EXPENSE", "TRANSFER", "ADJUSTMENT", "ASSET_SALE" -> {
+                    clauses.add("t.transaction_type = ?");
+                    params.add(type);
+                }
+                case "LOAN", "LOAN_REPAYMENT" ->
+                        clauses.add("((t.transaction_type = 'LOAN') OR t.transaction_purpose IN ('LOAN_PRINCIPAL_PAYMENT', 'LOAN_INTEREST_PAYMENT', 'LOAN_FEE', 'LOAN_PENALTY', 'BORROWED_REPAID', 'LENT_REPAID'))");
+                case "LOAN_PROCEEDS", "BORROWED_MONEY" -> clauses.add("t.transaction_purpose IN ('LOAN_PROCEEDS', 'MONEY_BORROWED')");
+                case "SAVINGS_CONTRIBUTION" -> clauses.add("t.transaction_purpose IN ('SAVINGS', 'GOAL_CONTRIBUTION') OR t.source IN ('SAVINGS_GROUPS', 'COMMUNITY_SAVINGS')");
+                case "CHIPELEGANYU_CONTRIBUTION" -> clauses.add("t.source IN ('SAVINGS_GROUPS', 'COMMUNITY_SAVINGS') AND lower(COALESCE(t.description, '')) LIKE '%chipeleganyu%'");
+                case "BANK_NKHONDE_CONTRIBUTION" -> clauses.add("t.source IN ('SAVINGS_GROUPS', 'COMMUNITY_SAVINGS') AND lower(COALESCE(t.description, '')) LIKE '%bank nkhonde%'");
+                case "ASSET_PURCHASE" -> clauses.add("t.transaction_purpose = 'ASSET_PURCHASE' OR lower(COALESCE(c.category_name, '')) LIKE '%asset%'");
+                case "INVESTMENT" -> clauses.add("lower(COALESCE(c.category_name, '')) LIKE '%investment%' OR lower(COALESCE(t.description, '')) LIKE '%investment%'");
+                default -> {
+                    clauses.add("(t.transaction_type = ? OR t.transaction_purpose = ?)");
+                    params.add(type);
+                    params.add(type);
+                }
+            }
+        }
+        String status = safeText(filter.status(), "").trim().toUpperCase(Locale.ENGLISH).replace(' ', '_');
+        if (!status.isBlank() && !status.startsWith("ALL")) {
+            switch (status) {
+                case "PAID", "POSTED", "COMPLETED" -> clauses.add("t.transaction_status IN ('COMPLETED', 'CLEARED', 'PARTIALLY_CLEARED')");
+                case "PENDING", "SCHEDULED" -> clauses.add("t.transaction_status IN ('PENDING', 'SCHEDULED', 'OPEN')");
+                default -> {
+                    clauses.add("t.transaction_status = ?");
+                    params.add(status);
+                }
+            }
+        }
+        String query = cleanNullable(filter.searchText());
+        if (query != null) {
+            String like = "%" + query.toLowerCase(Locale.ENGLISH) + "%";
+            clauses.add("""
+                    (
+                        lower(COALESCE(t.description, '')) LIKE ?
+                        OR lower(COALESCE(c.category_name, '')) LIKE ?
+                        OR lower(COALESCE(a.account_name, '')) LIKE ?
+                        OR lower(COALESCE(t.reference_number, '')) LIKE ?
+                        OR lower(COALESCE(pe.full_name, '')) LIKE ?
+                        OR lower(COALESCE(t.payment_method, '')) LIKE ?
+                        OR CAST(t.id AS TEXT) LIKE ?
+                        OR CAST(t.amount AS TEXT) LIKE ?
+                    )
+                    """);
+            for (int i = 0; i < 8; i++) {
+                params.add(like);
+            }
+        }
+        return String.join(" AND ", clauses);
+    }
+
     public List<FinanceTransaction> listTransactionsForAccount(int accountId) {
         List<FinanceTransaction> transactions = new ArrayList<>();
         String sql = """
                 SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
                        c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
                        t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
-                FROM transactions t
+                FROM valid_transactions t
                 JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN categories c ON c.id = t.category_id
                 LEFT JOIN projects p ON p.id = t.project_id
@@ -4695,6 +20891,51 @@ public class DatabaseHandler {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to list account transactions", exception);
+        }
+        return transactions;
+    }
+
+    public List<FinanceTransaction> listLoanTransactionsForPerson(int personId) {
+        List<FinanceTransaction> transactions = new ArrayList<>();
+        String sql = """
+                SELECT t.id, a.account_name, t.transaction_type, t.transaction_purpose, t.transaction_status,
+                       c.category_name, p.project_name, t.project_activity_id, pa.activity_name, pe.full_name,
+                       t.amount, t.transaction_date, t.description, t.payment_method, t.reference_number
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN projects p ON p.id = t.project_id
+                LEFT JOIN project_activities pa ON pa.id = t.project_activity_id
+                LEFT JOIN people pe ON pe.id = t.person_id
+                WHERE t.person_id = ?
+                  AND t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID', 'MONEY_BORROWED', 'BORROWED_REPAID', 'LOAN_INTEREST', 'LOAN_PENALTY')
+                ORDER BY t.transaction_date ASC, t.id ASC
+                """;
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, personId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    transactions.add(new FinanceTransaction(
+                            resultSet.getInt("id"),
+                            resultSet.getString("account_name"),
+                            resultSet.getString("transaction_type"),
+                            resultSet.getString("transaction_purpose"),
+                            resultSet.getString("transaction_status"),
+                            resultSet.getString("category_name"),
+                            resultSet.getString("project_name"),
+                            resultSet.getString("full_name"),
+                            resultSet.getDouble("amount"),
+                            resultSet.getString("transaction_date"),
+                            resultSet.getString("description"),
+                            resultSet.getString("payment_method"),
+                            resultSet.getString("reference_number"),
+                            nullableInt(resultSet, "project_activity_id"),
+                            resultSet.getString("activity_name")
+                    ));
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to list person loan transactions", exception);
         }
         return transactions;
     }
@@ -4847,40 +21088,58 @@ public class DatabaseHandler {
                             SELECT COALESCE(SUM(account_balance), 0)
                             FROM (
                                 SELECT a.id,
-                                       a.opening_balance + COALESCE(SUM(
+                                       (
                                            CASE
-                                               WHEN t.transaction_type = 'INCOME' THEN t.amount
+                                               WHEN a.opening_balance_date IS NULL
+                                                 OR trim(a.opening_balance_date) = ''
+                                      OR date(a.opening_balance_date) <= date('now', 'localtime')
+                                               THEN a.opening_balance
+                                               ELSE 0
+                                           END + COALESCE(SUM(
+                                            CASE
+                                                WHEN t.transaction_type = 'INCOME' THEN t.amount
+                                                WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
                                                WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
                                                WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
                                                WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                                               WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                                               WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                                               WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                                               WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
                                                ELSE 0
-                                           END
-                                       ), 0) AS account_balance
-                                FROM accounts a
-                                LEFT JOIN transactions t ON t.account_id = a.id
-                                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                                            END
+                                       ), 0)
+                                       ) * COALESCE(cur.rate_to_base, 1) AS account_balance
+                                 FROM accounts a
+                                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                                LEFT JOIN valid_transactions t ON t.account_id = a.id
                                 WHERE a.status = 'ACTIVE'
+                                  AND COALESCE(a.is_deleted, 0) = 0
+                                  AND COALESCE(a.is_system_account, 0) = 0
+                                  AND COALESCE(a.account_category, 'ASSET') <> 'LIABILITY'
                                 GROUP BY a.id
                             )
                             """),
                     queryMonthlyTotal(connection, month, "INCOME"),
                     queryMonthlyTotal(connection, month, "EXPENSE"),
-                    queryInt(connection, "SELECT COUNT(*) FROM accounts WHERE status = 'ACTIVE'"),
-                    queryInt(connection, "SELECT COUNT(*) FROM projects WHERE status = 'ACTIVE'"),
+                    queryInt(connection, "SELECT COUNT(*) FROM accounts WHERE status = 'ACTIVE' AND COALESCE(is_deleted, 0) = 0 AND COALESCE(is_system_account, 0) = 0"),
+                    queryInt(connection, "SELECT COUNT(*) FROM projects WHERE upper(status) = 'ACTIVE'"),
                     queryInt(connection, "SELECT COUNT(*) FROM goals WHERE status = 'ACTIVE'"),
                     queryDouble(connection, """
                             SELECT COALESCE(SUM(
                                 CASE
-                                    WHEN transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN amount
-                                    WHEN transaction_purpose = 'LENT_REPAID' THEN -amount
-                                    WHEN transaction_purpose = 'MONEY_BORROWED' THEN -amount
-                                    WHEN transaction_purpose = 'BORROWED_REPAID' THEN amount
-                                    ELSE 0
-                                END
-                            ), 0)
-                            FROM transactions
-                            WHERE transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID', 'MONEY_BORROWED', 'BORROWED_REPAID')
-                              AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                                    WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
+                                    WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
+                                    WHEN t.transaction_purpose = 'MONEY_BORROWED' THEN -t.amount
+                                     WHEN t.transaction_purpose = 'BORROWED_REPAID' THEN t.amount
+                                     ELSE 0
+                                 END
+                                 * COALESCE(cur.rate_to_base, 1)
+                             ), 0)
+                            FROM valid_transactions t
+                            JOIN accounts a ON a.id = t.account_id
+                            LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                            WHERE t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID', 'MONEY_BORROWED', 'BORROWED_REPAID')
                             """)
             );
         } catch (SQLException exception) {
@@ -4888,13 +21147,104 @@ public class DatabaseHandler {
         }
     }
 
+    public double getAvailableCashAndBankBalance() {
+        try (Connection connection = connect()) {
+            return queryDouble(connection, """
+                    SELECT COALESCE(SUM(account_balance), 0)
+                    FROM (
+                        SELECT a.id,
+                               (
+                                   CASE
+                                       WHEN a.opening_balance_date IS NULL
+                                         OR trim(a.opening_balance_date) = ''
+                              OR date(a.opening_balance_date) <= date('now', 'localtime')
+                                       THEN a.opening_balance
+                                       ELSE 0
+                                   END + COALESCE(SUM(
+                                    CASE
+                                        WHEN t.transaction_type = 'INCOME' THEN t.amount
+                                        WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
+                                        WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                                        ELSE 0
+                                    END
+                               ), 0)
+                               ) * COALESCE(cur.rate_to_base, 1) AS account_balance
+                        FROM accounts a
+                        LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                        LEFT JOIN valid_transactions t ON t.account_id = a.id
+                        WHERE a.status = 'ACTIVE'
+                          AND COALESCE(a.is_deleted, 0) = 0
+                          AND COALESCE(a.is_system_account, 0) = 0
+                          AND COALESCE(a.account_category, 'ASSET') <> 'LIABILITY'
+                          AND lower(COALESCE(a.account_type, '')) NOT IN ('community savings', 'community_savings')
+                          AND (
+                               lower(COALESCE(a.account_type, '')) LIKE '%cash%'
+                            OR lower(COALESCE(a.account_type, '')) LIKE '%bank%'
+                            OR lower(COALESCE(a.account_type, '')) LIKE '%mobile%'
+                            OR lower(COALESCE(a.account_type, '')) = 'savings account'
+                          )
+                        GROUP BY a.id
+                    )
+                    """);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load available cash and bank balance", exception);
+        }
+    }
+
+    public double getCommunitySavingsBalance() {
+        try (Connection connection = connect()) {
+            return queryDouble(connection, """
+                    SELECT COALESCE(SUM(account_balance), 0)
+                    FROM (
+                        SELECT a.id,
+                               (
+                                   CASE
+                                       WHEN a.opening_balance_date IS NULL
+                                         OR trim(a.opening_balance_date) = ''
+                            OR date(a.opening_balance_date) <= date('now', 'localtime')
+                                       THEN a.opening_balance
+                                       ELSE 0
+                                   END + COALESCE(SUM(
+                                    CASE
+                                        WHEN t.transaction_type = 'INCOME' THEN t.amount
+                                        WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
+                                        WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
+                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
+                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
+                                        ELSE 0
+                                    END
+                               ), 0)
+                               ) * COALESCE(cur.rate_to_base, 1) AS account_balance
+                        FROM community_savings_profiles p
+                        JOIN accounts a ON a.id = p.account_id
+                        LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                        LEFT JOIN valid_transactions t ON t.account_id = a.id
+                        WHERE COALESCE(p.is_deleted, 0) = 0
+                          AND COALESCE(a.is_deleted, 0) = 0
+                          AND COALESCE(a.is_system_account, 0) = 1
+                        GROUP BY a.id
+                    )
+                    """);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load Community Savings balance", exception);
+        }
+    }
+
     private double queryMonthlyTotal(Connection connection, String month, String type) throws SQLException {
         String sql = """
-                SELECT COALESCE(SUM(amount), 0)
-                FROM transactions
-                WHERE transaction_type = ?
-                  AND substr(transaction_date, 1, 7) = ?
-                  AND COALESCE(transaction_status, 'COMPLETED') <> 'CANCELLED'
+                SELECT COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0)
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                WHERE t.transaction_type = ?
+                  AND substr(t.transaction_date, 1, 7) = ?
+                  AND COALESCE(a.is_system_account, 0) = 0
                 """;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, type);
@@ -4929,11 +21279,13 @@ public class DatabaseHandler {
 
     public List<ReportRow> categorySpendingReport() {
         return report("""
-                SELECT COALESCE(c.category_name, 'Uncategorized') AS label, COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'EXPENSE'
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label
                 ORDER BY amount DESC
                 """);
@@ -4941,12 +21293,14 @@ public class DatabaseHandler {
 
     public List<ReportRow> categorySpendingReport(String month) {
         return report("""
-                SELECT COALESCE(c.category_name, 'Uncategorized') AS label, COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'EXPENSE'
                   AND substr(t.transaction_date, 1, 7) = ?
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label
                 ORDER BY amount DESC
                 """, month);
@@ -4954,11 +21308,13 @@ public class DatabaseHandler {
 
     public List<ReportRow> incomeSourceReport() {
         return report("""
-                SELECT COALESCE(c.category_name, 'Uncategorized') AS label, COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'INCOME'
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label
                 ORDER BY amount DESC
                 """);
@@ -4968,12 +21324,12 @@ public class DatabaseHandler {
         return reportWithAccount("""
                 SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
                        a.account_name AS account,
-                       COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
                 JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'INCOME'
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label, account
                 ORDER BY label, account
                 """);
@@ -4983,13 +21339,13 @@ public class DatabaseHandler {
         return reportWithAccount("""
                 SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
                        a.account_name AS account,
-                       COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
                 JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'INCOME'
                   AND substr(t.transaction_date, 1, 7) = ?
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label, account
                 ORDER BY label, account
                 """, month);
@@ -4999,12 +21355,12 @@ public class DatabaseHandler {
         return reportWithAccount("""
                 SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
                        a.account_name AS account,
-                       COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
                 JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'EXPENSE'
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label, account
                 ORDER BY label, account
                 """);
@@ -5014,13 +21370,13 @@ public class DatabaseHandler {
         return reportWithAccount("""
                 SELECT COALESCE(c.category_name, 'Uncategorized') AS label,
                        a.account_name AS account,
-                       COALESCE(SUM(t.amount), 0) AS amount
-                FROM transactions t
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
+                FROM valid_transactions t
                 JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN categories c ON c.id = t.category_id
                 WHERE t.transaction_type = 'EXPENSE'
                   AND substr(t.transaction_date, 1, 7) = ?
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label, account
                 ORDER BY label, account
                 """, month);
@@ -5028,11 +21384,13 @@ public class DatabaseHandler {
 
     public List<ReportRow> projectSpendingReport() {
         return report("""
-                SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
+                SELECT p.project_name AS label,
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
                 FROM projects p
-                LEFT JOIN transactions t ON t.project_id = p.id
+                LEFT JOIN valid_transactions t ON t.project_id = p.id
                     AND t.transaction_type = 'EXPENSE'
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 GROUP BY p.id
                 ORDER BY amount DESC
                 """);
@@ -5040,12 +21398,14 @@ public class DatabaseHandler {
 
     public List<ReportRow> projectSpendingReport(String month) {
         return report("""
-                SELECT p.project_name AS label, COALESCE(SUM(t.amount), 0) AS amount
+                SELECT p.project_name AS label,
+                       COALESCE(SUM(t.amount * COALESCE(cur.rate_to_base, 1)), 0) AS amount
                 FROM projects p
-                LEFT JOIN transactions t ON t.project_id = p.id
+                LEFT JOIN valid_transactions t ON t.project_id = p.id
                     AND t.transaction_type = 'EXPENSE'
                     AND substr(t.transaction_date, 1, 7) = ?
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 GROUP BY p.id
                 ORDER BY amount DESC
                 """, month);
@@ -5054,18 +21414,33 @@ public class DatabaseHandler {
     public List<ReportRow> accountBalanceReport() {
         return report("""
                 SELECT a.account_name AS label,
-                       a.opening_balance + COALESCE(SUM(
+                       (
+                       CASE
+                           WHEN a.opening_balance_date IS NULL
+                             OR trim(a.opening_balance_date) = ''
+                              OR date(a.opening_balance_date) <= date('now', 'localtime')
+                           THEN a.opening_balance
+                           ELSE 0
+                       END + COALESCE(SUM(
                            CASE
                               WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
                               ELSE 0
                           END
-                       ), 0) AS amount
+                       ), 0)
+                       ) * COALESCE(cur.rate_to_base, 1) AS amount
                 FROM accounts a
-                LEFT JOIN transactions t ON t.account_id = a.id
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
+                WHERE COALESCE(a.is_deleted, 0) = 0
+                  AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
                 """);
@@ -5074,40 +21449,57 @@ public class DatabaseHandler {
     public List<ReportRow> accountBalanceReportThroughMonth(String month) {
         return report("""
                 SELECT a.account_name AS label,
-                       a.opening_balance + COALESCE(SUM(
+                       (
+                       CASE
+                           WHEN a.opening_balance_date IS NULL
+                             OR trim(a.opening_balance_date) = ''
+                             OR substr(a.opening_balance_date, 1, 7) <= ?
+                           THEN a.opening_balance
+                           ELSE 0
+                       END + COALESCE(SUM(
                            CASE
                               WHEN t.transaction_type = 'INCOME' THEN t.amount
+                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
+                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
+                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
                               ELSE 0
                           END
-                       ), 0) AS amount
+                       ), 0)
+                       ) * COALESCE(cur.rate_to_base, 1) AS amount
                 FROM accounts a
-                LEFT JOIN transactions t ON t.account_id = a.id
-                    AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                LEFT JOIN valid_transactions t ON t.account_id = a.id
                     AND substr(t.transaction_date, 1, 7) <= ?
+                WHERE COALESCE(a.is_deleted, 0) = 0
+                  AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
-                """, month);
+                """, month, month);
     }
 
     public List<ReportRow> lendingByPersonReport() {
         return report("""
                 SELECT COALESCE(pe.full_name, 'Unassigned') AS label,
-                       COALESCE(SUM(
-                           CASE
-                               WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
-                               WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
-                               WHEN t.transaction_purpose = 'MONEY_BORROWED' THEN -t.amount
-                               WHEN t.transaction_purpose = 'BORROWED_REPAID' THEN t.amount
-                               ELSE 0
-                           END
-                       ), 0) AS amount
-                FROM transactions t
+                        COALESCE(SUM(
+                            CASE
+                                WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
+                                WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
+                                WHEN t.transaction_purpose = 'MONEY_BORROWED' THEN -t.amount
+                                WHEN t.transaction_purpose = 'BORROWED_REPAID' THEN t.amount
+                                ELSE 0
+                            END
+                            * COALESCE(cur.rate_to_base, 1)
+                        ), 0) AS amount
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN people pe ON pe.id = t.person_id
                 WHERE t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID', 'MONEY_BORROWED', 'BORROWED_REPAID')
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label
                 ORDER BY amount DESC
                 """);
@@ -5116,20 +21508,22 @@ public class DatabaseHandler {
     public List<ReportRow> lendingByPersonReport(String month) {
         return report("""
                 SELECT COALESCE(pe.full_name, 'Unassigned') AS label,
-                       COALESCE(SUM(
-                           CASE
-                               WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
-                               WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
-                               WHEN t.transaction_purpose = 'MONEY_BORROWED' THEN -t.amount
-                               WHEN t.transaction_purpose = 'BORROWED_REPAID' THEN t.amount
-                               ELSE 0
-                           END
-                       ), 0) AS amount
-                FROM transactions t
+                        COALESCE(SUM(
+                            CASE
+                                WHEN t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN') THEN t.amount
+                                WHEN t.transaction_purpose = 'LENT_REPAID' THEN -t.amount
+                                WHEN t.transaction_purpose = 'MONEY_BORROWED' THEN -t.amount
+                                WHEN t.transaction_purpose = 'BORROWED_REPAID' THEN t.amount
+                                ELSE 0
+                            END
+                            * COALESCE(cur.rate_to_base, 1)
+                        ), 0) AS amount
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
                 LEFT JOIN people pe ON pe.id = t.person_id
                 WHERE t.transaction_purpose IN ('MONEY_LENT', 'SUPPORT_GIVEN', 'LENT_REPAID', 'MONEY_BORROWED', 'BORROWED_REPAID')
                   AND substr(t.transaction_date, 1, 7) = ?
-                  AND COALESCE(t.transaction_status, 'COMPLETED') <> 'CANCELLED'
                 GROUP BY label
                 ORDER BY amount DESC
                 """, month);
@@ -5149,11 +21543,13 @@ public class DatabaseHandler {
         return rows;
     }
 
-    private List<ReportRow> report(String sql, String value) {
+    private List<ReportRow> report(String sql, String... values) {
         List<ReportRow> rows = new ArrayList<>();
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, value);
+            for (int index = 0; index < values.length; index++) {
+                statement.setString(index + 1, values[index]);
+            }
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     rows.add(new ReportRow(resultSet.getString("label"), resultSet.getDouble("amount")));

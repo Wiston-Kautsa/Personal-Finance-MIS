@@ -63,13 +63,12 @@ public class UserManagementController {
         authEventColumn.setCellValueFactory(new PropertyValueFactory<>("eventType"));
         authResultColumn.setCellValueFactory(new PropertyValueFactory<>("result"));
         authDetailsColumn.setCellValueFactory(new PropertyValueFactory<>("details"));
-        roleCombo.setItems(FXCollections.observableArrayList(SystemUser.ROLE_USER, SystemUser.ROLE_SUPER_ADMIN));
+        roleCombo.setItems(FXCollections.observableArrayList(
+                SystemUser.ROLE_USER,
+                SystemUser.ROLE_ADMIN,
+                SystemUser.ROLE_SUPER_ADMIN
+        ));
         roleCombo.setValue(SystemUser.ROLE_USER);
-        emailField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (isDevelopmentSuperAdminEmail(newValue)) {
-                roleCombo.setValue(SystemUser.ROLE_SUPER_ADMIN);
-            }
-        });
         configureContextMenus();
         refresh();
     }
@@ -102,7 +101,7 @@ public class UserManagementController {
                     usernameField.getText(),
                     emailField.getText(),
                     temporaryPasswordField.getText(),
-                    isDevelopmentSuperAdminEmail(emailField.getText()) ? SystemUser.ROLE_SUPER_ADMIN : roleCombo.getValue(),
+                    roleCombo.getValue(),
                     UserSession.getAuthenticatedUser().getId()
             );
             clearForm();
@@ -258,10 +257,6 @@ public class UserManagementController {
         if (!UserSession.isSuperAdmin()) {
             throw new SecurityException("Only a super administrator can manage users.");
         }
-    }
-
-    private boolean isDevelopmentSuperAdminEmail(String email) {
-        return AuthDatabase.DEFAULT_SUPER_ADMIN_EMAIL.equalsIgnoreCase(email == null ? "" : email.trim());
     }
 
     private String rootMessage(Throwable throwable) {

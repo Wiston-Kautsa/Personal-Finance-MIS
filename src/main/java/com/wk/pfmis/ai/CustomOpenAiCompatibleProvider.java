@@ -7,13 +7,16 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class CustomOpenAiCompatibleProvider implements AiProvider {
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(4);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(20);
+    private static final int MAX_RESPONSE_BYTES = 1_048_576;
 
     private final AiSettings settings;
     private final HttpClient client = HttpClient.newBuilder()
@@ -42,11 +45,14 @@ public class CustomOpenAiCompatibleProvider implements AiProvider {
         if (!settings.getApiKey().isBlank()) {
             builder.header("Authorization", "Bearer " + settings.getApiKey());
         }
-        HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        if (response.body().length > MAX_RESPONSE_BYTES) {
+            throw new IllegalStateException("AI response was too large to process safely.");
+        }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalStateException("AI request failed with HTTP " + response.statusCode() + ".");
         }
-        return extractRecommendation(response.body());
+        return extractRecommendation(new String(response.body(), StandardCharsets.UTF_8));
     }
 
     @Override
@@ -65,13 +71,37 @@ public class CustomOpenAiCompatibleProvider implements AiProvider {
 
     protected URI chatCompletionsUri(String endpoint) {
         String normalized = trimTrailingSlash(endpoint);
+        URI uri;
         if (normalized.endsWith("/chat/completions")) {
-            return URI.create(normalized);
+            uri = URI.create(normalized);
+        } else if (normalized.matches("(?i).*/v\\d+")) {
+            uri = URI.create(normalized + "/chat/completions");
+        } else {
+            uri = URI.create(normalized + "/v1/chat/completions");
         }
-        if (normalized.matches("(?i).*/v\\d+")) {
-            return URI.create(normalized + "/chat/completions");
+        return requireSecureEndpoint(uri);
+    }
+
+    private URI requireSecureEndpoint(URI uri) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ENGLISH);
+        if ("https".equals(scheme)) {
+            return uri;
         }
-        return URI.create(normalized + "/v1/chat/completions");
+        if ("http".equals(scheme) && isLoopbackHost(uri.getHost())) {
+            return uri;
+        }
+        throw new IllegalArgumentException("Custom AI endpoints must use HTTPS unless they are loopback.");
+    }
+
+    private boolean isLoopbackHost(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String normalized = host.toLowerCase(Locale.ENGLISH);
+        return "localhost".equals(normalized)
+                || "127.0.0.1".equals(normalized)
+                || "::1".equals(normalized)
+                || "[::1]".equals(normalized);
     }
 
     protected String extractRecommendation(String responseBody) {
@@ -160,8 +190,9 @@ public class CustomOpenAiCompatibleProvider implements AiProvider {
 
     private String jsonEscape(String value) {
         StringBuilder escaped = new StringBuilder();
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
+        String source = value == null ? "" : value;
+        for (int index = 0; index < source.length(); index++) {
+            char character = source.charAt(index);
             switch (character) {
                 case '"' -> escaped.append("\\\"");
                 case '\\' -> escaped.append("\\\\");
