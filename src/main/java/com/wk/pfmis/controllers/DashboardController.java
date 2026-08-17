@@ -1205,8 +1205,8 @@ public class DashboardController {
     private void configureUserSecurityHeader() {
         SystemUser signedIn = UserSession.getAuthenticatedUser();
         SystemUser workspace = UserSession.getWorkspaceUser();
-        signedInUserLabel.setText("Signed in: " + signedIn.getDisplayName() + " · " + signedIn.getRoleDisplay());
-        activeWorkspaceLabel.setText("Workspace: " + workspace.getDisplayName() + " (" + workspace.getUsername() + ")");
+        signedInUserLabel.setText("Signed in: " + signedIn.getDisplayName());
+        activeWorkspaceLabel.setText("Workspace: " + workspace.getUsername());
         boolean superAdmin = signedIn.isSuperAdmin();
         if (dataMaintenanceButton != null) {
             dataMaintenanceButton.setVisible(superAdmin);

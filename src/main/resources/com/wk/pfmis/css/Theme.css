@@ -3175,10 +3175,70 @@
 
 .user-session-bar {
     -fx-background-color: white;
-    -fx-background-radius: 10px;
+    -fx-background-radius: 8px;
     -fx-border-color: #d8e1e8;
-    -fx-border-radius: 10px;
-    -fx-padding: 12px 14px;
+    -fx-border-radius: 8px;
+    -fx-padding: 20px;
+}
+
+.dashboard-session-title {
+    -fx-font-size: 28px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #172033;
+}
+
+.session-detail-row {
+    -fx-spacing: 16px;
+}
+
+.session-identity-row {
+    -fx-min-height: 38px;
+}
+
+.session-identity-label {
+    -fx-text-fill: #243041;
+    -fx-font-size: 15px;
+    -fx-font-weight: 400;
+}
+
+.session-actions {
+    -fx-min-height: 38px;
+    -fx-spacing: 14px;
+}
+
+.session-secondary-action,
+.session-danger-action {
+    -fx-min-height: 38px;
+    -fx-pref-height: 38px;
+    -fx-cursor: hand;
+    -fx-alignment: CENTER;
+    -fx-background-radius: 6px;
+    -fx-border-radius: 6px;
+    -fx-font-size: 14px;
+    -fx-font-weight: 600;
+    -fx-padding: 0 14px;
+}
+
+.session-secondary-action {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #cbd5e1;
+    -fx-text-fill: #172033;
+}
+
+.session-secondary-action:hover {
+    -fx-background-color: #eef2f7;
+    -fx-border-color: #b8c4d4;
+}
+
+.session-danger-action {
+    -fx-background-color: #991b1b;
+    -fx-border-color: #8f1d1d;
+    -fx-text-fill: white;
+}
+
+.session-danger-action:hover {
+    -fx-background-color: #7f1d1d;
+    -fx-border-color: #7f1d1d;
 }
 
 .session-user-label {

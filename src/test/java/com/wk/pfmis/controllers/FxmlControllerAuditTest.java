@@ -145,6 +145,40 @@ class FxmlControllerAuditTest {
     }
 
     @Test
+    void dashboardHeaderKeepsIdentityReadableAndUsesSessionIdentityFields() throws Exception {
+        Path dashboard = fxmlFiles().stream()
+                .filter(path -> path.getFileName().toString().equals("Dashboard.fxml"))
+                .findFirst()
+                .orElseThrow();
+        String content = Files.readString(dashboard);
+        String header = content.substring(
+                content.indexOf("styleClass=\"user-session-bar\""),
+                content.indexOf("fx:id=\"dashboardSummaryPane\"")
+        );
+
+        assertTrue(header.contains("text=\"Dashboard\""));
+        assertTrue(header.contains("<FlowPane"));
+        assertTrue(header.contains("fx:id=\"signedInUserLabel\""));
+        assertTrue(header.contains("fx:id=\"activeWorkspaceLabel\""));
+        assertTrue(header.contains("textOverrun=\"CLIP\""));
+        assertFalse(header.contains("textOverrun=\"ELLIPSIS\""));
+        assertTrue(header.contains("HBox.hgrow=\"ALWAYS\""));
+        assertTrue(header.contains("text=\"My Account\""));
+        assertTrue(header.contains("text=\"Sign Out\""));
+        assertFalse(header.contains("prefWidth=\"122\""));
+        assertFalse(header.contains("prefWidth=\"98\""));
+
+        String controller = Files.readString(Path.of("src/main/java/com/wk/pfmis/controllers/DashboardController.java"));
+        String method = controller.substring(
+                controller.indexOf("private void configureUserSecurityHeader()"),
+                controller.indexOf("@FXML", controller.indexOf("private void configureUserSecurityHeader()"))
+        );
+        assertTrue(method.contains("signedIn.getDisplayName()"));
+        assertTrue(method.contains("workspace.getUsername()"));
+        assertFalse(method.contains("getRoleDisplay()"));
+    }
+
+    @Test
     void accountsPassiveTypeRefreshDoesNotRequireAccountType() throws Exception {
         Path controller = Path.of("src/main/java/com/wk/pfmis/controllers/AccountsController.java");
         String source = Files.readString(controller);

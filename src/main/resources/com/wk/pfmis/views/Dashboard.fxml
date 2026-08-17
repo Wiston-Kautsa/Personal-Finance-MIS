@@ -13,6 +13,7 @@
 <?import javafx.scene.chart.NumberAxis?>
 <?import javafx.scene.chart.PieChart?>
 <?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
@@ -191,18 +192,21 @@
     <center>
         <ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="ALWAYS" styleClass="workspace-scroll">
             <VBox spacing="18" styleClass="workspace">
-                <HBox spacing="12" alignment="CENTER_LEFT" styleClass="user-session-bar">
-                    <VBox spacing="2" HBox.hgrow="ALWAYS">
-                        <Label fx:id="sectionTitleLabel" text="Dashboard" styleClass="page-title"/>
-                        <HBox spacing="12">
-                            <Label fx:id="signedInUserLabel" text="Signed in" styleClass="session-user-label"/>
-                            <Label fx:id="activeWorkspaceLabel" text="Workspace" styleClass="workspace-security-label"/>
+                <VBox spacing="12" maxWidth="Infinity" styleClass="user-session-bar">
+                    <Label fx:id="sectionTitleLabel" text="Dashboard" styleClass="dashboard-session-title"/>
+                    <HBox spacing="16" alignment="CENTER_LEFT" maxWidth="Infinity" styleClass="session-detail-row">
+                        <FlowPane hgap="28" vgap="6" prefWrapLength="720" alignment="CENTER_LEFT" rowValignment="CENTER" minWidth="0" styleClass="session-identity-row">
+                            <Label fx:id="signedInUserLabel" text="Signed in:" wrapText="true" minWidth="0" maxWidth="Infinity" textOverrun="CLIP" styleClass="session-identity-label"/>
+                            <Label fx:id="activeWorkspaceLabel" text="Workspace:" wrapText="true" minWidth="0" maxWidth="Infinity" textOverrun="CLIP" styleClass="session-identity-label"/>
+                        </FlowPane>
+                        <Region minWidth="16" maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
+                        <HBox spacing="14" alignment="CENTER_RIGHT" minWidth="USE_PREF_SIZE" styleClass="session-actions">
+                            <Button text="My Account" onAction="#showMyAccount" minHeight="38" prefHeight="38" maxHeight="38" styleClass="session-secondary-action"/>
+                            <Button fx:id="returnWorkspaceButton" text="My Workspace" onAction="#returnToMyWorkspace" minHeight="38" prefHeight="38" maxHeight="38" styleClass="session-secondary-action"/>
+                            <Button text="Sign Out" onAction="#logout" minHeight="38" prefHeight="38" maxHeight="38" styleClass="session-danger-action"/>
                         </HBox>
-                    </VBox>
-                    <Button text="My Account" onAction="#showMyAccount" styleClass="secondary-button"/>
-                    <Button fx:id="returnWorkspaceButton" text="My Workspace" onAction="#returnToMyWorkspace" styleClass="secondary-button"/>
-                    <Button text="Sign Out" onAction="#logout" styleClass="danger-button"/>
-                </HBox>
+                    </HBox>
+                </VBox>
 
                 <VBox fx:id="dashboardSummaryPane" spacing="18" maxWidth="Infinity" styleClass="dashboard-home">
                     <HBox spacing="14" alignment="CENTER_LEFT" styleClass="dashboard-header-panel">
