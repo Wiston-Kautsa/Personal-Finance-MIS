@@ -19,13 +19,22 @@ public final class AppConfig {
     }
 
     public static String get(String key, String fallback) {
-        String environmentValue = System.getenv(key);
-        if (hasText(environmentValue)) {
-            return environmentValue.trim();
-        }
         String systemProperty = System.getProperty(key);
         if (hasText(systemProperty)) {
             return systemProperty.trim();
+        }
+
+        if (hasExplicitEnvFileReference()) {
+            if (envFileValues.containsKey(key)) {
+                return envFileValues.get(key).trim();
+            }
+            String environmentValue = System.getenv(key);
+            return hasText(environmentValue) ? environmentValue.trim() : fallback;
+        }
+
+        String environmentValue = System.getenv(key);
+        if (hasText(environmentValue)) {
+            return environmentValue.trim();
         }
         String fileValue = envFileValues.get(key);
         return hasText(fileValue) ? fileValue.trim() : fallback;
@@ -179,6 +188,10 @@ public final class AppConfig {
             value = System.getProperty("PFMIS_APP_ENV");
         }
         return ApplicationEnvironment.from(hasText(value) ? value : "production");
+    }
+
+    private static boolean hasExplicitEnvFileReference() {
+        return hasText(System.getenv("PFMIS_ENV_FILE")) || hasText(System.getProperty("PFMIS_ENV_FILE"));
     }
 
     private static Path resolveApplicationDataDirectory() {

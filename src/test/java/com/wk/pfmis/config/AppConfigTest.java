@@ -81,6 +81,16 @@ class AppConfigTest {
     }
 
     @Test
+    void explicitEnvFileBlankValueOverridesProcessEnvironmentFallback() throws Exception {
+        Path envFile = tempDir.resolve(".env");
+        Files.writeString(envFile, "PFMIS_SUPER_ADMIN_PASSWORD=\n");
+        System.setProperty("PFMIS_ENV_FILE", envFile.toString());
+        AppConfig.reload();
+
+        assertEquals("", AppConfig.get("PFMIS_SUPER_ADMIN_PASSWORD", "fallback"));
+    }
+
+    @Test
     void parsesFxMailAndLoggingTypedValues() {
         System.setProperty("PFMIS_FX_REQUEST_TIMEOUT_SECONDS", "9");
         System.setProperty("PFMIS_FX_CONNECT_TIMEOUT_SECONDS", "4");
