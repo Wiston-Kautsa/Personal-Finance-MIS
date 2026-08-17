@@ -3,6 +3,8 @@ package com.wk.pfmis.domain;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FinancialTransactionEffectTest {
     private static final Money MWK_100 = Money.parseMajor("100.00", "MWK");
@@ -27,7 +29,9 @@ class FinancialTransactionEffectTest {
     void borrowedLoanDisbursementIsCashIncreaseButNotOrdinaryIncome() {
         assertEquals(1, FinancialTransactionEffect.accountBalanceMultiplier("LOAN", "LOAN_PROCEEDS"));
         assertEquals(1, FinancialTransactionEffect.accountBalanceMultiplier("LOAN", "MONEY_BORROWED"));
-        assertEquals(0, FinancialTransactionEffect.accountBalanceMultiplier("INCOME", "LOAN_PROCEEDS"));
+        assertTrue(FinancialTransactionEffect.isOrdinaryIncome("INCOME", "NORMAL"));
+        assertFalse(FinancialTransactionEffect.isOrdinaryIncome("LOAN", "LOAN_PROCEEDS"));
+        assertFalse(FinancialTransactionEffect.isOrdinaryIncome("INCOME", "LOAN_PROCEEDS"));
     }
 
     @Test

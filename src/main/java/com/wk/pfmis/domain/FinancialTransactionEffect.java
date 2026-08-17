@@ -61,6 +61,16 @@ public final class FinancialTransactionEffect {
         return 0;
     }
 
+    public static boolean isOrdinaryIncome(String transactionType, String transactionPurpose) {
+        return "INCOME".equals(normalize(transactionType))
+                && !Set.of("LOAN_PROCEEDS", "MONEY_BORROWED", "LENT_REPAID").contains(normalize(transactionPurpose));
+    }
+
+    public static boolean isOrdinaryExpense(String transactionType, String transactionPurpose) {
+        return "EXPENSE".equals(normalize(transactionType))
+                && !Set.of("ASSET_PURCHASE_RECOGNITION").contains(normalize(transactionPurpose));
+    }
+
     public static String accountBalanceCaseSql(String transactionTypeExpression,
                                                String transactionPurposeExpression,
                                                String amountExpression) {
