@@ -3,6 +3,7 @@ package com.wk.pfmis.db;
 import com.wk.pfmis.ai.AiCredentialStore;
 import com.wk.pfmis.domain.ChipeleganyuContributionStatus;
 import com.wk.pfmis.domain.ChipeleganyuMissedReason;
+import com.wk.pfmis.domain.FinancialTransactionEffect;
 import com.wk.pfmis.domain.Money;
 import com.wk.pfmis.fx.ExchangeRateQuote;
 import com.wk.pfmis.fx.ExchangeRateSource;
@@ -168,6 +169,8 @@ public class DatabaseHandler {
     private static final String STATUS_CANCELLED = "CANCELLED";
     private static final String STATUS_REVERSED = "REVERSED";
     private static final double LOAN_CLEARANCE_EPSILON = 0.005;
+    private static final String ACCOUNT_BALANCE_EFFECT_SQL =
+            FinancialTransactionEffect.accountBalanceCaseSql("t.transaction_type", "t.transaction_purpose", "t.amount");
 
     private record LoanSide(Integer personId, String principalPurpose, String repaymentPurpose) {
     }
@@ -4490,27 +4493,14 @@ public class DatabaseHandler {
                               OR date(a.opening_balance_date) <= date('now', 'localtime')
                            THEN a.opening_balance
                            ELSE 0
-                       END + COALESCE(SUM(
-                           CASE
-                              WHEN t.transaction_type = 'INCOME' THEN t.amount
-                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                              ELSE 0
-                           END
-                       ), 0) AS current_balance
+                       END + COALESCE(SUM(%s), 0) AS current_balance
                 FROM accounts a
                 LEFT JOIN valid_transactions t ON t.account_id = a.id
                 WHERE COALESCE(a.is_deleted, 0) = 0
                   AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
-                """;
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -5566,27 +5556,14 @@ public class DatabaseHandler {
                               OR date(a.opening_balance_date) <= date('now', 'localtime')
                         THEN a.opening_balance
                         ELSE 0
-                    END + COALESCE(SUM(
-                        CASE
-                            WHEN t.transaction_type = 'INCOME' THEN t.amount
-                            WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                            WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                            WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                            WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                            WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                            WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                            WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                            WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                            ELSE 0
-                        END
-                    ), 0)
+                    END + COALESCE(SUM(%s), 0)
                 ) AS current_balance
                 FROM accounts a
                 LEFT JOIN valid_transactions t ON t.account_id = a.id
                 WHERE a.id = ?
                   AND COALESCE(a.is_deleted, 0) = 0
                 GROUP BY a.id
-                """, accountId);
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL), accountId);
     }
 
     private boolean latestReconciliationIsClean(Connection connection, int accountId) throws SQLException {
@@ -5938,17 +5915,7 @@ public class DatabaseHandler {
                         WHEN a.opening_balance_date IS NULL OR trim(a.opening_balance_date) = '' OR date(a.opening_balance_date) <= date('now', 'localtime')
                                THEN a.opening_balance ELSE 0
                            END + (
-                               SELECT COALESCE(SUM(CASE
-                                   WHEN t.transaction_type IN ('INCOME', 'ASSET_SALE') THEN t.amount
-                                   WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                                   WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                                   WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                                   WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                                   WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                                   ELSE 0
-                               END), 0)
+                               SELECT COALESCE(SUM(%s), 0)
                                FROM valid_transactions t
                                WHERE t.account_id = a.id
                            )
@@ -5969,7 +5936,7 @@ public class DatabaseHandler {
                 WHERE COALESCE(g.is_deleted, 0) = 0
                   AND (? IS NULL OR g.group_type = ?)
                 ORDER BY CASE WHEN upper(g.status) = 'ACTIVE' THEN 0 ELSE 1 END, g.group_name
-                """;
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             String filter = groupTypeFilter == null || groupTypeFilter.isBlank() ? null : normalizedCommunityGroupType(groupTypeFilter);
@@ -6803,18 +6770,7 @@ public class DatabaseHandler {
                               OR date(a.opening_balance_date) <= date('now', 'localtime')
                            THEN a.opening_balance
                            ELSE 0
-                       END + COALESCE(SUM(
-                           CASE
-                              WHEN t.transaction_type = 'INCOME' THEN t.amount
-                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                              ELSE 0
-                           END
-                       ), 0) AS current_contribution_balance,
+                       END + COALESCE(SUM(%s), 0) AS current_contribution_balance,
                        p.created_at, p.updated_at
                 FROM community_savings_profiles p
                 JOIN accounts a ON a.id = p.account_id
@@ -6825,7 +6781,7 @@ public class DatabaseHandler {
                   AND (? IS NULL OR p.id = ?)
                 GROUP BY p.id
                 ORDER BY a.account_name
-                """;
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL);
         try (Connection connection = connect();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             setNullableInt(statement, 1, profileId);
@@ -16677,26 +16633,13 @@ public class DatabaseHandler {
                              OR date(a.opening_balance_date) <= date(?)
                            THEN a.opening_balance
                            ELSE 0
-                       END + COALESCE(SUM(
-                    CASE
-                       WHEN t.transaction_type = 'INCOME' THEN t.amount
-                       WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                       WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                       WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                       WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                       WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                       WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                       WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                       WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                       ELSE 0
-                    END
-                ), 0) AS balance
+                       END + COALESCE(SUM(%s), 0) AS balance
                 FROM accounts a
                 LEFT JOIN valid_transactions t ON t.account_id = a.id
                     AND t.transaction_date <= ?
                 WHERE a.id = ?
                 GROUP BY a.id
-                """;
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL);
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, date);
             statement.setString(2, date);
@@ -19263,20 +19206,7 @@ public class DatabaseHandler {
                           OR date(a.opening_balance_date) <= date('now', 'localtime')
                                    THEN a.opening_balance
                                    ELSE 0
-                               END + COALESCE(SUM(
-                               CASE
-                                   WHEN t.transaction_type = 'INCOME' THEN t.amount
-                                   WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                                   WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                                   WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                                  WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                                  WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                                  WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                                  WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                                  ELSE 0
-                               END
-                           ), 0)
+                               END + COALESCE(SUM(%s), 0)
                            ) * COALESCE(cur.rate_to_base, 1) AS account_balance
                     FROM accounts a
                     LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
@@ -19285,7 +19215,7 @@ public class DatabaseHandler {
                       AND COALESCE(a.account_category, 'ASSET') <> 'LIABILITY'
                     GROUP BY a.id
                 )
-                """);
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL));
     }
 
     private int parseRecordId(String recordId) {
@@ -22084,20 +22014,7 @@ public class DatabaseHandler {
                                       OR date(a.opening_balance_date) <= date('now', 'localtime')
                                                THEN a.opening_balance
                                                ELSE 0
-                                           END + COALESCE(SUM(
-                                            CASE
-                                                WHEN t.transaction_type = 'INCOME' THEN t.amount
-                                                WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                                               WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                                               WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                                               WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                                               WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                                               WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                                               WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                                               ELSE 0
-                                            END
-                                       ), 0)
+                                           END + COALESCE(SUM(%s), 0)
                                        ) * COALESCE(cur.rate_to_base, 1) AS account_balance
                                  FROM accounts a
                                 LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
@@ -22108,7 +22025,7 @@ public class DatabaseHandler {
                                   AND COALESCE(a.account_category, 'ASSET') <> 'LIABILITY'
                                 GROUP BY a.id
                             )
-                            """),
+                            """.formatted(ACCOUNT_BALANCE_EFFECT_SQL)),
                     queryMonthlyTotal(connection, month, "INCOME"),
                     queryMonthlyTotal(connection, month, "EXPENSE"),
                     queryInt(connection, "SELECT COUNT(*) FROM accounts WHERE status = 'ACTIVE' AND COALESCE(is_deleted, 0) = 0 AND COALESCE(is_system_account, 0) = 0"),
@@ -22149,18 +22066,7 @@ public class DatabaseHandler {
                               OR date(a.opening_balance_date) <= date('now', 'localtime')
                                        THEN a.opening_balance
                                        ELSE 0
-                                   END + COALESCE(SUM(
-                                    CASE
-                                        WHEN t.transaction_type = 'INCOME' THEN t.amount
-                                        WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                                        WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                                        ELSE 0
-                                    END
-                               ), 0)
+                                   END + COALESCE(SUM(__ACCOUNT_BALANCE_EFFECT__), 0)
                                ) * COALESCE(cur.rate_to_base, 1) AS account_balance
                         FROM accounts a
                         LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
@@ -22178,7 +22084,7 @@ public class DatabaseHandler {
                           )
                         GROUP BY a.id
                     )
-                    """);
+                    """.replace("__ACCOUNT_BALANCE_EFFECT__", ACCOUNT_BALANCE_EFFECT_SQL));
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load available cash and bank balance", exception);
         }
@@ -22197,18 +22103,7 @@ public class DatabaseHandler {
                             OR date(a.opening_balance_date) <= date('now', 'localtime')
                                        THEN a.opening_balance
                                        ELSE 0
-                                   END + COALESCE(SUM(
-                                    CASE
-                                        WHEN t.transaction_type = 'INCOME' THEN t.amount
-                                        WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                                        WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                                        WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                                        WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                                        ELSE 0
-                                    END
-                               ), 0)
+                                   END + COALESCE(SUM(__ACCOUNT_BALANCE_EFFECT__), 0)
                                ) * COALESCE(cur.rate_to_base, 1) AS account_balance
                         FROM community_savings_profiles p
                         JOIN accounts a ON a.id = p.account_id
@@ -22219,7 +22114,7 @@ public class DatabaseHandler {
                           AND COALESCE(a.is_system_account, 0) = 1
                         GROUP BY a.id
                     )
-                    """);
+                    """.replace("__ACCOUNT_BALANCE_EFFECT__", ACCOUNT_BALANCE_EFFECT_SQL));
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load Community Savings balance", exception);
         }
@@ -22410,20 +22305,7 @@ public class DatabaseHandler {
                               OR date(a.opening_balance_date) <= date('now', 'localtime')
                            THEN a.opening_balance
                            ELSE 0
-                       END + COALESCE(SUM(
-                           CASE
-                              WHEN t.transaction_type = 'INCOME' THEN t.amount
-                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                              ELSE 0
-                          END
-                       ), 0)
+                       END + COALESCE(SUM(%s), 0)
                        ) * COALESCE(cur.rate_to_base, 1) AS amount
                 FROM accounts a
                 LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
@@ -22432,7 +22314,7 @@ public class DatabaseHandler {
                   AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
-                """);
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL));
     }
 
     public List<ReportRow> accountBalanceReportThroughMonth(String month) {
@@ -22445,20 +22327,7 @@ public class DatabaseHandler {
                              OR substr(a.opening_balance_date, 1, 7) <= ?
                            THEN a.opening_balance
                            ELSE 0
-                       END + COALESCE(SUM(
-                           CASE
-                              WHEN t.transaction_type = 'INCOME' THEN t.amount
-                              WHEN t.transaction_type = 'ASSET_SALE' THEN t.amount
-                              WHEN t.transaction_type = 'EXPENSE' THEN -t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_IN' THEN t.amount
-                              WHEN t.transaction_type = 'TRANSFER' AND t.transaction_purpose = 'TRANSFER_OUT' THEN -t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_BORROWED', 'LENT_REPAID', 'LOAN_PROCEEDS', 'COMMUNITY_LOAN_RECEIVABLE_INCREASE', 'COMMUNITY_LOAN_LIABILITY_INCREASE') THEN t.amount
-                              WHEN t.transaction_type = 'LOAN' AND t.transaction_purpose IN ('MONEY_LENT', 'BORROWED_REPAID', 'LOAN_PRINCIPAL_PAYMENT', 'LOAN_SETTLEMENT', 'COMMUNITY_LOAN_RECEIVABLE_DECREASE', 'COMMUNITY_LOAN_LIABILITY_DECREASE') THEN -t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_INCREASE' THEN t.amount
-                              WHEN t.transaction_type = 'ADJUSTMENT' AND t.transaction_purpose = 'BALANCE_DECREASE' THEN -t.amount
-                              ELSE 0
-                          END
-                       ), 0)
+                       END + COALESCE(SUM(%s), 0)
                        ) * COALESCE(cur.rate_to_base, 1) AS amount
                 FROM accounts a
                 LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
@@ -22468,7 +22337,7 @@ public class DatabaseHandler {
                   AND COALESCE(a.is_system_account, 0) = 0
                 GROUP BY a.id
                 ORDER BY a.account_name
-                """, month, month);
+                """.formatted(ACCOUNT_BALANCE_EFFECT_SQL), month, month);
     }
 
     public List<ReportRow> lendingByPersonReport() {
