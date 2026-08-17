@@ -4341,292 +4341,383 @@
     -fx-border-radius: 7;
 }
 
-/* Final professional login screen */
+/* Dark PFMIS login screen */
+.login-root,
 .auth-standard-login-root {
-    -fx-background-color: linear-gradient(to bottom right, #edf3f7, #f8fbfd 44%, #e5edf3);
+    -fx-background-color: #111827;
+    -fx-background-insets: 0;
 }
 
+.login-root .label {
+    -fx-text-fill: #cbd5e1;
+}
+
+.login-root .login-scene-shell,
 .auth-standard-login-root .auth-modern-shell {
-    -fx-background-color: linear-gradient(to bottom right, #edf3f7, #f8fbfd 44%, #e5edf3);
+    -fx-background-color: #111827;
+    -fx-background-insets: 0;
     -fx-padding: 28;
 }
 
+.login-root .login-card,
 .auth-standard-login-root .auth-modern-card {
-    -fx-background-color: #ffffff;
-    -fx-background-radius: 16;
-    -fx-border-color: rgba(15, 23, 42, 0.10);
+    -fx-background-color: #172033;
+    -fx-background-radius: 14;
+    -fx-border-color: #263449;
     -fx-border-width: 1;
-    -fx-border-radius: 16;
-    -fx-effect: dropshadow(gaussian, rgba(15, 23, 42, 0.22), 28, 0.16, 0, 10);
+    -fx-border-radius: 14;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.28), 24, 0.16, 0, 10);
 }
 
+.login-root .login-brand-panel,
 .auth-standard-login-root .auth-brand-panel {
-    -fx-background-color: linear-gradient(to bottom right, #0b1f33, #123b58 58%, #0c2f34);
-    -fx-background-radius: 16 0 0 16;
+    -fx-background-color: #0b1220;
+    -fx-background-radius: 14 0 0 14;
 }
 
+.login-root .login-form-panel,
 .auth-standard-login-root .auth-form-panel {
-    -fx-background-color: #ffffff;
-    -fx-background-radius: 0 16 16 0;
+    -fx-background-color: #111827;
+    -fx-background-radius: 0 14 14 0;
 }
 
 .auth-standard-login-root .auth-brand-mark {
-    -fx-background-color: rgba(16, 185, 129, 0.15);
-    -fx-border-color: rgba(167, 243, 208, 0.28);
+    -fx-background-color: #172033;
+    -fx-border-color: #263449;
     -fx-border-width: 1;
-    -fx-background-radius: 18;
-    -fx-border-radius: 18;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
 }
 
 .auth-standard-login-root .auth-brand-mark-icon {
     -fx-fill: transparent;
-    -fx-stroke: #a7f3d0;
-    -fx-stroke-width: 2.1;
+    -fx-stroke: #60a5fa;
+    -fx-stroke-width: 2;
 }
 
+.login-root .brand-title,
 .auth-standard-login-root .auth-brand-name {
-    -fx-font-size: 34px;
+    -fx-font-size: 26px;
     -fx-font-weight: 900;
-    -fx-text-fill: #ffffff;
+    -fx-text-fill: #f8fafc;
 }
 
-.auth-standard-login-root .auth-brand-subtitle {
+.login-root .brand-subtitle,
+.auth-standard-login-root .auth-brand-subtitle,
+.auth-standard-login-root .auth-brand-footer-title {
     -fx-font-size: 14px;
     -fx-font-weight: 800;
-    -fx-text-fill: #a7f3d0;
+    -fx-text-fill: #cbd5e1;
 }
 
-.auth-standard-login-root .auth-brand-tagline {
-    -fx-font-size: 13px;
-    -fx-font-weight: 700;
-    -fx-text-fill: #d6e5ef;
-}
-
-.auth-standard-login-root .auth-brand-footer-title {
-    -fx-font-size: 12px;
-    -fx-font-weight: 900;
-    -fx-text-fill: #ffffff;
-}
-
+.login-root .brand-description,
+.auth-standard-login-root .auth-brand-tagline,
 .auth-standard-login-root .auth-brand-footer-copy {
-    -fx-font-size: 12px;
-    -fx-line-spacing: 2;
-    -fx-text-fill: #bfd0dc;
+    -fx-font-size: 13px;
+    -fx-line-spacing: 3;
+    -fx-text-fill: #94a3b8;
 }
 
+.login-root .login-heading,
 .auth-standard-login-root .auth-standard-title {
     -fx-font-size: 24px;
     -fx-font-weight: 900;
-    -fx-text-fill: #132033;
+    -fx-text-fill: #f8fafc;
 }
 
+.login-root .login-heading-small,
 .auth-standard-login-root .auth-standard-title-small {
     -fx-font-size: 18px;
     -fx-font-weight: 900;
-    -fx-text-fill: #132033;
+    -fx-text-fill: #f8fafc;
 }
 
+.login-root .login-subheading,
 .auth-standard-login-root .auth-standard-copy {
-    -fx-font-size: 13px;
-    -fx-text-fill: #5e6f82;
+    -fx-font-size: 14px;
+    -fx-text-fill: #94a3b8;
 }
 
-.auth-standard-login-root .auth-modern-footer {
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-text-fill: #738294;
-}
-
+.login-root .form-label,
 .auth-standard-login-root .auth-form-label {
     -fx-font-size: 12px;
     -fx-font-weight: 900;
-    -fx-text-fill: #1d2a3a;
+    -fx-text-fill: #e2e8f0;
 }
 
+.login-root .required-indicator,
+.auth-standard-login-root .required-indicator {
+    -fx-text-fill: #ef4444;
+    -fx-font-weight: 900;
+}
+
+.login-root .login-field,
 .auth-standard-login-root .auth-input-shell {
-    -fx-min-height: 44;
-    -fx-pref-height: 44;
-    -fx-background-color: #f8fafc;
-    -fx-border-color: #d3dde8;
+    -fx-min-height: 46;
+    -fx-pref-height: 46;
+    -fx-background-color: #182230;
+    -fx-border-color: #334155;
     -fx-border-width: 1;
     -fx-background-radius: 8;
     -fx-border-radius: 8;
-    -fx-padding: 0 11;
+    -fx-padding: 0 12;
 }
 
-.auth-standard-login-root .auth-input-shell:hover,
+.login-root .login-field:hover,
+.auth-standard-login-root .auth-input-shell:hover {
+    -fx-border-color: #475569;
+}
+
+.login-root .login-field.auth-input-focused,
 .auth-standard-login-root .auth-input-shell.auth-input-focused {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #22b981;
-    -fx-border-width: 1.4;
-    -fx-effect: dropshadow(gaussian, rgba(34, 185, 129, 0.20), 12, 0.16, 0, 0);
+    -fx-border-color: #3b82f6;
+    -fx-border-width: 1.5;
+    -fx-effect: dropshadow(gaussian, rgba(59, 130, 246, 0.24), 12, 0.16, 0, 0);
 }
 
+.login-root .login-field.field-error,
 .auth-standard-login-root .auth-input-shell.field-error {
-    -fx-background-color: #fff7f7;
-    -fx-border-color: #dc2626;
-    -fx-border-width: 1.4;
+    -fx-background-color: #2a1620;
+    -fx-border-color: #ef4444;
+    -fx-border-width: 1.5;
     -fx-effect: none;
 }
 
+.login-root .login-field-control,
 .auth-standard-login-root .auth-field-flat {
-    -fx-pref-height: 42;
+    -fx-pref-height: 44;
     -fx-background-color: transparent;
+    -fx-background-insets: 0;
     -fx-border-color: transparent;
-    -fx-text-fill: #132033;
-    -fx-prompt-text-fill: #8493a4;
-    -fx-font-size: 13px;
+    -fx-border-width: 0;
+    -fx-text-fill: #f8fafc;
+    -fx-prompt-text-fill: #64748b;
+    -fx-highlight-fill: #2563eb;
+    -fx-highlight-text-fill: #f8fafc;
+    -fx-font-size: 14px;
     -fx-padding: 0;
 }
 
+.login-root .login-field-control:focused,
 .auth-standard-login-root .auth-field-flat:focused {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
+    -fx-effect: none;
 }
 
+.login-root .login-field-control:disabled,
 .auth-standard-login-root .auth-field-flat:disabled {
     -fx-opacity: 0.72;
 }
 
 .auth-standard-login-root .auth-field-icon {
     -fx-fill: transparent;
-    -fx-stroke: #718196;
-    -fx-stroke-width: 1.75;
+    -fx-stroke: #94a3b8;
+    -fx-stroke-width: 1.8;
 }
 
+.login-root .password-toggle,
 .auth-standard-login-root .auth-eye-button {
-    -fx-min-height: 30;
-    -fx-pref-height: 30;
-    -fx-background-color: transparent;
-    -fx-border-color: transparent;
-    -fx-text-fill: #11865d;
+    -fx-min-height: 32;
+    -fx-pref-height: 32;
+    -fx-background-color: #172033;
+    -fx-background-insets: 0;
+    -fx-border-color: #475569;
+    -fx-border-width: 1;
+    -fx-background-radius: 7;
+    -fx-border-radius: 7;
+    -fx-text-fill: #e2e8f0;
     -fx-font-size: 12px;
     -fx-font-weight: 900;
-    -fx-padding: 4 0 4 8;
+    -fx-padding: 4 10;
     -fx-cursor: hand;
 }
 
+.login-root .password-toggle:hover,
 .auth-standard-login-root .auth-eye-button:hover {
-    -fx-text-fill: #0b6f4b;
+    -fx-background-color: #243047;
+    -fx-border-color: #64748b;
 }
 
+.login-root .password-toggle:pressed,
+.auth-standard-login-root .auth-eye-button:pressed {
+    -fx-background-color: #0f172a;
+}
+
+.login-root .remember-check,
 .auth-standard-login-root .auth-remember-check {
     -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-text-fill: #425267;
+    -fx-font-weight: 800;
+    -fx-text-fill: #cbd5e1;
 }
 
+.login-root .remember-check .box,
 .auth-standard-login-root .auth-remember-check .box {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #b8c5d3;
+    -fx-background-color: #111827;
+    -fx-background-insets: 0;
+    -fx-border-color: #475569;
+    -fx-border-width: 1;
     -fx-background-radius: 4;
     -fx-border-radius: 4;
 }
 
+.login-root .remember-check:hover .box,
+.auth-standard-login-root .auth-remember-check:hover .box,
+.login-root .remember-check:focused .box,
+.auth-standard-login-root .auth-remember-check:focused .box {
+    -fx-border-color: #60a5fa;
+}
+
+.login-root .remember-check:selected .box,
 .auth-standard-login-root .auth-remember-check:selected .box {
-    -fx-background-color: #22b981;
-    -fx-border-color: #22b981;
+    -fx-background-color: #2563eb;
+    -fx-border-color: #3b82f6;
 }
 
+.login-root .remember-check:selected .mark,
 .auth-standard-login-root .auth-remember-check:selected .mark {
-    -fx-background-color: #ffffff;
+    -fx-background-color: #0b1220;
 }
 
+.login-root .forgot-password-link,
 .auth-standard-login-root .auth-link-button,
 .auth-standard-login-root .auth-link-button:focused {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
     -fx-background-insets: 0;
     -fx-border-insets: 0;
-    -fx-text-fill: #2563eb;
+    -fx-text-fill: #60a5fa;
     -fx-font-size: 12px;
     -fx-font-weight: 800;
     -fx-padding: 4 0;
     -fx-cursor: hand;
 }
 
+.login-root .forgot-password-link:hover,
 .auth-standard-login-root .auth-link-button:hover {
-    -fx-text-fill: #1d4ed8;
+    -fx-text-fill: #93c5fd;
+}
+
+.login-root .login-primary-button,
+.auth-standard-login-root .auth-primary-button {
+    -fx-min-height: 44;
+    -fx-pref-height: 44;
+    -fx-background-color: #2563eb;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-background-radius: 8;
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 14px;
+    -fx-font-weight: 900;
+    -fx-padding: 11 24;
+    -fx-cursor: hand;
+}
+
+.login-root .login-primary-button:hover,
+.auth-standard-login-root .auth-primary-button:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+.login-root .login-primary-button:pressed,
+.auth-standard-login-root .auth-primary-button:pressed {
+    -fx-background-color: #1e40af;
+}
+
+.login-root .login-primary-button:disabled,
+.auth-standard-login-root .auth-primary-button:disabled {
+    -fx-opacity: 0.55;
+    -fx-cursor: default;
+}
+
+.login-root .login-secondary-button,
+.auth-standard-login-root .auth-saved-login-action,
+.auth-standard-login-root .auth-forget-button {
+    -fx-min-height: 32;
+    -fx-background-color: #172033;
+    -fx-background-insets: 0;
+    -fx-border-color: #334155;
+    -fx-border-width: 1;
+    -fx-background-radius: 7;
+    -fx-border-radius: 7;
+    -fx-text-fill: #e2e8f0;
+    -fx-font-size: 12px;
+    -fx-font-weight: 900;
+    -fx-padding: 6 12;
+    -fx-cursor: hand;
+}
+
+.login-root .login-secondary-button:hover,
+.auth-standard-login-root .auth-saved-login-action:hover,
+.auth-standard-login-root .auth-forget-button:hover {
+    -fx-background-color: #243047;
+    -fx-border-color: #475569;
+    -fx-text-fill: #f8fafc;
+}
+
+.login-root .login-secondary-button:pressed,
+.auth-standard-login-root .auth-saved-login-action:pressed,
+.auth-standard-login-root .auth-forget-button:pressed {
+    -fx-background-color: #0f172a;
+}
+
+.login-root .login-secondary-button:disabled,
+.auth-standard-login-root .auth-saved-login-action:disabled,
+.auth-standard-login-root .auth-forget-button:disabled {
+    -fx-opacity: 0.55;
+    -fx-cursor: default;
 }
 
 .auth-standard-login-root .auth-back-link {
     -fx-alignment: CENTER;
 }
 
-.auth-standard-login-root .auth-primary-button {
-    -fx-min-height: 44;
-    -fx-pref-height: 44;
-    -fx-background-color: #22b981;
-    -fx-border-color: transparent;
-    -fx-background-radius: 8;
-    -fx-text-fill: #ffffff;
-    -fx-font-size: 13px;
-    -fx-font-weight: 900;
-    -fx-padding: 0 16;
-    -fx-cursor: hand;
-}
-
-.auth-standard-login-root .auth-primary-button:hover {
-    -fx-background-color: #1fa172;
-}
-
-.auth-standard-login-root .auth-primary-button:pressed {
-    -fx-background-color: #18825d;
-}
-
-.auth-standard-login-root .auth-primary-button:disabled {
-    -fx-opacity: 0.72;
-}
-
 .auth-standard-login-root .auth-validation-message {
-    -fx-text-fill: #dc2626;
+    -fx-text-fill: #fca5a5;
     -fx-font-size: 11px;
-    -fx-font-weight: 700;
+    -fx-font-weight: 800;
 }
 
 .auth-standard-login-root .auth-message-error {
-    -fx-text-fill: #b91c1c;
+    -fx-text-fill: #fca5a5;
     -fx-font-size: 12px;
     -fx-font-weight: 800;
 }
 
 .auth-standard-login-root .auth-message-success {
-    -fx-text-fill: #047857;
+    -fx-text-fill: #a7f3d0;
     -fx-font-size: 12px;
     -fx-font-weight: 800;
 }
 
+.login-root .saved-login-panel,
 .auth-standard-login-root .auth-saved-login-panel {
-    -fx-background-color: #ecfdf5;
-    -fx-border-color: #a7f3d0;
-    -fx-background-radius: 8;
-    -fx-border-radius: 8;
-    -fx-padding: 9 10;
-}
-
-.auth-standard-login-root .auth-saved-login-label {
-    -fx-text-fill: #065f46;
-    -fx-font-size: 12px;
-    -fx-font-weight: 800;
-}
-
-.auth-standard-login-root .auth-saved-login-action {
-    -fx-background-color: transparent;
-    -fx-border-color: #22b981;
+    -fx-background-color: #0b332c;
+    -fx-border-color: #10b981;
     -fx-border-width: 1;
-    -fx-background-radius: 7;
-    -fx-border-radius: 7;
-    -fx-text-fill: #047857;
+    -fx-background-radius: 9;
+    -fx-border-radius: 9;
+    -fx-padding: 12 16;
+}
+
+.login-root .saved-login-title,
+.auth-standard-login-root .auth-saved-login-label {
+    -fx-text-fill: #a7f3d0;
     -fx-font-size: 12px;
     -fx-font-weight: 900;
-    -fx-padding: 5 10;
-    -fx-cursor: hand;
 }
 
-.auth-standard-login-root .auth-saved-login-action:hover {
-    -fx-background-color: rgba(34, 185, 129, 0.10);
-}
-
-.auth-standard-login-root .auth-forget-button {
+.login-root .login-footer,
+.auth-standard-login-root .auth-modern-footer {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
     -fx-text-fill: #64748b;
+}
+
+.login-root .tooltip,
+.auth-standard-login-root .tooltip {
+    -fx-background-color: #172033;
+    -fx-text-fill: #e2e8f0;
+    -fx-border-color: #334155;
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
 }

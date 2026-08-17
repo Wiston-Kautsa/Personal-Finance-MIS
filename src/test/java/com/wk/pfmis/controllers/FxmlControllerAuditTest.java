@@ -101,8 +101,8 @@ class FxmlControllerAuditTest {
         assertFalse(content.contains("Create User and Open Workspace"));
         assertFalse(content.contains("Sign in as Super Administrator"));
         assertFalse(content.contains(">OR<"));
-        assertTrue(content.contains("styleClass=\"auth-brand-panel\""));
-        assertTrue(content.contains("styleClass=\"auth-form-panel\""));
+        assertTrue(content.contains("login-brand-panel"));
+        assertTrue(content.contains("login-form-panel"));
         assertTrue(content.contains("fx:id=\"usernameField\""));
         assertTrue(content.contains("fx:id=\"passwordField\""));
         assertTrue(content.contains("fx:id=\"signInButton\""));

@@ -33,6 +33,7 @@ import javafx.scene.control.TitledPane;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.io.IOException;
@@ -278,6 +279,9 @@ public class MainApp extends Application {
             RequiredFieldSupport.apply(root);
             ReadableTextSupport.apply(root);
             Scene scene = new Scene(root, width, height);
+            if ("Login.fxml".equals(fxml)) {
+                scene.setFill(Color.web("#111827"));
+            }
             scene.getStylesheets().add(MainApp.class.getResource("/com/wk/pfmis/css/Theme.css").toExternalForm());
             primaryStage.setFullScreen(false);
             primaryStage.setIconified(false);
