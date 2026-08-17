@@ -2,23 +2,28 @@ package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.MainApp;
 import com.wk.pfmis.db.DatabaseHandler;
-import com.wk.pfmis.db.DatabaseHandler.SavingsGroupOverview;
-import com.wk.pfmis.fx.ConversionResult;
-import com.wk.pfmis.fx.ExchangeRateService;
-import com.wk.pfmis.models.Account;
-import com.wk.pfmis.models.DashboardStats;
 import com.wk.pfmis.models.FinanceTransaction;
-import com.wk.pfmis.models.Project;
-import com.wk.pfmis.models.ReportRow;
+import com.wk.pfmis.services.DashboardAggregationService;
+import com.wk.pfmis.services.DashboardAggregationService.AccountBalancePoint;
+import com.wk.pfmis.services.DashboardAggregationService.AttentionItem;
+import com.wk.pfmis.services.DashboardAggregationService.BudgetPerformance;
+import com.wk.pfmis.services.DashboardAggregationService.CashFlowPoint;
+import com.wk.pfmis.services.DashboardAggregationService.DashboardSnapshot;
+import com.wk.pfmis.services.DashboardAggregationService.GoalProgress;
+import com.wk.pfmis.services.DashboardAggregationService.SavingsSummary;
+import com.wk.pfmis.services.DashboardAggregationService.SpendingCategory;
 import com.wk.pfmis.models.SystemUser;
 import com.wk.pfmis.security.UserSession;
 import com.wk.pfmis.utils.MoneyUtil;
 import com.wk.pfmis.utils.ReadableTextSupport;
 import com.wk.pfmis.utils.RequiredFieldSupport;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
+import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.chart.BarChart;
@@ -29,13 +34,13 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TitledPane;
-import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -45,30 +50,24 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
-import java.math.BigDecimal;
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 public class DashboardController {
     @FXML private Label totalBalanceLabel;
     @FXML private Label incomeLabel;
     @FXML private Label expensesLabel;
     @FXML private Label savingsLabel;
+    @FXML private Label netCashFlowLabel;
     @FXML private Label balanceDetailLabel;
     @FXML private Label incomeDetailLabel;
     @FXML private Label expensesDetailLabel;
     @FXML private Label savingsDetailLabel;
+    @FXML private Label netCashFlowDetailLabel;
+    @FXML private Label dashboardBasisLabel;
     @FXML private Label activeAccountsLabel;
     @FXML private Label activeProjectsLabel;
     @FXML private Label activeGoalsLabel;
@@ -161,12 +160,31 @@ public class DashboardController {
     @FXML private Button assetSaleDisposalButton;
     @FXML private Button assetHistoryButton;
     @FXML private Button returnWorkspaceButton;
+    @FXML private Button refreshDashboardButton;
     @FXML private VBox dashboardSummaryPane;
     @FXML private VBox planSnapshotBox;
+    @FXML private GridPane dashboardKpiGrid;
+    @FXML private GridPane dashboardAnalyticsGrid;
+    @FXML private GridPane dashboardPerformanceGrid;
+    @FXML private GridPane dashboardResourcesGrid;
+    @FXML private VBox kpiBalanceCard;
+    @FXML private VBox kpiIncomeCard;
+    @FXML private VBox kpiExpensesCard;
+    @FXML private VBox kpiNetCashFlowCard;
+    @FXML private VBox cashFlowPanel;
+    @FXML private VBox spendingPanel;
+    @FXML private VBox performancePanel;
+    @FXML private VBox attentionPanel;
+    @FXML private VBox accountBalancesPanel;
+    @FXML private VBox savingsPanel;
+    @FXML private VBox budgetGoalProgressBox;
+    @FXML private VBox savingsSummaryBox;
+    @FXML private Label spendingEmptyLabel;
+    @FXML private Label accountBalancesEmptyLabel;
     @FXML private StackPane contentPane;
     @FXML private LineChart<String, Number> cashFlowChart;
     @FXML private PieChart expenseDistributionChart;
-    @FXML private PieChart accountBalanceChart;
+    @FXML private BarChart<Number, String> accountBalanceChart;
     @FXML private PieChart incomeSourceChart;
     @FXML private PieChart moneyPositionChart;
     @FXML private BarChart<String, Number> projectSpendingChart;
@@ -175,10 +193,10 @@ public class DashboardController {
     @FXML private TableColumn<FinanceTransaction, String> dashboardTypeColumn;
     @FXML private TableColumn<FinanceTransaction, String> dashboardAccountColumn;
     @FXML private TableColumn<FinanceTransaction, String> dashboardCategoryColumn;
-    @FXML private TableColumn<FinanceTransaction, Double> dashboardAmountColumn;
+    @FXML private TableColumn<FinanceTransaction, String> dashboardAmountColumn;
     @FXML private VBox alertsBox;
     private final DatabaseHandler database = DatabaseHandler.getInstance();
-    private final ExchangeRateService exchangeRateService = ExchangeRateService.getInstance();
+    private final DashboardAggregationService dashboardService = new DashboardAggregationService();
     private static final String REPORT_GROUP_OVERVIEW = "Overview";
     private static final String REPORT_GROUP_INCOME_EXPENSES = "Income and Expenses";
     private static final String REPORT_GROUP_ACCOUNTS_POSITION = "Accounts and Position";
@@ -192,7 +210,6 @@ public class DashboardController {
     private static final String DATA_SECTION_AUDIT_HISTORY = "Audit and History";
     private static final String DATA_SECTION_SYNC_RECOVERY = "Sync and Recovery";
     private static final String DATA_SECTION_MAINTENANCE = "Data Maintenance";
-    private static final DateTimeFormatter MONTH_LABEL_FORMAT = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH);
     private String currentViewFileName;
     private String currentViewTitle = "Dashboard";
     private boolean currentViewIsDashboard = true;
@@ -205,6 +222,8 @@ public class DashboardController {
     private boolean openingReportGroup;
     private boolean openingDataRecordsSection;
     private Button pendingNavigationButton;
+    private Task<DashboardSnapshot> dashboardRefreshTask;
+    private String dashboardBaseCurrency = "MWK";
 
     @FXML
     public void initialize() {
@@ -225,6 +244,7 @@ public class DashboardController {
         NavigationBus.onSmartNavigationRequested(this::openSmartNavigationTarget);
         configureSidebarNavigationState();
         configureDashboardTable();
+        configureDashboardResponsiveLayout();
         showHome();
     }
 
@@ -1222,100 +1242,121 @@ public class DashboardController {
 
     @FXML
     private void refreshDashboard() {
-        DashboardStats stats = database.getDashboardStats();
-        List<FinanceTransaction> transactions = database.listRecentTransactions(500);
-        List<FinanceTransaction> currentMonthTransactions = transactions.stream()
-                .filter(this::isCurrentMonth)
-                .toList();
-        long incomeRecords = currentMonthTransactions.stream()
-                .filter(transaction -> "INCOME".equals(transaction.getTransactionType()))
-                .count();
-        long expenseRecords = currentMonthTransactions.stream()
-                .filter(transaction -> "EXPENSE".equals(transaction.getTransactionType()))
-                .count();
-        double savingsRate = stats.getMonthlyIncome() == 0 ? 0 : (stats.getMonthlySavings() / stats.getMonthlyIncome()) * 100;
-        String baseCurrency = database.getBaseCurrencyCode();
-        SavingsGroupOverview savingsGroups = database.getSavingsGroupOverview();
-        DashboardFxBalance convertedBalance = dashboardFxBalance(baseCurrency);
-        double communitySavingsBalance = database.getCommunitySavingsBalance();
-        totalBalanceLabel.setText(MoneyUtil.format(baseCurrency, convertedBalance.total()));
-        incomeLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyIncome()));
-        expensesLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlyExpenses()));
-        savingsLabel.setText(MoneyUtil.format(baseCurrency, stats.getMonthlySavings()));
-        balanceDetailLabel.setText(convertedBalance.detail());
-        incomeDetailLabel.setText(incomeRecords + " income records");
-        expensesDetailLabel.setText(expenseRecords + " expense records");
-        savingsDetailLabel.setText(String.format("%.1f%% savings rate", savingsRate));
-        activeAccountsLabel.setText(String.valueOf(stats.getActiveAccounts()));
-        activeProjectsLabel.setText(String.valueOf(stats.getActiveProjects()));
-        activeGoalsLabel.setText(String.valueOf(stats.getActiveGoals()));
-        moneyGivenLabel.setText(MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut()));
-        communitySavingsBalanceLabel.setText(MoneyUtil.format(baseCurrency, communitySavingsBalance));
-        communitySavingsDetailLabel.setText("Not included in available cash");
-        savingsGroupContributionsLabel.setText(MoneyUtil.format(baseCurrency, savingsGroups.contributionsThisMonth()));
-        savingsGroupContributionsDetailLabel.setText("This year: " + MoneyUtil.format(baseCurrency, savingsGroups.contributionsThisYear()));
-        savingsGroupNextContributionLabel.setText(blankToDashboard(savingsGroups.nextContributionDueDate()));
-        savingsGroupNextContributionDetailLabel.setText(savingsGroups.activeSavingsAccounts() + " active Savings Group(s)");
-        savingsGroupExpectedPayoutLabel.setText(MoneyUtil.format(baseCurrency, savingsGroups.expectedPayout()));
-        savingsGroupExpectedPayoutDetailLabel.setText(savingsGroups.cyclesNearingCompletion() + " cycle(s) nearing completion");
-        refreshDashboardCharts(stats, transactions);
-        refreshDashboardTable(transactions);
-        refreshPlanSnapshot(stats, savingsGroups, baseCurrency);
-        refreshAlerts(stats, baseCurrency);
-    }
-
-    private DashboardFxBalance dashboardFxBalance(String baseCurrency) {
-        BigDecimal total = BigDecimal.ZERO;
-        int converted = 0;
-        int missing = 0;
-        boolean cached = false;
-        Set<String> currencies = new LinkedHashSet<>();
-        for (Account account : database.listAccounts()) {
-            if (!"ACTIVE".equalsIgnoreCase(account.getStatus()) || account.isLiabilityAccount()) {
-                continue;
-            }
-            String currency = account.getCurrency() == null || account.getCurrency().isBlank()
-                    ? baseCurrency
-                    : account.getCurrency().trim().toUpperCase(Locale.ENGLISH);
-            currencies.add(currency);
-            BigDecimal balance = BigDecimal.valueOf(account.getCurrentBalance());
-            if (currency.equalsIgnoreCase(baseCurrency)) {
-                total = total.add(balance);
-                converted++;
-                continue;
-            }
-            try {
-                ConversionResult result = exchangeRateService.convertUsingLastKnown(balance, currency, baseCurrency);
-                total = total.add(result.convertedAmount());
-                cached = cached || result.quote().stale();
-                converted++;
-            } catch (RuntimeException exception) {
-                missing++;
-            }
+        if (dashboardRefreshTask != null && dashboardRefreshTask.isRunning()) {
+            dashboardRefreshTask.cancel();
         }
-        String detail = "Across " + converted + " account(s) in " + currencies.size() + " currenc" + (currencies.size() == 1 ? "y" : "ies");
-        if (missing > 0) {
-            detail += ". Some balances could not be converted because an exchange rate is unavailable.";
-        } else if (cached) {
-            detail += ". Using saved exchange rates.";
-        }
-        return new DashboardFxBalance(total, detail);
-    }
-
-    private record DashboardFxBalance(BigDecimal total, String detail) {
+        setDashboardLoading(true);
+        Task<DashboardSnapshot> task = new Task<>() {
+            @Override
+            protected DashboardSnapshot call() {
+                return dashboardService.loadSnapshot();
+            }
+        };
+        task.setOnSucceeded(event -> {
+            if (dashboardRefreshTask != task) {
+                return;
+            }
+            applyDashboardSnapshot(task.getValue());
+            setDashboardLoading(false);
+        });
+        task.setOnFailed(event -> {
+            if (dashboardRefreshTask != task) {
+                return;
+            }
+            setDashboardLoading(false);
+            showDashboardRefreshFailure(task.getException());
+        });
+        task.setOnCancelled(event -> {
+            if (dashboardRefreshTask == task) {
+                setDashboardLoading(false);
+            }
+        });
+        dashboardRefreshTask = task;
+        Thread thread = new Thread(task, "pfmis-dashboard-refresh");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void configureDashboardTable() {
         if (dashboardTransactionsTable == null || dashboardDateColumn == null) {
             return;
         }
-        dashboardDateColumn.setCellValueFactory(new PropertyValueFactory<>("transactionDate"));
-        dashboardTypeColumn.setCellValueFactory(new PropertyValueFactory<>("transactionType"));
-        dashboardAccountColumn.setCellValueFactory(new PropertyValueFactory<>("accountName"));
-        dashboardCategoryColumn.setCellValueFactory(new PropertyValueFactory<>("categoryName"));
-        dashboardAmountColumn.setCellValueFactory(new PropertyValueFactory<>("amount"));
+        dashboardDateColumn.setCellValueFactory(cell -> new ReadOnlyStringWrapper(labelOrDefault(cell.getValue().getTransactionDate(), "-")));
+        dashboardTypeColumn.setCellValueFactory(cell -> new ReadOnlyStringWrapper(labelOrDefault(cell.getValue().getTransactionType(), "-")));
+        dashboardAccountColumn.setCellValueFactory(cell -> new ReadOnlyStringWrapper(labelOrDefault(cell.getValue().getAccountName(), "-")));
+        dashboardCategoryColumn.setCellValueFactory(cell -> new ReadOnlyStringWrapper(labelOrDefault(cell.getValue().getCategoryName(), "-")));
+        dashboardAmountColumn.setCellValueFactory(cell -> new ReadOnlyStringWrapper(MoneyUtil.format(dashboardBaseCurrency, cell.getValue().getAmount())));
+        dashboardTransactionsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         TableActions.configureScrollableTable(dashboardTransactionsTable);
         TableActions.installRowContextMenu(dashboardTransactionsTable, this::dashboardTransactionMenuItems);
+    }
+
+    private void configureDashboardResponsiveLayout() {
+        if (dashboardSummaryPane == null) {
+            return;
+        }
+        dashboardSummaryPane.widthProperty().addListener((observable, oldValue, newValue) ->
+                applyDashboardResponsiveLayout(newValue.doubleValue()));
+        applyDashboardResponsiveLayout(dashboardSummaryPane.getWidth() > 0 ? dashboardSummaryPane.getWidth() : 1100);
+    }
+
+    private void applyDashboardResponsiveLayout(double width) {
+        int kpiColumns = width < 560 ? 1 : width < 920 ? 2 : 4;
+        arrangeKpiCards(kpiColumns);
+        boolean stacked = width < 980;
+        arrangeTwoPanelGrid(dashboardAnalyticsGrid, cashFlowPanel, spendingPanel, stacked);
+        arrangeTwoPanelGrid(dashboardPerformanceGrid, performancePanel, attentionPanel, stacked);
+        arrangeTwoPanelGrid(dashboardResourcesGrid, accountBalancesPanel, savingsPanel, stacked);
+    }
+
+    private void arrangeKpiCards(int columns) {
+        if (dashboardKpiGrid == null) {
+            return;
+        }
+        List<Node> cards = List.of(kpiBalanceCard, kpiIncomeCard, kpiExpensesCard, kpiNetCashFlowCard);
+        for (int index = 0; index < cards.size(); index++) {
+            Node card = cards.get(index);
+            if (card == null) {
+                continue;
+            }
+            GridPane.setColumnIndex(card, index % columns);
+            GridPane.setRowIndex(card, index / columns);
+            GridPane.setHgrow(card, Priority.ALWAYS);
+            if (card instanceof Region region) {
+                region.setMaxWidth(Double.MAX_VALUE);
+            }
+        }
+        setGridColumnPercentages(dashboardKpiGrid, columns);
+    }
+
+    private void arrangeTwoPanelGrid(GridPane grid, Node left, Node right, boolean stacked) {
+        if (grid == null || left == null || right == null) {
+            return;
+        }
+        GridPane.setColumnIndex(left, 0);
+        GridPane.setRowIndex(left, 0);
+        GridPane.setColumnIndex(right, stacked ? 0 : 1);
+        GridPane.setRowIndex(right, stacked ? 1 : 0);
+        GridPane.setHgrow(left, Priority.ALWAYS);
+        GridPane.setHgrow(right, Priority.ALWAYS);
+        if (left instanceof Region leftRegion) {
+            leftRegion.setMaxWidth(Double.MAX_VALUE);
+        }
+        if (right instanceof Region rightRegion) {
+            rightRegion.setMaxWidth(Double.MAX_VALUE);
+        }
+        setGridColumnPercentages(grid, stacked ? 1 : 2);
+    }
+
+    private void setGridColumnPercentages(GridPane grid, int columns) {
+        grid.getColumnConstraints().clear();
+        for (int index = 0; index < columns; index++) {
+            ColumnConstraints constraints = new ColumnConstraints();
+            constraints.setPercentWidth(100.0 / columns);
+            constraints.setHgrow(Priority.ALWAYS);
+            constraints.setFillWidth(true);
+            grid.getColumnConstraints().add(constraints);
+        }
     }
 
     private List<javafx.scene.control.MenuItem> dashboardTransactionMenuItems(FinanceTransaction transaction) {
@@ -1339,173 +1380,248 @@ public class DashboardController {
                         + "\nType: " + transaction.getTransactionType()
                         + "\nAccount: " + transaction.getAccountName()
                         + "\nCategory: " + labelOrDefault(transaction.getCategoryName(), "-")
-                        + "\nAmount: " + MoneyUtil.mwk(transaction.getAmount())
+                        + "\nAmount: " + MoneyUtil.format(dashboardBaseCurrency, transaction.getAmount())
                         + "\nStatus: " + labelOrDefault(transaction.getTransactionStatus(), "-")
                         + "\nDescription: " + labelOrDefault(transaction.getDescription(), "-")
         );
     }
 
-    private void refreshDashboardCharts(DashboardStats stats, List<FinanceTransaction> transactions) {
-        if (expenseDistributionChart != null) {
-            setPieData(expenseDistributionChart, database.categorySpendingReport(), "No expenses");
+    private void applyDashboardSnapshot(DashboardSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
         }
-        if (accountBalanceChart != null) {
-            setPieData(accountBalanceChart, database.accountBalanceReport(), "No balances");
+        dashboardBaseCurrency = snapshot.baseCurrency();
+        dashboardBasisLabel.setText(snapshot.financialBasisNote()
+                + (snapshot.missingExchangeRates() ? " Some non-base balances are excluded until FX rates are configured." : ""));
+        totalBalanceLabel.setText(MoneyUtil.format(snapshot.baseCurrency(), snapshot.kpis().availableBalance()));
+        incomeLabel.setText(MoneyUtil.format(snapshot.baseCurrency(), snapshot.kpis().monthlyIncome()));
+        expensesLabel.setText(MoneyUtil.format(snapshot.baseCurrency(), snapshot.kpis().monthlyExpenses()));
+        netCashFlowLabel.setText(MoneyUtil.format(snapshot.baseCurrency(), snapshot.kpis().netCashFlow()));
+        setPositiveNegativeStyle(netCashFlowLabel, snapshot.kpis().netCashFlow());
+        balanceDetailLabel.setText(snapshot.kpis().availableBalanceDetail());
+        incomeDetailLabel.setText(snapshot.kpis().incomeDetail());
+        expensesDetailLabel.setText(snapshot.kpis().expenseDetail());
+        netCashFlowDetailLabel.setText(snapshot.kpis().netCashFlowDetail());
+        refreshCashFlowChart(snapshot.cashFlow(), snapshot.baseCurrency());
+        refreshSpendingByCategory(snapshot.spendingCategories(), snapshot.baseCurrency());
+        refreshAccountBalanceChart(snapshot.accountBalances(), snapshot.baseCurrency());
+        refreshBudgetGoalProgress(snapshot);
+        refreshAttention(snapshot.attentionItems());
+        refreshSavingsSummary(snapshot.savingsSummary(), snapshot.loanSummary(), snapshot.baseCurrency());
+        refreshDashboardTable(snapshot.recentTransactions());
+    }
+
+    private void setDashboardLoading(boolean loading) {
+        if (refreshDashboardButton != null) {
+            refreshDashboardButton.setDisable(loading);
+            refreshDashboardButton.setText(loading ? "Refreshing" : "Refresh");
         }
-        if (incomeSourceChart != null) {
-            setPieData(incomeSourceChart, incomeSourceRows(transactions), "No income");
-        }
-        if (moneyPositionChart != null) {
-            setPieData(moneyPositionChart, moneyPositionRows(stats), "No money position");
-        }
-        if (cashFlowChart != null) {
-            refreshCashFlowChart(transactions);
-        }
-        if (projectSpendingChart != null) {
-            refreshProjectSpendingChart();
+        if (loading && dashboardBasisLabel != null) {
+            dashboardBasisLabel.setText("Refreshing dashboard financial data...");
         }
     }
 
-    private void setPieData(PieChart chart, List<ReportRow> rows, String emptyLabel) {
-        List<PieChart.Data> data = rows.stream()
-                .filter(row -> row.getAmount() > 0)
-                .map(row -> new PieChart.Data(row.getLabel(), row.getAmount()))
-                .toList();
-        if (data.isEmpty()) {
-            data = List.of(new PieChart.Data(emptyLabel, 1));
+    private void showDashboardRefreshFailure(Throwable throwable) {
+        database.recordSystemLog("Dashboard", "Refresh Failed", "ERROR", throwable == null ? "Unknown dashboard refresh failure." : throwable.getMessage());
+        if (alertsBox != null) {
+            alertsBox.getChildren().setAll(attentionNode(new AttentionItem(
+                    "HIGH",
+                    "Dashboard refresh failed",
+                    "Financial data could not be refreshed. Review system logs for details."
+            )));
         }
-        chart.setData(FXCollections.observableArrayList(data));
     }
 
-    private List<ReportRow> incomeSourceRows(List<FinanceTransaction> transactions) {
-        return transactions.stream()
-                .filter(transaction -> "INCOME".equals(transaction.getTransactionType()))
-                .collect(Collectors.groupingBy(
-                        transaction -> labelOrDefault(transaction.getCategoryName(), "Other"),
-                        LinkedHashMap::new,
-                        Collectors.summingDouble(FinanceTransaction::getAmount)
-                ))
-                .entrySet()
-                .stream()
-                .map(entry -> new ReportRow(entry.getKey(), entry.getValue()))
-                .toList();
-    }
-
-    private List<ReportRow> moneyPositionRows(DashboardStats stats) {
-        List<ReportRow> rows = new ArrayList<>();
-        rows.add(new ReportRow("Available Cash and Bank", Math.max(database.getAvailableCashAndBankBalance(), 0)));
-        rows.add(new ReportRow("Community Savings", Math.max(database.getCommunitySavingsBalance(), 0)));
-        rows.add(new ReportRow("Expenses", Math.max(stats.getMonthlyExpenses(), 0)));
-        rows.add(new ReportRow("Savings", Math.max(stats.getMonthlySavings(), 0)));
-        rows.add(new ReportRow("Loans Receivable", Math.max(stats.getMoneyGivenOut(), 0)));
-        return rows;
-    }
-
-    private String blankToDashboard(String value) {
-        return value == null || value.isBlank() ? "None scheduled" : value;
-    }
-
-    private void refreshCashFlowChart(List<FinanceTransaction> transactions) {
+    private void refreshCashFlowChart(List<CashFlowPoint> points, String baseCurrency) {
         if (cashFlowChart == null) {
             return;
         }
         cashFlowChart.getData().clear();
+        cashFlowChart.getYAxis().setLabel(baseCurrency);
         XYChart.Series<String, Number> incomeSeries = new XYChart.Series<>();
         incomeSeries.setName("Income");
         XYChart.Series<String, Number> expenseSeries = new XYChart.Series<>();
         expenseSeries.setName("Expenses");
-        Map<YearMonth, double[]> totals = new LinkedHashMap<>();
-        YearMonth start = YearMonth.now().minusMonths(5);
-        for (int index = 0; index < 6; index++) {
-            totals.put(start.plusMonths(index), new double[]{0, 0});
+        XYChart.Series<String, Number> netSeries = new XYChart.Series<>();
+        netSeries.setName("Net Cash Flow");
+        for (CashFlowPoint point : points) {
+            incomeSeries.getData().add(new XYChart.Data<>(point.label(), point.income()));
+            expenseSeries.getData().add(new XYChart.Data<>(point.label(), point.expenses()));
+            netSeries.getData().add(new XYChart.Data<>(point.label(), point.netCashFlow()));
         }
-        for (FinanceTransaction transaction : transactions) {
-            YearMonth month = parseMonth(transaction.getTransactionDate());
-            if (month == null || !totals.containsKey(month)) {
-                continue;
-            }
-            double[] monthTotals = totals.get(month);
-            if ("INCOME".equals(transaction.getTransactionType())) {
-                monthTotals[0] += transaction.getAmount();
-            } else if ("EXPENSE".equals(transaction.getTransactionType())) {
-                monthTotals[1] += transaction.getAmount();
-            }
-        }
-        for (Map.Entry<YearMonth, double[]> entry : totals.entrySet()) {
-            String label = entry.getKey().atDay(1).format(MONTH_LABEL_FORMAT);
-            incomeSeries.getData().add(new XYChart.Data<>(label, entry.getValue()[0]));
-            expenseSeries.getData().add(new XYChart.Data<>(label, entry.getValue()[1]));
-        }
-        cashFlowChart.getData().addAll(incomeSeries, expenseSeries);
+        cashFlowChart.getData().addAll(incomeSeries, expenseSeries, netSeries);
     }
 
-    private void refreshProjectSpendingChart() {
-        if (projectSpendingChart == null) {
+    private void refreshSpendingByCategory(List<SpendingCategory> categories, String baseCurrency) {
+        if (expenseDistributionChart == null) {
             return;
         }
-        projectSpendingChart.getData().clear();
-        XYChart.Series<String, Number> budgetSeries = new XYChart.Series<>();
-        budgetSeries.setName("Budget");
-        XYChart.Series<String, Number> spentSeries = new XYChart.Series<>();
-        spentSeries.setName("Spent");
-        for (Project project : database.listProjects()) {
-            budgetSeries.getData().add(new XYChart.Data<>(project.getProjectName(), project.getPlannedBudget()));
-            spentSeries.getData().add(new XYChart.Data<>(project.getProjectName(), project.getAmountSpent()));
+        boolean empty = categories == null || categories.isEmpty();
+        setEmptyState(expenseDistributionChart, spendingEmptyLabel, empty);
+        if (empty) {
+            expenseDistributionChart.getData().clear();
+            return;
         }
-        projectSpendingChart.getData().addAll(budgetSeries, spentSeries);
+        List<PieChart.Data> data = categories.stream()
+                .map(category -> new PieChart.Data(
+                        category.category() + " " + Math.round(category.percentage()) + "%",
+                        category.amount()
+                ))
+                .toList();
+        expenseDistributionChart.setData(FXCollections.observableArrayList(data));
+        expenseDistributionChart.setTitle(baseCurrency);
+    }
+
+    private void refreshAccountBalanceChart(List<AccountBalancePoint> balances, String baseCurrency) {
+        if (accountBalanceChart == null) {
+            return;
+        }
+        boolean empty = balances == null || balances.isEmpty();
+        setEmptyState(accountBalanceChart, accountBalancesEmptyLabel, empty);
+        accountBalanceChart.getData().clear();
+        if (empty) {
+            return;
+        }
+        accountBalanceChart.getXAxis().setLabel(baseCurrency);
+        XYChart.Series<Number, String> series = new XYChart.Series<>();
+        for (AccountBalancePoint balance : balances) {
+            series.getData().add(new XYChart.Data<>(balance.balance(), balance.account()));
+        }
+        accountBalanceChart.getData().add(series);
+    }
+
+    private void refreshBudgetGoalProgress(DashboardSnapshot snapshot) {
+        if (budgetGoalProgressBox == null) {
+            return;
+        }
+        budgetGoalProgressBox.getChildren().clear();
+        addProgressGroupHeader(budgetGoalProgressBox, "Budgets");
+        if (snapshot.budgetPerformance().isEmpty()) {
+            budgetGoalProgressBox.getChildren().add(emptyLabel("No active budget for the current month."));
+        } else {
+            for (BudgetPerformance budget : snapshot.budgetPerformance()) {
+                budgetGoalProgressBox.getChildren().add(progressRow(
+                        budget.name(),
+                        budget.status() + " - " + budget.category(),
+                        MoneyUtil.format(budget.currency(), budget.actual()) + " / " + MoneyUtil.format(budget.currency(), budget.planned()),
+                        budget.utilizationPercent(),
+                        budget.remaining() < 0 ? "Over limit by " + MoneyUtil.format(budget.currency(), Math.abs(budget.remaining()))
+                                : "Remaining " + MoneyUtil.format(budget.currency(), budget.remaining())
+                ));
+            }
+        }
+        addProgressGroupHeader(budgetGoalProgressBox, "Goals");
+        if (snapshot.goalProgress().isEmpty()) {
+            budgetGoalProgressBox.getChildren().add(emptyLabel("No active goals to track."));
+        } else {
+            for (GoalProgress goal : snapshot.goalProgress()) {
+                budgetGoalProgressBox.getChildren().add(progressRow(
+                        goal.name(),
+                        goal.status() + " - target " + goal.targetDate(),
+                        MoneyUtil.format(goal.currency(), goal.achieved()) + " / " + MoneyUtil.format(goal.currency(), goal.target()),
+                        goal.percentComplete(),
+                        "Remaining " + MoneyUtil.format(goal.currency(), goal.remaining())
+                ));
+            }
+        }
+    }
+
+    private void refreshAttention(List<AttentionItem> items) {
+        if (alertsBox == null) {
+            return;
+        }
+        alertsBox.getChildren().clear();
+        for (AttentionItem item : items) {
+            alertsBox.getChildren().add(attentionNode(item));
+        }
+    }
+
+    private void refreshSavingsSummary(SavingsSummary savings, DashboardAggregationService.LoanSummary loans, String baseCurrency) {
+        if (savingsSummaryBox == null) {
+            return;
+        }
+        savingsSummaryBox.getChildren().clear();
+        savingsSummaryBox.getChildren().add(summaryLine("Active groups", String.valueOf(savings.activeGroups())));
+        savingsSummaryBox.getChildren().add(summaryLine("Community balance", MoneyUtil.format(baseCurrency, savings.balance())));
+        savingsSummaryBox.getChildren().add(summaryLine("Contribution this month", MoneyUtil.format(baseCurrency, savings.contributionThisMonth())));
+        savingsSummaryBox.getChildren().add(summaryLine("Contribution this year", MoneyUtil.format(baseCurrency, savings.contributionThisYear())));
+        savingsSummaryBox.getChildren().add(summaryLine("Next contribution due", savings.nextDueDate()));
+        savingsSummaryBox.getChildren().add(summaryLine("Expected payout", MoneyUtil.format(baseCurrency, savings.expectedPayout())));
+        savingsSummaryBox.getChildren().add(summaryLine("Cycles nearing completion", String.valueOf(savings.cyclesNearingCompletion())));
+        savingsSummaryBox.getChildren().add(summaryLine("Loans receivable", MoneyUtil.format(baseCurrency, loans.receivableOutstanding())));
+        savingsSummaryBox.getChildren().add(summaryLine("Loans payable", MoneyUtil.format(baseCurrency, loans.payableOutstanding())));
     }
 
     private void refreshDashboardTable(List<FinanceTransaction> transactions) {
         if (dashboardTransactionsTable == null) {
             return;
         }
-        dashboardTransactionsTable.setItems(FXCollections.observableArrayList(transactions.stream().limit(10).toList()));
+        dashboardTransactionsTable.setItems(FXCollections.observableArrayList(transactions));
     }
 
-    private void refreshPlanSnapshot(DashboardStats stats, SavingsGroupOverview savingsGroups, String baseCurrency) {
-        if (planSnapshotBox == null) {
-            return;
-        }
-        planSnapshotBox.getChildren().clear();
-        planSnapshotBox.getChildren().add(snapshotLine("Accounts", stats.getActiveAccounts() + " active accounts"));
-        planSnapshotBox.getChildren().add(snapshotLine("Goals", stats.getActiveGoals() + " active goals"));
-        planSnapshotBox.getChildren().add(snapshotLine("Projects", stats.getActiveProjects() + " active projects"));
-        planSnapshotBox.getChildren().add(snapshotLine("Savings Groups", savingsGroups.activeSavingsAccounts()
-                + " active groups, next due " + blankToDashboard(savingsGroups.nextContributionDueDate())));
-        planSnapshotBox.getChildren().add(snapshotLine("Loan Position", MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut())));
+    private void setPositiveNegativeStyle(Label label, double value) {
+        label.getStyleClass().removeAll("positive-money", "negative-money");
+        label.getStyleClass().add(value < 0 ? "negative-money" : "positive-money");
     }
 
-    private void refreshAlerts(DashboardStats stats, String baseCurrency) {
-        if (alertsBox == null) {
-            return;
-        }
-        alertsBox.getChildren().clear();
-        if (stats.getActiveGoals() > 0 && stats.getMonthlySavings() <= 0) {
-            alertsBox.getChildren().add(alertLabel("No positive savings recorded this month."));
-        }
-        for (Project project : database.listProjects()) {
-            if (project.getPlannedBudget() > 0 && project.getAmountSpent() / project.getPlannedBudget() >= 0.7) {
-                alertsBox.getChildren().add(alertLabel(project.getProjectName() + " has used at least 70% of budget."));
-            }
-        }
-        if (stats.getMoneyGivenOut() > 0) {
-            alertsBox.getChildren().add(alertLabel(MoneyUtil.format(baseCurrency, stats.getMoneyGivenOut()) + " is still owed to you."));
-        } else if (stats.getMoneyGivenOut() < 0) {
-            alertsBox.getChildren().add(alertLabel(MoneyUtil.format(baseCurrency, Math.abs(stats.getMoneyGivenOut())) + " is still owed by you."));
-        }
-        if (alertsBox.getChildren().isEmpty()) {
-            alertsBox.getChildren().add(alertLabel("No urgent reminders."));
+    private void setEmptyState(Node chart, Label emptyLabel, boolean empty) {
+        chart.setVisible(!empty);
+        chart.setManaged(!empty);
+        if (emptyLabel != null) {
+            emptyLabel.setVisible(empty);
+            emptyLabel.setManaged(empty);
         }
     }
 
-    private Label alertLabel(String text) {
+    private void addProgressGroupHeader(VBox box, String title) {
+        Label label = new Label(title);
+        label.getStyleClass().add("dashboard-subsection-label");
+        box.getChildren().add(label);
+    }
+
+    private VBox progressRow(String title, String detail, String amount, double percent, String note) {
+        Label titleLabel = new Label(title);
+        titleLabel.setWrapText(true);
+        titleLabel.getStyleClass().add("dashboard-progress-title");
+        Label amountLabel = new Label(amount);
+        amountLabel.setWrapText(true);
+        amountLabel.getStyleClass().add("dashboard-progress-amount");
+        HBox heading = new HBox(8, titleLabel, amountLabel);
+        heading.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(titleLabel, Priority.ALWAYS);
+        ProgressBar progress = new ProgressBar(Math.max(0, Math.min(1, percent / 100.0)));
+        progress.setMaxWidth(Double.MAX_VALUE);
+        Label detailLabel = new Label(detail + " - " + Math.round(percent) + "%");
+        detailLabel.setWrapText(true);
+        detailLabel.getStyleClass().add("metric-note");
+        Label noteLabel = new Label(note);
+        noteLabel.setWrapText(true);
+        noteLabel.getStyleClass().add("form-note");
+        VBox row = new VBox(5, heading, progress, detailLabel, noteLabel);
+        row.getStyleClass().add("dashboard-progress-row");
+        return row;
+    }
+
+    private VBox attentionNode(AttentionItem item) {
+        Label titleLabel = new Label(item.title());
+        titleLabel.setWrapText(true);
+        titleLabel.getStyleClass().add("attention-title");
+        Label detailLabel = new Label(item.detail());
+        detailLabel.setWrapText(true);
+        detailLabel.getStyleClass().add("attention-detail");
+        VBox box = new VBox(3, titleLabel, detailLabel);
+        box.getStyleClass().addAll("attention-item", "attention-" + item.severity().toLowerCase(Locale.ENGLISH));
+        return box;
+    }
+
+    private Label emptyLabel(String text) {
         Label label = new Label(text);
         label.setWrapText(true);
-        label.getStyleClass().add("alert-line");
+        label.getStyleClass().add("empty-state-label");
         return label;
     }
 
-    private HBox snapshotLine(String title, String detail) {
+    private HBox summaryLine(String title, String detail) {
         Label titleLabel = new Label(title);
         titleLabel.getStyleClass().add("field-label");
         Label detailLabel = new Label(detail);
@@ -1515,19 +1631,6 @@ public class DashboardController {
         line.getStyleClass().add("dashboard-snapshot-line");
         HBox.setHgrow(detailLabel, Priority.ALWAYS);
         return line;
-    }
-
-    private boolean isCurrentMonth(FinanceTransaction transaction) {
-        YearMonth month = parseMonth(transaction.getTransactionDate());
-        return YearMonth.now().equals(month);
-    }
-
-    private YearMonth parseMonth(String date) {
-        try {
-            return date == null || date.isBlank() ? null : YearMonth.from(LocalDate.parse(date));
-        } catch (RuntimeException exception) {
-            return null;
-        }
     }
 
     private String labelOrDefault(String value, String fallback) {

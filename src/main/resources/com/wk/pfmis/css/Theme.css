@@ -312,6 +312,140 @@
     -fx-min-height: 92;
 }
 
+.dashboard-home {
+    -fx-padding: 0;
+}
+
+.dashboard-header-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14 16;
+}
+
+.dashboard-kpi-card {
+    -fx-pref-width: 260;
+    -fx-max-width: 10000;
+    -fx-min-height: 112;
+    -fx-border-width: 1 1 1 5;
+}
+
+.dashboard-kpi-card .metric-value {
+    -fx-font-size: 22px;
+}
+
+.dashboard-section-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dde3ee;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 14;
+}
+
+.dashboard-section-title {
+    -fx-text-fill: #172033;
+    -fx-font-size: 16px;
+    -fx-font-weight: 800;
+}
+
+.dashboard-subsection-label {
+    -fx-text-fill: #475569;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+    -fx-padding: 3 0 0 0;
+}
+
+.dashboard-progress-row {
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 10 12;
+}
+
+.dashboard-progress-title {
+    -fx-text-fill: #172033;
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+}
+
+.dashboard-progress-amount {
+    -fx-text-fill: #334155;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+}
+
+.dashboard-progress-row .progress-bar {
+    -fx-pref-height: 9;
+}
+
+.dashboard-progress-row .progress-bar > .track {
+    -fx-background-color: #e2e8f0;
+    -fx-background-radius: 999;
+}
+
+.dashboard-progress-row .progress-bar > .bar {
+    -fx-background-color: #1f7a5c;
+    -fx-background-radius: 999;
+    -fx-padding: 0.28em;
+}
+
+.attention-item {
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 10 12;
+    -fx-border-width: 1;
+}
+
+.attention-high {
+    -fx-background-color: #fff1f2;
+    -fx-border-color: #fecdd3;
+}
+
+.attention-medium {
+    -fx-background-color: #fffbeb;
+    -fx-border-color: #fde68a;
+}
+
+.attention-info {
+    -fx-background-color: #eff6ff;
+    -fx-border-color: #bfdbfe;
+}
+
+.attention-title {
+    -fx-text-fill: #172033;
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+}
+
+.attention-detail,
+.empty-state-label {
+    -fx-text-fill: #475569;
+    -fx-font-size: 12px;
+}
+
+.empty-state-label {
+    -fx-background-color: #f7f9fd;
+    -fx-border-color: #e2e8f2;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-padding: 12;
+}
+
+.dashboard-snapshot-line {
+    -fx-padding: 5 0;
+    -fx-border-color: transparent transparent #edf1f7 transparent;
+}
+
+.positive-money {
+    -fx-text-fill: #166534;
+}
+
+.negative-money {
+    -fx-text-fill: #b91c1c;
+}
+
 .compact-metric-card {
     -fx-background-color: white;
     -fx-border-color: #dde3ee;

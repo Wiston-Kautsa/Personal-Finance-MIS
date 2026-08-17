@@ -35,6 +35,10 @@ public class DashboardStats {
         return monthlyIncome - monthlyExpenses;
     }
 
+    public double getNetCashFlow() {
+        return monthlyIncome - monthlyExpenses;
+    }
+
     public int getActiveAccounts() {
         return activeAccounts;
     }

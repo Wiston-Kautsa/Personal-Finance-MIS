@@ -145,6 +145,31 @@ class FxmlControllerAuditTest {
     }
 
     @Test
+    void dashboardHomeIsDecisionSupportLayoutNotDuplicateMetricCards() throws Exception {
+        Path dashboard = fxmlFiles().stream()
+                .filter(path -> path.getFileName().toString().equals("Dashboard.fxml"))
+                .findFirst()
+                .orElseThrow();
+        String content = Files.readString(dashboard);
+
+        assertTrue(content.contains("text=\"Available Balance\""));
+        assertTrue(content.contains("text=\"Monthly Income\""));
+        assertTrue(content.contains("text=\"Monthly Expenses\""));
+        assertTrue(content.contains("text=\"Net Cash Flow\""));
+        assertTrue(content.contains("text=\"Cash Flow Trend\""));
+        assertTrue(content.contains("text=\"Spending By Category\""));
+        assertTrue(content.contains("text=\"Budget / Goal Progress\""));
+        assertTrue(content.contains("text=\"Attention Required\""));
+        assertTrue(content.contains("text=\"Account Balances\""));
+        assertTrue(content.contains("text=\"Savings Summary\""));
+        assertTrue(content.contains("fixedCellSize=\"32\""));
+        assertFalse(content.contains("Savings This Month"));
+        assertFalse(content.contains("Plan / Obligation Snapshot"));
+        assertFalse(content.contains("Active Accounts"));
+        assertFalse(content.contains("Community Savings Balance"));
+    }
+
+    @Test
     void accountsPassiveTypeRefreshDoesNotRequireAccountType() throws Exception {
         Path controller = Path.of("src/main/java/com/wk/pfmis/controllers/AccountsController.java");
         String source = Files.readString(controller);

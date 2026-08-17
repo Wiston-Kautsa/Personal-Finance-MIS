@@ -204,127 +204,121 @@
                     <Button text="Sign Out" onAction="#logout" styleClass="danger-button"/>
                 </HBox>
 
-                <VBox fx:id="dashboardSummaryPane" spacing="18" maxWidth="Infinity" styleClass="dashboard-home">
+                <VBox fx:id="dashboardSummaryPane" spacing="18" maxWidth="Infinity" styleClass="dashboard-home" VBox.vgrow="ALWAYS">
                     <HBox spacing="14" alignment="CENTER_LEFT" styleClass="dashboard-header-panel">
                         <VBox spacing="4" HBox.hgrow="ALWAYS">
-                            <Label text="Current financial position and items needing attention" wrapText="true" styleClass="page-subtitle"/>
-                            <Label text="Posted transactions drive balances. Expected, draft and scheduled items are shown as planning signals only." wrapText="true" styleClass="form-note"/>
+                            <Label text="Current financial position" wrapText="true" styleClass="dashboard-section-title"/>
+                            <Label fx:id="dashboardBasisLabel" text="Posted transactions only. Scheduled and draft items are planning alerts." wrapText="true" styleClass="form-note"/>
                         </VBox>
-                        <Button text="Refresh" onAction="#refreshDashboard" styleClass="secondary-button"/>
+                        <Button fx:id="refreshDashboardButton" text="Refresh" onAction="#refreshDashboard" styleClass="secondary-button"/>
                     </HBox>
 
-                    <GridPane hgap="12" vgap="12">
-                        <VBox styleClass="metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
-                            <Label text="Available Cash and Bank" styleClass="metric-title"/>
-                            <Label fx:id="totalBalanceLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="balanceDetailLabel" text="Cash, bank and mobile money only" styleClass="metric-note"/>
+                    <GridPane fx:id="dashboardKpiGrid" hgap="12" vgap="12" maxWidth="Infinity">
+                        <VBox fx:id="kpiBalanceCard" maxWidth="Infinity" styleClass="metric-card,dashboard-kpi-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                            <Label text="Available Balance" styleClass="metric-title"/>
+                            <Label fx:id="totalBalanceLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                            <Label fx:id="balanceDetailLabel" text="Active asset accounts" wrapText="true" styleClass="metric-note"/>
                         </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
-                            <Label text="Income This Month" styleClass="metric-title"/>
-                            <Label fx:id="incomeLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="incomeDetailLabel" text="0 income records" styleClass="metric-note"/>
+                        <VBox fx:id="kpiIncomeCard" maxWidth="Infinity" styleClass="metric-card,dashboard-kpi-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                            <Label text="Monthly Income" styleClass="metric-title"/>
+                            <Label fx:id="incomeLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                            <Label fx:id="incomeDetailLabel" text="0 posted income records" wrapText="true" styleClass="metric-note"/>
                         </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
-                            <Label text="Expenses This Month" styleClass="metric-title"/>
-                            <Label fx:id="expensesLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="expensesDetailLabel" text="0 expense records" styleClass="metric-note"/>
+                        <VBox fx:id="kpiExpensesCard" maxWidth="Infinity" styleClass="metric-card,dashboard-kpi-card" GridPane.columnIndex="2" GridPane.rowIndex="0">
+                            <Label text="Monthly Expenses" styleClass="metric-title"/>
+                            <Label fx:id="expensesLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                            <Label fx:id="expensesDetailLabel" text="0 posted expense records" wrapText="true" styleClass="metric-note"/>
                         </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
-                            <Label text="Savings This Month" styleClass="metric-title"/>
-                            <Label fx:id="savingsLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="savingsDetailLabel" text="0.0% savings rate" styleClass="metric-note"/>
-                        </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="0" GridPane.rowIndex="1">
-                            <Label text="Community Savings Balance" styleClass="metric-title"/>
-                            <Label fx:id="communitySavingsBalanceLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="communitySavingsDetailLabel" text="Not included in available cash" styleClass="metric-note"/>
-                        </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="1" GridPane.rowIndex="1">
-                            <Label text="Savings Contributions" styleClass="metric-title"/>
-                            <Label fx:id="savingsGroupContributionsLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="savingsGroupContributionsDetailLabel" text="This year: MWK 0.00" styleClass="metric-note"/>
-                        </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="2" GridPane.rowIndex="1">
-                            <Label text="Next Savings Due" styleClass="metric-title"/>
-                            <Label fx:id="savingsGroupNextContributionLabel" text="None scheduled" styleClass="metric-value"/>
-                            <Label fx:id="savingsGroupNextContributionDetailLabel" text="0 active Savings Group(s)" styleClass="metric-note"/>
-                        </VBox>
-                        <VBox styleClass="metric-card" GridPane.columnIndex="3" GridPane.rowIndex="1">
-                            <Label text="Expected Savings Payout" styleClass="metric-title"/>
-                            <Label fx:id="savingsGroupExpectedPayoutLabel" text="MWK 0.00" styleClass="metric-value"/>
-                            <Label fx:id="savingsGroupExpectedPayoutDetailLabel" text="0 cycle(s) nearing completion" styleClass="metric-note"/>
+                        <VBox fx:id="kpiNetCashFlowCard" maxWidth="Infinity" styleClass="metric-card,dashboard-kpi-card" GridPane.columnIndex="3" GridPane.rowIndex="0">
+                            <Label text="Net Cash Flow" styleClass="metric-title"/>
+                            <Label fx:id="netCashFlowLabel" text="MWK 0.00" wrapText="true" styleClass="metric-value"/>
+                            <Label fx:id="netCashFlowDetailLabel" text="Income minus expenses" wrapText="true" styleClass="metric-note"/>
                         </VBox>
                     </GridPane>
 
-                    <HBox spacing="14" alignment="TOP_LEFT">
-                        <TitledPane text="Today / Upcoming Attention" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
-                            <VBox spacing="10">
-                                <VBox fx:id="alertsBox" spacing="8"/>
-                                <HBox spacing="8" alignment="CENTER_LEFT">
-                                    <Button text="Open Ledger" onAction="#showTransactions" styleClass="secondary-button"/>
-                                    <Button text="Record Expense" onAction="#showExpenses" styleClass="secondary-button"/>
-                                    <Button text="Expected Income" onAction="#showExpectedIncome" styleClass="secondary-button"/>
-                                </HBox>
-                            </VBox>
-                        </TitledPane>
-                        <TitledPane text="Plan / Obligation Snapshot" collapsible="false" expanded="true" maxWidth="Infinity" styleClass="section-pane" HBox.hgrow="ALWAYS">
-                            <VBox spacing="10">
-                                <GridPane hgap="10" vgap="10">
-                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="0">
-                                        <Label text="Active Accounts" styleClass="metric-title"/>
-                                        <Label fx:id="activeAccountsLabel" text="0" styleClass="overview-value"/>
-                                    </VBox>
-                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="0">
-                                        <Label text="Active Projects" styleClass="metric-title"/>
-                                        <Label fx:id="activeProjectsLabel" text="0" styleClass="overview-value"/>
-                                    </VBox>
-                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="0" GridPane.rowIndex="1">
-                                        <Label text="Active Goals" styleClass="metric-title"/>
-                                        <Label fx:id="activeGoalsLabel" text="0" styleClass="overview-value"/>
-                                    </VBox>
-                                    <VBox styleClass="compact-metric-card" GridPane.columnIndex="1" GridPane.rowIndex="1">
-                                        <Label text="Net Loan Position" styleClass="metric-title"/>
-                                        <Label fx:id="moneyGivenLabel" text="MWK 0.00" styleClass="overview-value"/>
-                                    </VBox>
-                                </GridPane>
-                                <VBox fx:id="planSnapshotBox" spacing="7"/>
-                                <HBox spacing="8" alignment="CENTER_LEFT">
-                                    <Button text="Open Budgets" onAction="#showBudgets" styleClass="secondary-button"/>
-                                    <Button text="Open Goals" onAction="#showGoalRecords" styleClass="secondary-button"/>
-                                    <Button text="Loan Ledger" onAction="#showLoanLedger" styleClass="secondary-button"/>
-                                </HBox>
-                            </VBox>
-                        </TitledPane>
-                    </HBox>
-
-                    <TitledPane text="Cash Flow Trend" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                        <LineChart fx:id="cashFlowChart" legendVisible="true" animated="false" createSymbols="true" prefHeight="260">
-                            <xAxis>
-                                <CategoryAxis label="Month"/>
-                            </xAxis>
-                            <yAxis>
-                                <NumberAxis label="MWK"/>
-                            </yAxis>
-                        </LineChart>
-                    </TitledPane>
-
-                    <TitledPane text="Recent Posted Activity" collapsible="true" expanded="true" maxWidth="Infinity" styleClass="section-pane">
-                        <VBox spacing="10">
-                            <TableView fx:id="dashboardTransactionsTable" prefHeight="260">
-                                <columns>
-                                    <TableColumn fx:id="dashboardDateColumn" text="Date" prefWidth="100"/>
-                                    <TableColumn fx:id="dashboardTypeColumn" text="Type" prefWidth="90"/>
-                                    <TableColumn fx:id="dashboardAccountColumn" text="Account" prefWidth="160"/>
-                                    <TableColumn fx:id="dashboardCategoryColumn" text="Category" prefWidth="150"/>
-                                    <TableColumn fx:id="dashboardAmountColumn" text="Amount" prefWidth="130"/>
-                                </columns>
-                            </TableView>
-                            <HBox alignment="CENTER_RIGHT">
-                                <Region HBox.hgrow="ALWAYS"/>
-                                <Button text="Open Full Ledger" onAction="#showTransactions" styleClass="secondary-button"/>
+                    <GridPane fx:id="dashboardAnalyticsGrid" hgap="14" vgap="14" maxWidth="Infinity">
+                        <VBox fx:id="cashFlowPanel" spacing="10" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Cash Flow Trend" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Label text="Last 6 months" styleClass="period-chip"/>
                             </HBox>
+                            <LineChart fx:id="cashFlowChart" legendVisible="true" animated="false" createSymbols="true" minHeight="240" prefHeight="300" VBox.vgrow="ALWAYS">
+                                <xAxis>
+                                    <CategoryAxis label="Month"/>
+                                </xAxis>
+                                <yAxis>
+                                    <NumberAxis label="Base currency"/>
+                                </yAxis>
+                            </LineChart>
                         </VBox>
-                    </TitledPane>
+                        <VBox fx:id="spendingPanel" spacing="10" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Spending By Category" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Label text="This month" styleClass="period-chip"/>
+                            </HBox>
+                            <PieChart fx:id="expenseDistributionChart" legendVisible="true" labelsVisible="true" minHeight="240" prefHeight="300" VBox.vgrow="ALWAYS"/>
+                            <Label fx:id="spendingEmptyLabel" text="No posted expenses for this month." wrapText="true" managed="false" visible="false" styleClass="empty-state-label"/>
+                        </VBox>
+                    </GridPane>
+
+                    <GridPane fx:id="dashboardPerformanceGrid" hgap="14" vgap="14" maxWidth="Infinity">
+                        <VBox fx:id="performancePanel" spacing="12" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Budget / Goal Progress" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Button text="Open Budgets" onAction="#showBudgetPerformance" styleClass="secondary-button"/>
+                                <Button text="Open Goals" onAction="#showGoalRecords" styleClass="secondary-button"/>
+                            </HBox>
+                            <VBox fx:id="budgetGoalProgressBox" spacing="10"/>
+                        </VBox>
+                        <VBox fx:id="attentionPanel" spacing="12" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Attention Required" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Button text="Open Loans" onAction="#showLoanRecords" styleClass="secondary-button"/>
+                            </HBox>
+                            <VBox fx:id="alertsBox" spacing="8"/>
+                        </VBox>
+                    </GridPane>
+
+                    <GridPane fx:id="dashboardResourcesGrid" hgap="14" vgap="14" maxWidth="Infinity">
+                        <VBox fx:id="accountBalancesPanel" spacing="10" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Account Balances" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Button text="Open Accounts" onAction="#showAccounts" styleClass="secondary-button"/>
+                            </HBox>
+                            <BarChart fx:id="accountBalanceChart" legendVisible="false" animated="false" minHeight="220" prefHeight="270" VBox.vgrow="ALWAYS">
+                                <xAxis>
+                                    <NumberAxis label="Balance"/>
+                                </xAxis>
+                                <yAxis>
+                                    <CategoryAxis label="Account"/>
+                                </yAxis>
+                            </BarChart>
+                            <Label fx:id="accountBalancesEmptyLabel" text="No active account balances to display." wrapText="true" managed="false" visible="false" styleClass="empty-state-label"/>
+                        </VBox>
+                        <VBox fx:id="savingsPanel" spacing="12" maxWidth="Infinity" styleClass="dashboard-section-panel" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                            <HBox alignment="CENTER_LEFT" spacing="8">
+                                <Label text="Savings Summary" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                                <Button text="Open Savings" onAction="#showCommunitySavingsOverview" styleClass="secondary-button"/>
+                            </HBox>
+                            <VBox fx:id="savingsSummaryBox" spacing="9"/>
+                        </VBox>
+                    </GridPane>
+
+                    <VBox spacing="10" maxWidth="Infinity" styleClass="dashboard-section-panel">
+                        <HBox alignment="CENTER_LEFT" spacing="8">
+                            <Label text="Recent Transactions" styleClass="dashboard-section-title" HBox.hgrow="ALWAYS"/>
+                            <Button text="Open Full Ledger" onAction="#showTransactions" styleClass="secondary-button"/>
+                        </HBox>
+                        <TableView fx:id="dashboardTransactionsTable" fixedCellSize="32" prefHeight="198" maxWidth="Infinity">
+                            <columns>
+                                <TableColumn fx:id="dashboardDateColumn" text="Date" prefWidth="105"/>
+                                <TableColumn fx:id="dashboardTypeColumn" text="Type" prefWidth="100"/>
+                                <TableColumn fx:id="dashboardAccountColumn" text="Account" prefWidth="190"/>
+                                <TableColumn fx:id="dashboardCategoryColumn" text="Category" prefWidth="180"/>
+                                <TableColumn fx:id="dashboardAmountColumn" text="Amount" prefWidth="150"/>
+                            </columns>
+                        </TableView>
+                    </VBox>
                 </VBox>
 
                 <StackPane fx:id="contentPane" id="contentPane" maxWidth="Infinity" maxHeight="Infinity" VBox.vgrow="ALWAYS"/>

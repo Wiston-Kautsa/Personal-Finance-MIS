@@ -792,6 +792,13 @@ public class DatabaseHandler {
     ) {
     }
 
+    public record DashboardMonthlyCashFlow(
+            String month,
+            double income,
+            double expenses
+    ) {
+    }
+
     public record ChipeleganyuContributionRecord(
             int id,
             int profileId,
@@ -22145,6 +22152,49 @@ public class DatabaseHandler {
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to load monthly transaction total", exception);
         }
+    }
+
+    public List<DashboardMonthlyCashFlow> listDashboardMonthlyCashFlow(int months) {
+        int safeMonths = Math.max(1, Math.min(months, 24));
+        YearMonth startMonth = YearMonth.now().minusMonths(safeMonths - 1L);
+        YearMonth endMonth = YearMonth.now();
+        Map<String, double[]> totalsByMonth = new LinkedHashMap<>();
+        for (int index = 0; index < safeMonths; index++) {
+            totalsByMonth.put(startMonth.plusMonths(index).toString(), new double[]{0, 0});
+        }
+        String sql = """
+                SELECT substr(t.transaction_date, 1, 7) AS month,
+                       COALESCE(SUM(CASE WHEN t.transaction_type = 'INCOME' THEN t.amount * COALESCE(cur.rate_to_base, 1) ELSE 0 END), 0) AS income,
+                       COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' THEN t.amount * COALESCE(cur.rate_to_base, 1) ELSE 0 END), 0) AS expenses
+                FROM valid_transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN currencies cur ON upper(cur.currency_code) = upper(a.currency)
+                WHERE t.transaction_type IN ('INCOME', 'EXPENSE')
+                  AND substr(t.transaction_date, 1, 7) BETWEEN ? AND ?
+                  AND COALESCE(a.is_system_account, 0) = 0
+                GROUP BY month
+                ORDER BY month
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, startMonth.toString());
+            statement.setString(2, endMonth.toString());
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    double[] totals = totalsByMonth.get(resultSet.getString("month"));
+                    if (totals != null) {
+                        totals[0] = resultSet.getDouble("income");
+                        totals[1] = resultSet.getDouble("expenses");
+                    }
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to load dashboard monthly cash flow", exception);
+        }
+        return totalsByMonth.entrySet()
+                .stream()
+                .map(entry -> new DashboardMonthlyCashFlow(entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                .toList();
     }
 
     private double queryDouble(Connection connection, String sql) throws SQLException {
