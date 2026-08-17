@@ -1,12 +1,14 @@
 package com.wk.pfmis.controllers;
 
 import com.wk.pfmis.db.DatabaseHandler;
+import com.wk.pfmis.domain.Money;
 import com.wk.pfmis.models.Account;
 import com.wk.pfmis.models.Category;
 import com.wk.pfmis.models.FinanceTransaction;
 import com.wk.pfmis.models.Person;
 import com.wk.pfmis.models.Project;
 import com.wk.pfmis.models.ProjectActivity;
+import com.wk.pfmis.services.TransactionService;
 import com.wk.pfmis.utils.MoneyUtil;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -83,6 +85,7 @@ public class TransactionsController {
     @FXML private TableColumn<FinanceTransaction, Double> amountColumn;
 
     private final DatabaseHandler database = DatabaseHandler.getInstance();
+    private final TransactionService transactionService = new TransactionService();
     private FinanceTransaction editingTransaction;
     private String requestedTransactionType;
     private String requestedTransactionPurpose;
@@ -711,7 +714,7 @@ public class TransactionsController {
         if (account == null) {
             throw new IllegalArgumentException("Select an account.");
         }
-        double amount = parseAmount();
+        Money amount = parseAmount(account);
         boolean loanPurpose = isLoanPurpose(purposeBox.getValue());
         Integer categoryId = resolveCategoryId(loanPurpose);
         Integer projectId = loanPurpose || projectBox.getValue() == null ? null : projectBox.getValue().getId();
@@ -736,48 +739,34 @@ public class TransactionsController {
         );
     }
 
-    private double parseAmount() {
+    private Money parseAmount(Account account) {
         try {
-            return Double.parseDouble(amountField.getText().replace(",", "").trim());
+            return Money.parseMajor(amountField.getText(), account.getCurrency());
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException("Enter a valid amount.", exception);
         }
     }
 
     private void persistTransaction(TransactionFormData formData) {
+        TransactionService.TransactionCommand command = new TransactionService.TransactionCommand(
+                formData.accountId(),
+                formData.categoryId(),
+                formData.projectId(),
+                formData.activityId(),
+                formData.personId(),
+                formData.transactionType(),
+                formData.purpose(),
+                formData.status(),
+                formData.amount(),
+                formData.date(),
+                formData.description(),
+                editingTransaction == null ? null : editingTransaction.getPaymentMethod(),
+                editingTransaction == null ? null : editingTransaction.getReferenceNumber()
+        );
         if (editingTransaction == null) {
-            database.recordTransaction(
-                    formData.accountId(),
-                    formData.categoryId(),
-                    formData.projectId(),
-                    formData.activityId(),
-                    formData.personId(),
-                    formData.transactionType(),
-                    formData.purpose(),
-                    formData.status(),
-                    formData.amount(),
-                    formData.date(),
-                    formData.description(),
-                    null,
-                    null
-            );
+            transactionService.record(command);
         } else {
-            database.updateTransaction(
-                    editingTransaction.getId(),
-                    formData.accountId(),
-                    formData.categoryId(),
-                    formData.projectId(),
-                    formData.activityId(),
-                    formData.personId(),
-                    formData.transactionType(),
-                    formData.purpose(),
-                    formData.status(),
-                    formData.amount(),
-                    formData.date(),
-                    formData.description(),
-                    editingTransaction.getPaymentMethod(),
-                    editingTransaction.getReferenceNumber()
-            );
+            transactionService.update(editingTransaction.getId(), command);
             editingTransaction = null;
         }
     }
@@ -940,7 +929,7 @@ public class TransactionsController {
             String transactionType,
             String purpose,
             String status,
-            double amount,
+            Money amount,
             LocalDate date,
             String description
     ) {
