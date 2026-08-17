@@ -76,7 +76,7 @@ function Join-NativeArguments {
     $quoted = foreach ($argument in $Arguments) {
         if ($null -eq $argument) {
             '""'
-        } elseif ($argument -match '[\s"]') {
+        } elseif ($argument -match '[\s"]' -or $argument -match '^-D[^=]+=') {
             '"' + ($argument -replace '"', '\"') + '"'
         } else {
             $argument
@@ -110,32 +110,13 @@ function Invoke-CapturedNativeCommand {
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $processInfo
-    $stdoutBuilder = New-Object System.Text.StringBuilder
-    $stderrBuilder = New-Object System.Text.StringBuilder
-    $stdoutHandler = [System.Diagnostics.DataReceivedEventHandler] {
-        param($sender, $eventArgs)
-        if ($null -ne $eventArgs.Data) {
-            [void]$stdoutBuilder.AppendLine($eventArgs.Data)
-        }
-    }
-    $stderrHandler = [System.Diagnostics.DataReceivedEventHandler] {
-        param($sender, $eventArgs)
-        if ($null -ne $eventArgs.Data) {
-            [void]$stderrBuilder.AppendLine($eventArgs.Data)
-        }
-    }
-    $process.add_OutputDataReceived($stdoutHandler)
-    $process.add_ErrorDataReceived($stderrHandler)
     [void]$process.Start()
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
-    $process.WaitForExit()
-    $process.remove_OutputDataReceived($stdoutHandler)
-    $process.remove_ErrorDataReceived($stderrHandler)
 
-    $stdout = $stdoutBuilder.ToString().TrimEnd()
-    $stderr = $stderrBuilder.ToString().TrimEnd()
+    $stdout = $stdoutTask.Result.TrimEnd()
+    $stderr = $stderrTask.Result.TrimEnd()
 
     [PSCustomObject]@{
         ExitCode = $process.ExitCode
